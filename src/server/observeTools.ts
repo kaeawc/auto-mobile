@@ -192,7 +192,7 @@ const observeBaseSchema = withJsonSchemaOverride(
         waitFor: waitForSchema
           .optional()
           .describe(
-            "Wait for element to appear before returning observation. On timeout the last observation is returned with awaitTimeout: true and isError: true.",
+            'Wait for element to appear before returning observation. On timeout the last observation is returned with awaitTimeout: true and isError: true, except a for: "stable" timeout: a normal result with awaitTimeout: true, settled: false and unsettledBy naming what kept changing.',
           ),
         settled: settledSchema
           .optional()

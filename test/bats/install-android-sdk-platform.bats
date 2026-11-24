@@ -223,6 +223,31 @@ TOML
   [ "$status" -eq 0 ]
 }
 
+@test "advice returns ok (0) for a minor compileSdk installed as android-<major>.<minor>" {
+  write_toml <<'TOML'
+build-android-compileSdk = "37.1"
+TOML
+  mkdir -p "${ANDROID_HOME_DIR}/platforms/android-37.1"
+  touch "${ANDROID_HOME_DIR}/platforms/android-37.1/android.jar"
+
+  run_helper "android_platform_install_advice '${ANDROID_HOME_DIR}' '${TOML}'"
+
+  [ "$status" -eq 0 ]
+}
+
+@test "advice flags a minor compileSdk as missing when only the .0 platform is installed" {
+  write_toml <<'TOML'
+build-android-compileSdk = "37.1"
+TOML
+  mkdir -p "${ANDROID_HOME_DIR}/platforms/android-37.0"
+  touch "${ANDROID_HOME_DIR}/platforms/android-37.0/android.jar"
+
+  run_helper "android_platform_install_advice '${ANDROID_HOME_DIR}' '${TOML}'"
+
+  [ "$status" -eq 2 ]
+  [[ "$output" == *'sdkmanager "platforms;android-37.1"'* ]]
+}
+
 @test "advice tracks the compileSdk version from the toml (no hardcoded 37)" {
   write_toml <<'TOML'
 build-android-compileSdk = "41"

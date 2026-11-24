@@ -32,6 +32,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.SliderState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -277,13 +278,17 @@ internal fun RenderPrototypeSlider(
     if (node.text.isNotEmpty()) PrototypeComponentLabel(node)
     val interactions = remember { MutableInteractionSource() }
     val restingInteractions = remember { MutableInteractionSource() }
+    // Material 3 1.5 dropped the value-based overload that took a custom thumb; this mirrors what
+    // its remaining value overload does internally: a state keyed on steps and range, re-synced to
+    // the node's value on every composition, with onValueChange routing drags to the interaction.
+    val value = node.sliderValue.toFloat()
+    val sliderState = remember(steps, range) { SliderState(value, steps, range) }
+    sliderState.value = value
     Slider(
-      node.sliderValue.toFloat(),
-      change,
-      Modifier.fillMaxWidth(),
-      valueRange = range,
+      state = sliderState,
+      onValueChange = change,
+      modifier = Modifier.fillMaxWidth(),
       enabled = node.enabled,
-      steps = steps,
       interactionSource = interactions,
       thumb = {
         SliderDefaults.Thumb(

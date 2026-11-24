@@ -250,7 +250,7 @@ internal fun RenderPrototypeCarousel(
       HorizontalCenteredHeroCarousel(
         state = state,
         modifier = modifier,
-        maxItemWidth = width,
+        preferredItemWidth = width,
         itemSpacing = spacing,
         content = item,
       )

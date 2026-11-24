@@ -3,6 +3,10 @@ import { androidAutoProjectionSchema } from "../../models/AndroidAutoProjection"
 import { carAppTemplatesSchema } from "../../models/CarAppTemplates";
 import { IMPORTED_PROTOTYPE_CONTENT } from "../../features/observe/importedPrototypeContent";
 import {
+  MAX_DIFF_SUMMARY_LABELS,
+  MAX_DIFF_SUMMARY_LABEL_LENGTH,
+} from "../../features/observe/output/resultOutput/diffTypes";
+import {
   observationIdSchema,
   observationDeviceIdSchema,
   observationScreenshotResourceUriSchema,
@@ -64,6 +68,23 @@ const hierarchyBundleIdSchema = z
       "Present with every projection when that runner has a target app and returned a hierarchy; omitted otherwise. This app can differ from " +
       "the screenshot when another app was brought forward outside launchApp; compare them and " +
       "relaunch with launchApp to switch.",
+  );
+
+/** Why a stability check ended `settled: false` (#19123). */
+export const unsettledBySchema = z
+  .array(
+    z.object({
+      elementId: z.string().optional(),
+      label: z.string().optional(),
+      field: z.string(),
+    }),
+  )
+  .max(3)
+  .optional()
+  .describe(
+    "With `settled: false` after a stability check: up to 3 nodes that still changed between the last two differing reads. " +
+      "`field` is the first changed attribute, `added`/`removed` for a node that appeared or disappeared, or a changed top-level field name (no elementId/label). " +
+      "Status-bar chrome (clock, battery, signal) is never compared, so it never appears here.",
   );
 
 const importedPrototypeContentSchema = z
@@ -170,6 +191,7 @@ export const observationSummarySchema = z
       .describe(
         "Re-observations the hierarchy-stability gate took (issue #9591). Two are needed to settle; fewer at the budget means reads were too slow to compare.",
       ),
+    unsettledBy: unsettledBySchema,
     accessibilityAuditSkipped: z
       .literal("settled_capture_adopted")
       .optional()
@@ -245,15 +267,18 @@ export const observeDiffNodeSchema = z
   })
   .passthrough();
 
-/** Count and up to 5 labels of the nodes an action diff no longer lists (#19122). */
+/** Count and a few labels of the nodes an action diff no longer lists (#19122). */
 const observeDiffNodeSummarySchema = z
   .object({
     count: z.number().int().positive(),
     labels: z
-      .array(z.string())
-      .max(5)
+      .array(z.string().max(MAX_DIFF_SUMMARY_LABEL_LENGTH))
+      .max(MAX_DIFF_SUMMARY_LABELS)
       .optional()
-      .describe("Up to 5 distinct node labels (label, else element id)."),
+      .describe(
+        `Up to ${MAX_DIFF_SUMMARY_LABELS} distinct node labels (label, else element id), ` +
+          `each at most ${MAX_DIFF_SUMMARY_LABEL_LENGTH} characters.`,
+      ),
   })
   .optional();
 
@@ -403,6 +428,7 @@ export const observeDiffSchema = z
       .describe(
         "Same name/meaning as a full observation's `settlePolls` (issue #9591), copied from the post-action observation.",
       ),
+    unsettledBy: unsettledBySchema,
     accessibilityAuditSkipped: z
       .literal("settled_capture_adopted")
       .optional()
@@ -691,6 +717,7 @@ export const observeResultSchema = z
     awaitedElement: elementSchema.optional(),
     matched: z.boolean().optional(),
     settled: z.boolean().optional(),
+    unsettledBy: unsettledBySchema,
     accessibilityAuditSkipped: z
       .literal("settled_capture_adopted")
       .optional()

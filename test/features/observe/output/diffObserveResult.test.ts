@@ -1162,6 +1162,71 @@ describe("diffObserveResult", () => {
     }
   });
 
+  // #19145: two sub-screens of one activity can each place their one switch at the
+  // same bounds. An ancestor that moved re-keys the subtree, so the switches pair
+  // by resource id; the different row title says they are different controls.
+  test("does not report a flip between unmoved label-less switches in rows with different titles (#19145)", () => {
+    const screen = (title: string, listBottom: number, checked: boolean) =>
+      obs({
+        "resource-id": "root",
+        bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+        node: [
+          {
+            "resource-id": "recycler_view",
+            bounds: { left: 0, top: 0, right: 100, bottom: listBottom },
+            node: [
+              {
+                bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+                node: [
+                  {
+                    "resource-id": "android:id/title",
+                    text: title,
+                    bounds: { left: 0, top: 0, right: 60, bottom: 40 },
+                  },
+                  {
+                    bounds: { left: 70, top: 0, right: 100, bottom: 40 },
+                    node: [
+                      {
+                        "resource-id": "switchWidget",
+                        checked,
+                        checkable: true,
+                        bounds: { left: 70, top: 0, right: 100, bottom: 40 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+    for (const projectAddedRemoved of [false, true]) {
+      const differentRow = diffObserveResult(
+        screen("Airplane mode", 100, false),
+        screen("Wi-Fi", 300, true),
+        { projectAddedRemoved },
+      );
+      expect(differentRow.changed.filter((entry) => "checked" in entry.changes)).toEqual([]);
+
+      const sameRow = diffObserveResult(screen("Wi-Fi", 100, false), screen("Wi-Fi", 300, true), {
+        projectAddedRemoved,
+      });
+      const flips = sameRow.changed.filter((entry) => "checked" in entry.changes);
+      expect(flips).toHaveLength(1);
+      expect(flips[0].changes.checked).toEqual({ from: false, to: true });
+    }
+    const unprojected = diffObserveResult(
+      screen("Airplane mode", 100, false),
+      screen("Wi-Fi", 300, true),
+    );
+    expect(
+      [...unprojected.added, ...unprojected.removed].filter(
+        (node) => node.attributes["resource-id"] === "switchWidget",
+      ),
+    ).toHaveLength(2);
+  });
+
   // #19122: window roots carry no id or text and fill the screen, so a closing
   // sheet's root must not pair with the app window root underneath it.
   test("a closed sheet window is removed, not paired with the app window as a windowId change (#19122)", () => {

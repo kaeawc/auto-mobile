@@ -2801,6 +2801,58 @@ describe("CtrlProxyManager", function () {
       expect(localFakeAdb.wasCommandExecuted("shell pm uninstall")).toBe(true);
     });
 
+    test("retries an empty-reason in-place upgrade right after a cold boot (#19124)", async function () {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      // Verbatim shape of the dogfood failure: the streamed-install header and nothing after the colon.
+      class EmptyReasonOnceAdb extends FakeAdbExecutor {
+        upgradeAttempts = 0;
+        override async executeCommand(
+          command: string,
+          options?: Parameters<FakeAdbExecutor["executeCommand"]>[1],
+        ): Promise<ExecResult> {
+          const result = await super.executeCommand(command, options);
+          if (command.startsWith("install -r -d") && ++this.upgradeAttempts === 1) {
+            throw Object.assign(new Error("adb: failed to install /tmp/fake-accessibility.apk:"), {
+              code: 1,
+              stdout: "Performing Streamed Install",
+              stderr: "adb: failed to install /tmp/fake-accessibility.apk:",
+            });
+          }
+          return result;
+        }
+      }
+      const localFakeAdb = new EmptyReasonOnceAdb();
+      localFakeAdb.setCommandResponse(
+        `shell pm list packages ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+      );
+      localFakeAdb.setCommandResponse(
+        `shell pm path ${AndroidCtrlProxyManager.PACKAGE}`,
+        createExecResult("package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n", ""),
+      );
+      localFakeAdb.setCommandResponse(
+        "shell sha256sum",
+        createExecResult(
+          "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+          "",
+        ),
+      );
+      localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(testDevice, localFakeAdb, {
+        timer,
+        fileDownloader: { download: async () => undefined },
+      });
+      spyOn(manager, "downloadApk").mockResolvedValue("/tmp/fake-accessibility.apk");
+
+      const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
+
+      expect(result.status).toBe("upgraded");
+      expect(localFakeAdb.upgradeAttempts).toBe(2);
+      expect(localFakeAdb.wasCommandExecuted("shell pm uninstall")).toBe(false);
+    });
+
     test("does not uninstall when the upgrade fails with USER_RESTRICTED (#11134)", async function () {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const localFakeAdb = new FakeAdbExecutor();

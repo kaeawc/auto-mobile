@@ -47,4 +47,41 @@ describe("createObserveWaitResponse", () => {
     expect(isToolResponseFailure(response)).toBe(false);
     expect(response.structuredContent).toMatchObject({ awaitTimeout: false, matched: true });
   });
+
+  /** Issue #19123: a plain `stable` timeout still returns a usable observation. */
+  const stableTimeout = (extra: Partial<WaitForObservationOutcome> = {}) => ({
+    observation,
+    awaitDuration: 3379,
+    awaitTimeout: true,
+    settled: false,
+    timedOut: true,
+    polls: 3,
+    waitMs: 3379,
+    unsettledBy: [{ elementId: "com.example:id/sheet", field: "bounds" }],
+    timeoutIsResult: true as const,
+    ...extra,
+  });
+
+  test("returns a stable timeout as a normal result with unsettledBy", async () => {
+    const response = await createObserveWaitResponse(observation, stableTimeout());
+
+    expect(response.isError).toBeUndefined();
+    expect(isToolResponseFailure(response)).toBe(false);
+    expect(response.structuredContent).toMatchObject({
+      awaitTimeout: true,
+      settled: false,
+      timedOut: true,
+      unsettledBy: [{ elementId: "com.example:id/sheet", field: "bounds" }],
+    });
+    expect(response.structuredContent).not.toHaveProperty("timeoutIsResult");
+  });
+
+  test("keeps a stable wait without a usable timeout capture an error", async () => {
+    const response = await createObserveWaitResponse(
+      observation,
+      stableTimeout({ timedOut: false, unsettledBy: undefined, timeoutIsResult: undefined }),
+    );
+
+    expect(response.isError).toBe(true);
+  });
 });

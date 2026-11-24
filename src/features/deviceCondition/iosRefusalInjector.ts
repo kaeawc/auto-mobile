@@ -34,6 +34,7 @@ const ANDROID_ONLY_FAULT_KEYS: ReadonlySet<string> = new Set([
   "faults.clearPackageData",
   "vehicle.motion",
   "vehicle.nightMode",
+  "vehicle.property",
 ]);
 
 /** The shared key that covers part of an Android-only fault on the iOS Simulator. */

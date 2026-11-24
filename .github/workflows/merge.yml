@@ -26,7 +26,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -50,7 +50,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -65,7 +65,7 @@ jobs:
 
       - name: "Upload Test Results"
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-core-test-results
           path: android/desktop-core/build/reports/tests/test/
@@ -75,7 +75,7 @@ jobs:
       # the rendering. See issue #3913.
       - name: "Upload Screenshot Diffs"
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: desktop-core-screenshot-diffs
           path: android/desktop-core/build/reports/screenshots/
@@ -93,7 +93,7 @@ jobs:
         working-directory: android/ide-plugin
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -113,7 +113,7 @@ jobs:
         working-directory: android/ide-plugin
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -132,7 +132,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -148,7 +148,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -170,7 +170,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -181,7 +181,7 @@ jobs:
       # directory, so its save is skipped instead of freezing an incomplete
       # entry. The installers re-verify each file's SHA-256 before use (#17624).
       - name: "Cache pinned ktfmt download"
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/auto-mobile/tools/ktfmt
           key: tool-download-ktfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ktfmt/ktfmt_version.sh') }}
@@ -190,7 +190,7 @@ jobs:
       # (the project targets Java 21), rather than depending on whatever JDK the
       # runner image ships by default.
       - name: "Set up JDK"
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: "zulu"
           java-version: "21"
@@ -206,7 +206,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -232,7 +232,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
           fetch-depth: 0
@@ -264,7 +264,7 @@ jobs:
 
       - name: "Upload Android Lint Reports"
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: android-lint-reports
           path: |
@@ -275,7 +275,7 @@ jobs:
 
       - name: "Upload Detekt Reports"
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: detekt-reports
           path: android/**/build/reports/detekt/
@@ -288,7 +288,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -312,7 +312,7 @@ jobs:
         os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -323,7 +323,7 @@ jobs:
       # directory, so its save is skipped instead of freezing an incomplete
       # entry. The installers re-verify each file's SHA-256 before use (#17624).
       - name: "Cache pinned shfmt download"
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/auto-mobile/tools/shfmt
           key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
@@ -385,7 +385,7 @@ jobs:
 
       - name: "Upload BATS Unit Joblog"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: bats-unit-joblog-${{ matrix.os }}
           path: |
@@ -404,7 +404,7 @@ jobs:
         os: [ubuntu-latest]
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -415,7 +415,7 @@ jobs:
       # directory, so its save is skipped instead of freezing an incomplete
       # entry. The installers re-verify each file's SHA-256 before use (#17624).
       - name: "Cache pinned shfmt download"
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/auto-mobile/tools/shfmt
           key: tool-download-shfmt-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/shellcheck/shfmt_version.sh') }}
@@ -459,7 +459,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
       - uses: ./.github/actions/ci-webrtc-publisher-integration
@@ -471,7 +471,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
       - uses: ./.github/actions/ci-android-device-whep
@@ -482,7 +482,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -501,7 +501,7 @@ jobs:
           scripts/validate_mkdocs_nav.sh
 
       - name: "Install uv for docs Markdown validation"
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         with:
           enable-cache: true
           # Key the cache on the only uv lockfile. The default glob walks the
@@ -520,7 +520,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -540,7 +540,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -549,14 +549,14 @@ jobs:
       # checks the built HTML offline, so it needs Python + uv. Both are
       # independent of the lychee download, so run all three concurrently.
       - name: "Setup Python"
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         background: true
         id: setup-python
         with:
           python-version: "3.11"
 
       - name: "Install uv"
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
         background: true
         id: setup-uv
         with:
@@ -569,7 +569,7 @@ jobs:
       # install_lychee.sh re-verifies the cached archive's SHA-256 against the
       # pin in lychee_version.sh, which keys this entry (#17641).
       - name: "Cache pinned lychee download"
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/auto-mobile/tools/lychee
           key: tool-download-lychee-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/lychee/lychee_version.sh') }}
@@ -609,7 +609,7 @@ jobs:
           - ubuntu-latest
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -640,7 +640,7 @@ jobs:
 
       - name: "Upload Logs"
         if: env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: installer-minimal-${{ matrix.os }}-logs
           path: ci-logs/
@@ -671,7 +671,7 @@ jobs:
         os: [windows-latest]
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -700,7 +700,7 @@ jobs:
 
       - name: "Upload unit test diagnostics"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: node-unit-test-diagnostics-${{ matrix.os }}
           path: |
@@ -735,7 +735,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -772,7 +772,7 @@ jobs:
 
       - name: "Upload Windows netstat capture (#10717)"
         if: always() && !cancelled() && runner.os == 'Windows'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows-netstat-capture
           path: scratch/netstat-capture/
@@ -792,7 +792,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -817,12 +817,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
       - name: "Install JDK"
-        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
         with:
           distribution: "zulu"
           java-version: "21"
@@ -832,7 +832,7 @@ jobs:
 
       - name: "Upload Compatibility Logs"
         if: failure()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-runner-kotlin-consumer-compatibility-logs
           path: scratch/junit-runner-kotlin-consumer/logs/
@@ -844,7 +844,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -877,7 +877,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -902,14 +902,14 @@ jobs:
     needs: build-android-control-proxy
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -928,7 +928,7 @@ jobs:
 
       - name: "Upload Test Results"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: junit-runner-emulator-test-results
           path: android/junit-runner/build/reports/tests/test/
@@ -950,14 +950,14 @@ jobs:
     needs: build-android-control-proxy
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download CtrlProxy APK"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug
@@ -976,7 +976,7 @@ jobs:
 
       - name: "Upload Test Results"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playground-automobile-emulator-test-results
           path: android/playground/app/build/reports/tests/test/
@@ -999,7 +999,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -1026,7 +1026,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -1045,7 +1045,7 @@ jobs:
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: "Store AAR"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: aar
           path: core/build/outputs/aar/core-debug.aar
@@ -1059,7 +1059,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -1076,13 +1076,13 @@ jobs:
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: "Upload CtrlProxy APK"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: control-proxy-apk
           path: android/control-proxy/build/outputs/apk/debug/control-proxy-debug.apk
 
       - name: "Upload video-server jar"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: video-server-jar
           path: android/video-server/build/libs/automobile-video.jar
@@ -1098,7 +1098,7 @@ jobs:
         working-directory: android
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -1117,7 +1117,7 @@ jobs:
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
       - name: "Store Sample APK"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: success() # Only upload if build succeeded
         with:
           name: playground-app-apk
@@ -1131,13 +1131,13 @@ jobs:
   #        working-directory: android
   #    steps:
   #      - name: "Git Checkout"
-  #        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+  #        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
   #        with:
   #          lfs: false
   #
   #      - uses: ./.github/actions/setup-auto-mobile-npm-package
   #
-  #      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+  #      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
   #        with:
   #          name: apk
   #
@@ -1172,7 +1172,7 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -1192,7 +1192,7 @@ jobs:
         run: bash scripts/ci/verify-ts-coverage-output.sh
 
       - name: "Upload Coverage Part"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ts-coverage-part-${{ matrix.part }}
           path: |
@@ -1205,7 +1205,7 @@ jobs:
 
       - name: "Upload TypeScript Coverage Diagnostics"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ts-coverage-diagnostics-part-${{ matrix.part }}
           path: |
@@ -1245,7 +1245,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
           fetch-depth: 2
@@ -1253,7 +1253,7 @@ jobs:
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Download Coverage Parts"
-        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ts-coverage-part-*
           path: coverage-parts
@@ -1265,7 +1265,7 @@ jobs:
         run: bash scripts/coverage/generate-badge.sh coverage/lcov.info coverage/ts-coverage-badge.json "TS coverage" "3178C6"
 
       - name: "Upload Coverage Badge"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ts-coverage-badge
           path: coverage/ts-coverage-badge.json
@@ -1286,7 +1286,7 @@ jobs:
 
       - name: "Upload TypeScript Coverage Diagnostics"
         if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ts-coverage-diagnostics
           path: |
@@ -1305,7 +1305,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -1319,7 +1319,7 @@ jobs:
 
       - name: "Upload Kotlin Unit Test Reports on Failure"
         if: ${{ failure() }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kotlin-unit-test-reports
           path: android/**/build/reports/tests/testDebugUnitTest/
@@ -1328,7 +1328,7 @@ jobs:
         run: bash scripts/coverage/generate-kotlin-badge.sh
 
       - name: "Upload Kotlin Coverage Badge"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: kotlin-coverage-badge
           path: coverage/kotlin-coverage-badge.json
@@ -1344,14 +1344,14 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
           fetch-depth: 2
 
       - name: "Check for Swift coverage changes"
         id: filter-swift
-        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           filters: |
             ios:
@@ -1434,7 +1434,7 @@ jobs:
 
       - name: "Upload Swift Coverage Badge"
         if: steps.filter-swift.outputs.ios == 'true' && hashFiles('coverage/swift-coverage-badge.json') != ''
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: swift-coverage-badge
           path: coverage/swift-coverage-badge.json
@@ -1450,7 +1450,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -1469,7 +1469,7 @@ jobs:
           exit 0
 
       - name: "Upload Benchmark Report"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: context-benchmark-report

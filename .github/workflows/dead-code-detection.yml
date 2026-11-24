@@ -23,7 +23,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: "Git Checkout"
-        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: false
 
@@ -56,7 +56,7 @@ jobs:
           bun run dead-code:ts:production | tee reports/production-unreachable-files.txt || true
 
       - name: "Upload Dead Code Report (JSON)"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: dead-code-report-json
@@ -64,7 +64,7 @@ jobs:
           retention-days: 90
 
       - name: "Upload Dead Code Report (Markdown)"
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: dead-code-report-markdown
@@ -83,7 +83,7 @@ jobs:
 
       - name: "Create or Update Issue"
         if: always() && env.FAILED == 'true'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const fs = require('fs');
@@ -184,7 +184,7 @@ jobs:
 
       - name: "Close Issue if Passed"
         if: always() && env.FAILED != 'true'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             // Search for existing dead code issue

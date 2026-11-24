@@ -1,7 +1,7 @@
 import type { AndroidOrIosPlatform } from "../../models/Platform";
 
 /** Platforms a screenshot baseline is recorded for. */
-export type VisualPlatform = AndroidOrIosPlatform | "tvos";
+export type VisualPlatform = AndroidOrIosPlatform | "tvos" | "watchos";
 
 /**
  * The display configuration a screenshot baseline is only valid for (#14083): a baseline recorded
@@ -12,7 +12,7 @@ export interface VisualDeviceProfile {
   /** Full-screen screenshot pixels, in display orientation. */
   width: number;
   height: number;
-  /** Android effective DPI, or the iOS native scale; null when the device reported neither (tvOS). */
+  /** Android effective DPI, or the iOS native scale; null when the device reported neither (tvOS, watchOS). */
   density: number | null;
   fontScale: number | null;
   /** The resolved display theme (`light`, `dark`), or null when the device has no reading. */

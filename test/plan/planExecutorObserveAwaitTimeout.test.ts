@@ -68,6 +68,34 @@ describe("PlanExecutor — observe waitFor timeout", () => {
     expect(nextStep).not.toHaveBeenCalled();
   });
 
+  test("fails the plan on a stable timeout that is not an isError envelope (#19123)", async () => {
+    ToolRegistry.register("observe", "Mock stable timeout", z.object({}).passthrough(), async () =>
+      createStructuredToolResponse({
+        updatedAt: 0,
+        screenSize: { width: 100, height: 100 },
+        systemInsets: { left: 0, top: 0, right: 0, bottom: 0 },
+        awaitTimeout: true,
+        awaitDuration: 2500,
+        settled: false,
+        timedOut: true,
+        unsettledBy: [{ elementId: "com.example:id/sheet", field: "bounds" }],
+      }),
+    );
+    const plan: Plan = {
+      name: "stable-timeout-chain",
+      steps: [
+        { tool: "observe", params: { waitFor: { for: "stable" } } },
+        { tool: "observeAwaitTimeoutChainNoop", params: {} },
+      ],
+    };
+
+    const result = await planExecutor.executePlan(plan, 0, "android", "emulator-5554");
+
+    expect(result.success).toBe(false);
+    expect(result.failedStep?.error).toBe("observe waitFor timed out after 2500ms");
+    expect(nextStep).not.toHaveBeenCalled();
+  });
+
   test("fails openLink at its waitFor timeout and stops before the following step", async () => {
     ToolRegistry.register("openLink", "Mock openLink", z.object({}).passthrough(), async () =>
       createStructuredToolResponse({

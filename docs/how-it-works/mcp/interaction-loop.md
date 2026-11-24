@@ -202,6 +202,29 @@ nodes with no affordance. It counts them for actionable nodes in
 `relayout: {count, dx?, dy?}`. `dx` and `dy` appear only when every counted change
 shares the same non-zero left or top offset. A resize in place adds neither.
 
+A delivered action diff leaves out the `added` and `removed` node lists, because
+the `skeleton` already lists every actionable node. In their place it carries
+`addedSummary` and `removedSummary`: `{count, labels?}`, with up to 5 distinct
+labels (`label`, else element id), each cut to 60 characters with an ellipsis.
+A summary is absent when its list is empty.
+
+A skeleton-projected action that is not a scroll ships the full observation
+instead of a diff when it replaced the screen's actionable content. That holds
+in two cases. At least 3 nodes were both added and removed, and they cover at
+least half of the current skeleton. Or at least 3 nodes were added, they cover
+half of it, and any node was removed. Navigating between sub-screens of one
+activity, or closing a dialog that reveals many rows, therefore returns the new
+screen. A pure expansion (nothing removed) stays a diff.
+
+An ancestor whose bounds change re-keys its subtree, so its nodes no longer
+match by position. The diff then pairs leftover nodes that share a unique
+resource id, view id, content-desc and text. A label-less control (no text or
+content-desc, such as `switchWidget`) paired this way shows a state change
+(`checked`, `selected`, `state-description`) only when it kept its bounds and
+its row title. Otherwise the diff lists the two sides as removed and added.
+Android window roots key on `windowId`, so a closing window reads as removed
+rather than as a `windowId` change on the window beneath it.
+
 A requested post-action screenshot is published under the same `observationId`
 as the hierarchy it should match. Only a settle-gated action can replace its
 hierarchy with a later capture, so only it defers the screenshot to the

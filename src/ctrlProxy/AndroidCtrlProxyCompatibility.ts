@@ -70,6 +70,8 @@ export interface AndroidCtrlProxyCompatibilityHost {
   consumeCompletedPrefetchedApk(destinationPath: string): Promise<boolean>;
   clearAvailabilityCache(): void;
   executeApkStage(command: string, stage: string): Promise<ExecResult>;
+  /** An `adb install` stage that retries the empty-reason streamed-install failure (#19124). */
+  executeApkInstallStage(command: string, stage: string): Promise<ExecResult>;
   grantPostInstallPermissions(): Promise<void>;
   install(apkPath: string): Promise<void>;
   enable(): Promise<void>;
@@ -511,7 +513,9 @@ export class AndroidCtrlProxyCompatibility {
     try {
       result.attemptedInstall = true;
       perf.startOperation("installApk");
-      await this.host.executeApkStage(`install -r -d "${apkPath}"`, "CtrlProxy APK upgrade");
+      // Right after a cold boot the package manager can answer with an empty reason; the
+      // install stage retries that within the readiness deadline instead of failing (#19124).
+      await this.host.executeApkInstallStage(`install -r -d "${apkPath}"`, "CtrlProxy APK upgrade");
       perf.endOperation("installApk");
       logger.info("[CTRL_PROXY] APK upgraded successfully");
       this.host.clearAvailabilityCache();

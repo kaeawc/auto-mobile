@@ -16,7 +16,7 @@ import java.io.File
  */
 object RobolectricAndroidAll {
   /** The Robolectric release [versions] was read from; a catalog bump must refresh the table. */
-  const val ROBOLECTRIC_VERSION = "4.18"
+  const val ROBOLECTRIC_VERSION = "4.18.1"
 
   const val GROUP = "org.robolectric"
   const val ARTIFACT = "android-all-instrumented"

@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeEvent
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
+import dev.jasonpearson.automobile.protocol.PrototypePlatformReport
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PrototypeStackSnapshot
 import dev.jasonpearson.automobile.protocol.PrototypeStatusEntry
@@ -70,6 +71,7 @@ internal fun prototypeResultFrame(
   backdrop: String? = null,
   degradedEffects: List<PrototypeDegradedEffect> = emptyList(),
   screenRound: Boolean? = null,
+  platformRuntime: PrototypePlatformReport? = null,
 ): String =
   resultFrameJson.encodeToString<WebSocketResponse>(
     PrototypeResult(
@@ -88,6 +90,7 @@ internal fun prototypeResultFrame(
       backdrop = backdrop,
       degradedEffects = degradedEffects.ifEmpty { null },
       screenRound = screenRound,
+      platformRuntime = platformRuntime,
     ),
   )
 

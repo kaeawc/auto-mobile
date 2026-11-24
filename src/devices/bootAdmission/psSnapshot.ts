@@ -39,11 +39,21 @@ function devicePathMarker(udid: string): string {
   return `/CoreSimulator/Devices/${udid}/`;
 }
 
+const LAUNCHD_SIM_COMMAND = /(?:^|\/)launchd_sim\s/;
+
+/**
+ * True for the simulator's `launchd_sim` bootstrap process. A host process that merely names the
+ * device directory (`tail -f .../Devices/<udid>/data/...`) is not a root.
+ */
+function isSimulatorRoot(row: HostProcessRow, marker: string): boolean {
+  return LAUNCHD_SIM_COMMAND.test(row.command) && row.command.includes(marker);
+}
+
 /**
  * Attributes each process tree to a simulator in one pass over the table.
  *
- * A root is any process whose command line names the simulator's device data
- * directory (the `launchd_sim` bootstrap). Descendants follow `ppid`. A process
+ * A root is the `launchd_sim` process whose command line names the simulator's device data
+ * directory (its bootstrap). Descendants follow `ppid`. A process
  * claimed by two simulators is ambiguous and attributed to neither, so one
  * simulator's cost is never inflated by another's.
  */
@@ -51,15 +61,12 @@ export function attributeSimulatorProcesses(
   rows: readonly HostProcessRow[],
   udids: readonly string[],
 ): Map<string, SimulatorProcessCost> {
-  const children = new Map<number, HostProcessRow[]>();
-  for (const row of rows) {
-    children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
-  }
+  const children = childrenByParent(rows);
   const owner = new Map<number, string | null>();
   for (const udid of udids) {
     const marker = devicePathMarker(udid);
     const claimed = new Set<number>();
-    for (const root of rows.filter((row) => row.command.includes(marker))) {
+    for (const root of rows.filter((row) => isSimulatorRoot(row, marker))) {
       collectTree(root, children, claimed);
     }
     for (const pid of claimed) {
@@ -67,6 +74,31 @@ export function attributeSimulatorProcesses(
     }
   }
   return sumByOwner(rows, owner);
+}
+
+/**
+ * Every process of one simulator: the `launchd_sim` roots that name its device data directory
+ * and their descendants, in table order.
+ */
+export function simulatorProcessTree(
+  rows: readonly HostProcessRow[],
+  udid: string,
+): HostProcessRow[] {
+  const children = childrenByParent(rows);
+  const marker = devicePathMarker(udid);
+  const claimed = new Set<number>();
+  for (const root of rows.filter((row) => isSimulatorRoot(row, marker))) {
+    collectTree(root, children, claimed);
+  }
+  return rows.filter((row) => claimed.has(row.pid));
+}
+
+function childrenByParent(rows: readonly HostProcessRow[]): Map<number, HostProcessRow[]> {
+  const children = new Map<number, HostProcessRow[]>();
+  for (const row of rows) {
+    children.set(row.ppid, [...(children.get(row.ppid) ?? []), row]);
+  }
+  return children;
 }
 
 function collectTree(

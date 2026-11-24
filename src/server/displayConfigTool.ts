@@ -30,6 +30,8 @@ import {
   COLOR_CORRECTION_MODES,
 } from "../features/utility/AccessibilityDisplayPreferences";
 import { IOS_CONTENT_SIZE_CATEGORIES } from "../features/utility/IosSimulatorDisplayConfig";
+import { RENDER_OVERLAYS } from "../utils/ios-cmdline-tools/SimulatorRenderOverlays";
+import { DYNAMIC_ISLAND_STATES } from "../features/utility/IosSimulatorScreenControls";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import type { BootedDevice } from "../models";
 import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
@@ -48,6 +50,25 @@ const displaySideSchema = z
   .int()
   .min(MIN_ANDROID_DISPLAY_SIDE_PX)
   .max(MAX_ANDROID_DISPLAY_SIDE_PX);
+
+const overlaySwitch = (description: string) => z.boolean().optional().describe(description);
+
+/** One switch per {@link RENDER_OVERLAYS} entry (#19016). */
+const renderOverlaysSchema = z
+  .object({
+    blendedLayers: overlaySwitch("Color blended layers: green opaque, red blended."),
+    offscreenRendered: overlaySwitch("Color off-screen rendered layers yellow."),
+    misalignedImages: overlaySwitch("Color misaligned images magenta, scaled images yellow."),
+    copiedImages: overlaySwitch("Color images Core Animation had to copy cyan."),
+    cacheHits: overlaySwitch("Color rasterized layer cache hits green, misses red."),
+    flashUpdatedRegions: overlaySwitch("Flash regions as they redraw (yellow)."),
+  })
+  .strict()
+  .refine((value) => RENDER_OVERLAYS.some((overlay) => value[overlay] !== undefined), {
+    message: "renderOverlays must name at least one overlay.",
+  })
+  // The refine is invisible to JSON Schema; publish the same rule to clients.
+  .meta({ minProperties: 1 });
 
 export const displayConfigSchema = addDeviceTargetingToSchema(
   z
@@ -171,6 +192,28 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
         .boolean()
         .optional()
         .describe("Android API 31+: Extra dim (secure reduce_bright_colors_activated)."),
+      renderOverlays: renderOverlaysSchema
+        .optional()
+        .describe(
+          "iOS Simulator only: Core Animation render overlays, the Simulator Debug menu's color " +
+            "tints for rendering cost, on (true) or off (false). They tint every app on screen " +
+            "until turned off; screenshots show them. reset turns all of them off. Omit to leave unchanged.",
+        ),
+      dynamicIsland: z
+        .enum(DYNAMIC_ISLAND_STATES)
+        .optional()
+        .describe(
+          "iOS Simulator: hide or show the Dynamic Island in screen recordings and the Simulator " +
+            "window (screenshots never include it). Only device types with a Dynamic Island " +
+            "change. Omit to leave unchanged.",
+        ),
+      backlight: z
+        .boolean()
+        .optional()
+        .describe(
+          "iOS Simulator: false turns the display off (the Lock Screen, always-on where the " +
+            "device type has it); true turns it back on at the Lock Screen. Omit to leave unchanged.",
+        ),
       reset: z
         .union([z.boolean(), z.literal("factory")])
         .optional()
@@ -183,7 +226,7 @@ export const displayConfigSchema = addDeviceTargetingToSchema(
             "mode and display cutout to the values recorded before they were first changed. Restore " +
             "night mode only to the value displayConfig replaced earlier in this process; otherwise " +
             "leave it unchanged. " +
-            "Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. " +
+            "Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process, shows a hidden Dynamic Island, and turns an off display back on. " +
             "On both, restore each accessibility display preference that displayConfig " +
             "changed earlier in this process.",
         ),
@@ -225,6 +268,9 @@ const DISPLAY_CONFIG_SET_FIELDS = [
   "magnification",
   "magnificationScale",
   "extraDim",
+  "renderOverlays",
+  "dynamicIsland",
+  "backlight",
 ] as const;
 
 function displayConfigFieldsPresent(
@@ -251,8 +297,18 @@ function displayConfigSetInput(args: DisplayConfigArgs): SetDisplayConfigInput {
     ...(args.displayCutout !== undefined ? { displayCutout: args.displayCutout } : {}),
     ...accessibilityArgs(args),
     ...(args.contentSize !== undefined ? { contentSize: args.contentSize } : {}),
+    ...simulatorArgs(args),
     ...(args.reset !== undefined ? { reset: isResetRequest(args.reset) } : {}),
     ...(args.reset === "factory" ? { factory: true } : {}),
+  };
+}
+
+/** The iOS Simulator-only fields present in the wire args. */
+function simulatorArgs(args: DisplayConfigArgs): Partial<SetDisplayConfigInput> {
+  return {
+    ...(args.renderOverlays !== undefined ? { renderOverlays: args.renderOverlays } : {}),
+    ...(args.dynamicIsland !== undefined ? { dynamicIsland: args.dynamicIsland } : {}),
+    ...(args.backlight !== undefined ? { backlight: args.backlight } : {}),
   };
 }
 
@@ -400,4 +456,4 @@ export function createDisplayConfigHandler(dependencies: DisplayConfigToolDepend
 export const displayConfigHandler = createDisplayConfigHandler();
 
 export const DISPLAY_CONFIG_DESCRIPTION =
-  'Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image\'s overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed. reset: "factory" additionally forces platform defaults (light theme, iOS content size large, accessibility display preferences off) regardless of recorded baselines, including after a daemon restart.';
+  "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. On the iOS Simulator, dynamicIsland hides or shows the Dynamic Island and backlight turns the display off or on. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process, shows a hidden Dynamic Island and turns an off display on; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed. reset: \"factory\" additionally forces platform defaults (light theme, iOS content size large, accessibility display preferences off) regardless of recorded baselines, including after a daemon restart. On the iOS Simulator, renderOverlays turns Core Animation render overlays (blendedLayers, offscreenRendered, misalignedImages, copiedImages, cacheHits, flashUpdatedRegions) on or off; reads report every overlay, reset turns them all off, and a session's keep-booted reset restores the state it found.";

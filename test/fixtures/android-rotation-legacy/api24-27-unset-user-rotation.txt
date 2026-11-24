@@ -1,0 +1,4 @@
+$ adb shell settings get system user_rotation   (fresh API 24 and API 27 google_apis arm64 pixel_2 AVDs)
+null
+$ adb shell settings get system accelerometer_rotation
+1

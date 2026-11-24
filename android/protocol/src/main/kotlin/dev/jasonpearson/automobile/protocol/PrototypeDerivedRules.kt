@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.protocol
 
 import dev.jasonpearson.automobile.protocol.PrototypeStateChecks.Context
 import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.fail
+import dev.jasonpearson.automobile.protocol.PrototypeValidationPaths.text
 import kotlinx.serialization.json.*
 
 /** Semantic checks not expressible in the structural contract. */
@@ -14,25 +15,7 @@ internal object PrototypeDerivedRules {
     }
     for ((node, path) in context.nodes) {
       PrototypeBindableFields.first<PrototypeSpecError>(node, path) { value, at, kind ->
-          if (kind == PrototypeBindableKind.DERIVED_CONDITION) {
-            val name = (value as? JsonPrimitive)?.content
-            if (name != null && name !in derived)
-              fail(at, "Unknown derived value ${JsonPrimitive(name)}")
-            else null
-          } else if (
-            kind != PrototypeBindableKind.TEXT && kind != PrototypeBindableKind.REQUEST_TEXT
-          )
-            null
-          else
-            (value as? JsonPrimitive)
-              ?.takeIf { it.isString }
-              ?.let { text ->
-                PrototypeDerivedText.names(text.content)
-                  .firstOrNull { it !in derived }
-                  ?.let {
-                    fail(at, "Unknown derived value ${JsonPrimitive(it)}")
-                  }
-              }
+          referenceError(value, at, kind, derived)
         }
         ?.let {
           return it
@@ -41,7 +24,57 @@ internal object PrototypeDerivedRules {
         return it
       }
     }
+    for ((action, path) in context.actions) {
+      PrototypeBindableFields.firstAction<PrototypeSpecError>(action, path) { value, at, kind ->
+          if (kind == PrototypeBindableKind.DERIVED_BINDING)
+            referenceError(value, at, kind, derived)
+          else null
+        }
+        ?.let {
+          return it
+        }
+    }
     return null
+  }
+
+  private fun referenceError(
+    value: JsonElement?,
+    path: String,
+    kind: PrototypeBindableKind,
+    derived: JsonObject,
+  ): PrototypeSpecError? {
+    val text = (value as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+    val missing =
+      when (kind) {
+        PrototypeBindableKind.DERIVED_CONDITION,
+        PrototypeBindableKind.DERIVED_BINDING -> text.takeUnless { it in derived }
+        PrototypeBindableKind.TEXT,
+        PrototypeBindableKind.REQUEST_TEXT ->
+          PrototypeDerivedText.names(text).firstOrNull { it !in derived }
+        else -> null
+      }
+    return missing?.let { fail(path, "Unknown derived value ${JsonPrimitive(it)}") }
+  }
+
+  /** Data pointers and state keys that can affect a raw derived value. */
+  fun inputs(spec: JsonElement?, name: String): List<Pair<String, String>> {
+    val entries = (spec as? JsonObject)?.get("derive") as? JsonObject
+    val entry = entries?.get(name) as? JsonObject ?: return emptyList()
+    val collection = entry["collection"] as? JsonObject
+    val sources =
+      listOfNotNull((collection ?: entry)["of"] as? JsonObject) +
+        collection
+          ?.let {
+            PrototypeCollection.clauses(it).mapNotNull { clause ->
+              clause["value"] as? JsonObject
+            }
+          }
+          .orEmpty()
+    return sources.flatMap { binding ->
+      listOf("data", "state").mapNotNull { source ->
+        binding.text(source)?.let { source to it }
+      }
+    }
   }
 
   private fun repeatError(node: JsonObject, path: String, root: JsonObject): PrototypeSpecError? {
@@ -144,16 +177,54 @@ object PrototypeDerivedText {
 
 /** Device-local projections must pass the value-dependent checks deferred by host validation. */
 object PrototypeDerivedRows {
-  fun validate(node: PrototypeNode, rows: List<Map<String, PrototypeScalar>>): PrototypeSpecError? {
+  fun validate(
+    node: PrototypeNode,
+    rows: List<Map<String, PrototypeScalar>>,
+    sourceItems: List<JsonObject>? = null,
+    outerAlias: String? = null,
+  ): PrototypeSpecError? {
     val json = PrototypeSpecValidator.json
     val encoded = json.encodeToJsonElement(PrototypeNode.serializer(), node).jsonObject
     val repeat = encoded["repeat"] as? JsonObject ?: return null
+    val projected = json.encodeToJsonElement(rows).jsonArray
+    val items =
+      JsonArray(
+        projected.mapIndexed { index, row ->
+          JsonObject(sourceItems?.getOrNull(index).orEmpty() + row.jsonObject)
+        },
+      )
     val materialized =
       JsonObject(
-        encoded +
-          ("repeat" to
-            JsonObject((repeat - "derive") + ("items" to json.encodeToJsonElement(rows)))),
+        encoded + ("repeat" to JsonObject((repeat - "derive") + ("items" to items))),
       )
-    return PrototypeRepeatValidator.validate(buildJsonObject { put("root", materialized) })
+    if (outerAlias == null)
+      return PrototypeRepeatValidator.validate(buildJsonObject { put("root", materialized) })
+    val data = PrototypeRepeatData(null)
+    val scope =
+      checkNotNull(PrototypeRepeatTree.scopeOf(materialized, "root", data))
+        .copy(
+          outerAlias = outerAlias,
+          outerItem =
+            items.firstOrNull()?.jsonObject?.let { row ->
+              JsonObject(
+                row
+                  .filterKeys { it.startsWith("outer.") }
+                  .mapKeys { it.key.removePrefix("outer.") },
+              )
+            },
+        )
+    val state = PrototypeRepeatTextChecks.RepeatState(data)
+    for (child in PrototypeRepeatTree.childrenOf(materialized, "root")) {
+      PrototypeRepeatTree.templateErrors(
+          child.node,
+          child.path,
+          scope,
+          state,
+        )
+        ?.let {
+          return it
+        }
+    }
+    return PrototypeRepeatTree.repeatKeyError(materialized, "root", scope)
   }
 }

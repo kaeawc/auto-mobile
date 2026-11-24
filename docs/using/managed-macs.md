@@ -1,6 +1,8 @@
 # Managed Macs and CI runners
 
-On iOS simulators, `networkCondition` relies on a macOS network-filter system extension.
+On iOS simulators, `networkCondition` with `appId` relies on a macOS network-filter system
+extension. Device-wide `networkCondition` (no `appId`) needs none of this; see
+[iOS Simulator network condition](ios-network-condition.md).
 Out of the box, macOS asks a person to approve it twice: once for the system extension
 and once for the content filter. On Macs that nobody watches, such as CI runners, EC2 Mac
 hosts, or a team's managed machines, one MDM configuration profile removes both prompts.
@@ -95,7 +97,9 @@ After the profile is installed and `activate` has run:
    "/Applications/AutoMobile Network Identity Probe.app/Contents/MacOS/network-filter-controller" status
    ```
 
-3. `getDeviceState` reports the `networkCondition` backend as ready on that Mac.
+3. `getDeviceState` reports the `networkCondition` backend as ready on that Mac. While a
+   device-wide condition is active, it reports that condition instead, so reset it first or rely
+   on step 2.
 
 If the controller still reports `approval_required`, check that `profiles status -type
 enrollment` shows an MDM enrollment and that the profile appears in `profiles show`. A

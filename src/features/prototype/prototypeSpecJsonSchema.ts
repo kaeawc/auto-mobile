@@ -146,7 +146,11 @@ function terseProperty(property: JsonObject): JsonObject {
       terse[keyword] = property[keyword];
     }
   }
-  // An object-valued block converted as allOf/anyOf (e.g. channels) is still an object.
+  if (Array.isArray(property.anyOf)) {
+    terse.anyOf = (property.anyOf as JsonObject[]).map(terseProperty);
+    return terse;
+  }
+  // An object-valued block converted as allOf (e.g. channels) is still an object.
   if (terse.type === undefined && Object.keys(property).length > 0) {
     terse.type = "object";
   }

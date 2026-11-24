@@ -1003,6 +1003,7 @@ private fun RenderPrototypeNodeContent(
     "list" ->
       RenderPrototypeLazyList(node, modifier, interact) { RenderPrototypeNode(it, interact) }
     "chart" -> RenderPrototypeChart(node, modifier)
+    "webView" -> RenderPrototypeWebView(node, modifier, interact)
     "timePicker" ->
       PrototypeCheckedControl(node, parentModifier) {
         RenderPrototypeTimePicker(node, modifier, controlInteract)

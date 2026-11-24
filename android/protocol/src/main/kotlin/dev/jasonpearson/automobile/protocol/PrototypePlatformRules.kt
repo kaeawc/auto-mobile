@@ -351,6 +351,8 @@ object PrototypePlatformCalls {
     return PrototypeRateLimit(calls, windowMs)
   }
 
+  fun callOwner(name: String): String? = callDefinition(name)?.first
+
   fun eventOwner(name: String): String? = eventModule(name)
 
   /**

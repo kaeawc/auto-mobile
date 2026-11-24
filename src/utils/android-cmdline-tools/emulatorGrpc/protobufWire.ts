@@ -1,6 +1,6 @@
 /**
- * The protobuf wire format subset the emulator audio RPCs need: varints and length-delimited
- * fields. Hand-written because the messages are three small, stable structs from
+ * The protobuf wire format subset the emulator audio and XR input RPCs need: varints and
+ * length-delimited fields. Hand-written because the messages are a few small, stable structs from
  * `emulator_controller.proto` and no protobuf runtime is a dependency.
  */
 
@@ -45,6 +45,16 @@ export class ProtoWriter {
       ];
       this.chunks.push(Uint8Array.from(key), value);
     }
+    return this;
+  }
+
+  /** An embedded message, written even when empty so a oneof case stays selected. */
+  message(field: number, value: Uint8Array): this {
+    const key = [
+      ...encodeVarint(field * 8 + WIRE_LENGTH_DELIMITED),
+      ...encodeVarint(value.byteLength),
+    ];
+    this.chunks.push(Uint8Array.from(key), value);
     return this;
   }
 

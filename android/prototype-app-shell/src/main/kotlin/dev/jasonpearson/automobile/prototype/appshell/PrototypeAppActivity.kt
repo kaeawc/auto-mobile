@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.prototype.appshell
 
+import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
@@ -40,6 +42,7 @@ import kotlinx.coroutines.withContext
 
 @OptIn(InternalAutoMobilePrototypeApi::class)
 class PrototypeAppActivity : ComponentActivity() {
+  private val links = AppShellLinkInbox()
   private val attachScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
   private val embeddedHost = EmbeddedPrototypeHost(attachScope, Mutex())
   private lateinit var attachTarget: RuntimeAttachTarget
@@ -59,6 +62,15 @@ class PrototypeAppActivity : ComponentActivity() {
       }
     detachAttachTarget = process.bind(attachTarget)
     embeddedHost.onRuntime = { attachTarget.runtime = it }
+    embeddedHost.initializeRuntime = { runtime ->
+      val metadata =
+        packageManager.getActivityInfo(componentName, PackageManager.GET_META_DATA).metaData
+      runtime.registeredLinkSchemes =
+        metadata?.getString("automobile.prototype.linkSchemes")?.split(',').orEmpty()
+      links.attach(runtime::openLink)
+    }
+    // Main.immediate queues the launch URL under the interaction lock before composition starts.
+    deliverLink(intent, savedInstanceState)
     embeddedHost.nextSequence = { attachTarget.nextSequence() }
     embeddedHost.eventSink = PrototypeEventSink { process.agent.emit(it) }
     val source = ApkPrototypeSource(assets)
@@ -68,6 +80,18 @@ class PrototypeAppActivity : ComponentActivity() {
       MaterialTheme {
         AppContent(loader, prototypeAssets)
       }
+    }
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    deliverLink(intent, null)
+  }
+
+  private fun deliverLink(intent: Intent?, savedInstanceState: Bundle?) {
+    intent?.takePrototypeLaunchLink(savedInstanceState)?.let { url ->
+      attachScope.launch { embeddedHost.interactions.withLock { links.receive(url) } }
     }
   }
 
@@ -92,6 +116,7 @@ class PrototypeAppActivity : ComponentActivity() {
   }
 
   override fun onDestroy() {
+    links.detach()
     detachAttachTarget?.invoke()
     flushRuntime()
     attachTarget.runtime?.close()
@@ -138,6 +163,7 @@ class PrototypeAppActivity : ComponentActivity() {
                 storage = loader.storage,
                 handleBack = true,
                 onDismiss = {
+                  links.detach()
                   // Any other user dismissal ends the session; remount so returning is not blank,
                   // but
                   // only once the activity resumes so onAppear never runs while backgrounding.
@@ -153,4 +179,17 @@ class PrototypeAppActivity : ComponentActivity() {
       } else AppShellStatus(current) { moveTaskToBack(true) }
     }
   }
+}
+
+/** Consume the Intent itself so a later recreation or history launch cannot replay it. */
+internal fun Intent.takePrototypeLaunchLink(savedInstanceState: Bundle?): String? {
+  if (
+    savedInstanceState != null ||
+      flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0 ||
+      getBooleanExtra("automobile.prototype.linkConsumed", false)
+  )
+    return null
+  val url = dataString ?: return null
+  putExtra("automobile.prototype.linkConsumed", true)
+  return url
 }

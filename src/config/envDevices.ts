@@ -194,6 +194,12 @@ export const DEVICES_ENV = {
     default: "5554 on broker hosts; otherwise empty",
     doc: "Excluded even emulator console ports (5554–5682) or emulator serials, comma/whitespace-separated; explicit blank disables exclusions.",
   },
+  DISABLE_IOS_SIM_HID: {
+    name: "AUTOMOBILE_DISABLE_IOS_SIM_HID",
+    kind: "bool",
+    default: "off",
+    doc: "Send iOS Simulator raw input (tapAt, swipeAt, power, home, keys) through CtrlProxy instead of the SimulatorKit HID helper (1/true).",
+  },
   SKIP_CTRL_PROXY_DOWNLOAD: {
     name: "AUTOMOBILE_SKIP_CTRL_PROXY_DOWNLOAD",
     kind: "bool",

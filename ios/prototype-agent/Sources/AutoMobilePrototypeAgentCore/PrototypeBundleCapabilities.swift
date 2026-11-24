@@ -79,7 +79,6 @@ enum PrototypeBundleCapabilities {
             if PrototypeMediaItems.usedBy(node) { names.insert(PrototypeMediaItems.capability) }
             if node["shared"] != nil { names.insert("prototype_shared_element_v2") }
             let type = node["type"]?.stringValue ?? ""
-            if !PrototypeDerivedValidator.conditionReferences(node, path: "").isEmpty { need("derive") }
             if PrototypeStringConditions.uses(node) { need("string_conditions") }
             if type == "icon", node["effect"] != nil { need("icon_effects") }
             if type == "icon",
@@ -103,6 +102,7 @@ enum PrototypeBundleCapabilities {
             if let repeated = node["repeat"]?.objectFields,
                repeated["items"]?.objectFields != nil || repeated["key"] != nil { need("data_model") }
             if node["repeat"]?.objectFields?["items"]?.objectFields?["derived"] != nil { need("derive") }
+            if PrototypeRepeat.requiresNestedCapability(node["repeat"]) { need("nested_repeat") }
             if node["repeat"]?.objectFields?["derive"] != nil { need("format") }
             if node["span"] != nil { need("flow_grid") }
             if node["onLongPress"] != nil || node["onDoubleTap"] != nil { need("gestures") }
@@ -155,7 +155,9 @@ enum PrototypeBundleCapabilities {
             }
             scanSlots(.object(node), names: &names)
             if case let .array(children) = node["children"] { pending += children }
-            if let child = node["child"] { pending.append(child) }
+            for name in ["child", "header", "footer"] {
+                if let child = node[name] { pending.append(child) }
+            }
             if type == "adaptive" { pending += PrototypeAdaptive.slots.compactMap { node[$0] } }
             pending += Array(node["screens"]?.objectFields?.values ?? [:].values)
         }
@@ -167,6 +169,7 @@ enum PrototypeBundleCapabilities {
             scanSlots(item, names: &names)
         }; return }
         guard let fields = value.objectFields else { return }
+        if PrototypeDerivedValidator.requiresCapability(fields) { names.insert("prototype_derive_v1") }
         if fields["onAppear"] != nil { names.insert("prototype_timers_v1") }
         let type = fields["type"]?.stringValue
         if (type == "stack" && fields["routes"] != nil) ||
@@ -186,6 +189,8 @@ enum PrototypeBundleCapabilities {
         if ["setData", "appendData", "prependData", "upsertData", "removeData"]
             .contains(type ?? "") { names.insert("prototype_data_actions_v1") }
         if PrototypeGeneratedValues.needsDataV2(fields) { names.insert("prototype_data_actions_v2") }
+        if ["setData", "appendData", "prependData", "upsertData"].contains(type ?? ""),
+           fields["value"]?.objectFields?["object"] != nil { names.insert("prototype_data_actions_v3") }
         if type == "upsertData" ||
             (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
             .needsValueCapability(fields) { names.insert("prototype_platform_realtime_v1") }

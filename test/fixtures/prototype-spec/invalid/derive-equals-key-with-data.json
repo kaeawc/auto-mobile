@@ -1,0 +1,23 @@
+{
+  "spec": {
+    "id": "cart-bindings",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "data": {
+      "count": 1
+    },
+    "root": {
+      "type": "text",
+      "text": "Checkout",
+      "visibleWhen": {
+        "data": "/count",
+        "equalsKey": "confirm"
+      }
+    }
+  },
+  "expectedPath": "root.visibleWhen.equalsKey",
+  "expectedMessage": "Requires key"
+}

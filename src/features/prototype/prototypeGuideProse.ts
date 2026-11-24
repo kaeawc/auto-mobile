@@ -1,12 +1,9 @@
+import { GUIDE_INBOUND_LINKS } from "./prototypeGuideLinks";
 import { GUIDE_DISPOSABLE_APPS, GUIDE_PLATFORM_NAMESPACES } from "./prototypeGuideProseMore";
 import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { GUIDE_M3_EXPRESSIVE } from "./prototypeGuideM3Expressive";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
-import {
-  MAX_PROTOTYPE_DATA_ARRAY_ITEMS,
-  MAX_PROTOTYPE_LIST_ITEMS,
-  MAX_PROTOTYPE_SPEC_BYTES,
-} from "./prototypeSpec";
+import * as spec from "./prototypeSpec";
 export const GUIDE_GESTURES = `${GUIDE_PLATFORM_NAMESPACES}
 
 ## Gestures
@@ -245,6 +242,8 @@ bounded params. Shader source is never accepted. Any effect may loop with \`anim
 {periodMs: 400-20000}\` and start at \`phase\` 0-1; a spec has at most 64 effects and 8 animated ones
 across its expanded \`repeat\` tree, counting every \`styleWhen\` style's list too.
 
+${GUIDE_INBOUND_LINKS}
+
 ## Motion profiles and shared elements
 
 \`motion\` is \`standard\` (default), \`reduced\` or \`none\`. Explicit \`motion: "reduced"\`
@@ -325,17 +324,17 @@ support it yet.
 
 \`list {repeat:{items:{path},as,key},children:[row],axis?,header?,footer?,spacing?,contentPadding?,onEndReached?,endThreshold?,refresh?,maxItems?}\`
 is a lazy scrolling collection (needs \`prototype_lazy_list_v1\` and \`prototype_data_model_v1\`).
-The path resolves to at most ${MAX_PROTOTYPE_LIST_ITEMS} objects; \`key\` is required, projected and unique. Empty arrays
+The path resolves to at most ${spec.MAX_PROTOTYPE_LIST_ITEMS} objects; \`key\` is required, projected and unique. Empty arrays
 are valid. Axis defaults to vertical; spacing/padding are nonnegative dp. One row template and
 optional header/footer each count once toward node/image limits, while per-item binding and text
 budgets still apply. Header/footer are ordinary nodes outside the row scope. Never nest lists,
-put a list in a repeat, or put a same-axis scroll above/below a list. Rows cannot nest repeats/pagers.
+put a list in a repeat, or put a same-axis scroll above/below a list. Rows may nest one container repeat using an item field array with prototype_nested_repeat_v1; pagers remain invalid.
 Only composed rows are in \`observe\`; use \`swipeOn\` to reach more. Row keys preserve identity.
 \`onEndReached\` fires for nonempty rows within \`endThreshold\` of the end (1–50, default 3), once
 per \`(rowCount,lastRowKey)\` signature; empty/no-change pages never refire. Signature state survives
 recomposition and resets on show. \`endThreshold\` needs \`onEndReached\`. Vertical \`refresh\` uses
 scroll.refresh semantics and a declared boolean key (also needs \`prototype_refresh_v1\`).
-\`maxItems\` (1–${MAX_PROTOTYPE_LIST_ITEMS}) requires initial data to fit; appending trims oldest rows atomically before
+\`maxItems\` (1–${spec.MAX_PROTOTYPE_LIST_ITEMS}) requires initial data to fit; appending trims oldest rows atomically before
 final data limits. The smallest cap among lists sharing the exact data path wins.
 \`request.append:{from,to}\` (same lazy-list capability) extracts a response array from an object
 member at \`from\`, extends the existing \`/data/...\` array \`to\`, and writes the remaining response
@@ -355,7 +354,7 @@ until the acceptance run; benchmark qualification remains unverified.
 
 \`{type: "chart", variant, series, yRange?, xLabels?, goal?}\` draws a \`line\`, \`area\`, \`bar\` or
 \`ring\` chart (needs \`prototype_chart_v1\`). \`series\` holds 1-4 \`{path, x?, y, label, color?}\`
-entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most ${MAX_PROTOTYPE_DATA_ARRAY_ITEMS} items as
+entries: \`path\` is a \`/data\` pointer to an array of objects (empty is valid, at most ${spec.MAX_PROTOTYPE_DATA_ARRAY_ITEMS} items as
 for any data array), \`y\` names each point's numeric member and \`x\` its optional label member;
 \`color\` is a hex or theme role, or a \`{light, dark}\` pair. Points are drawn in array order, so
 \`appendData\`, a \`request\` \`into\` or a \`/data\` patch re-renders the chart. \`yRange {min, max}\`
@@ -1029,7 +1028,7 @@ export const GUIDE_ERRORS = `## Common validation errors
 | \`Data depth limit exceeded\` / \`Data array limit exceeded\` / \`Data byte limit exceeded\` | Reduce data to the generated limits. |
 | \`Invalid pointer value\` | Use a nonempty RFC 6901 pointer within the pointer limit. |
 | \`Repeat path does not resolve to an array\` / \`Repeat path resolves to more than 128 items\` / \`Repeat path item <i> is not an object\` | Point to an array of objects within the repeat item limit. |
-| \`Duplicate repeat key "x" (items <i> and <j>)\` | Give every item a unique rendered identity. |
+| \`Duplicate repeat key "x" (items <i> and <j>)\` / \`Derived repeat key "x" has the same input for items <i> and <j>\` | Give every item a unique rendered identity; derive a key from a field that differs per row, not a constant or a shared value. |
 | \`Bound state key "x" is invalid (repeat item <i>)\` | A path-bound key must form a valid state key; error is at repeat.items.path. |
 | \`Requires key or data or platform or derived\` | Supply one condition source with exactly one comparison. |
 | \`Repeat path cell limit exceeded\` | Reduce path-bound repeats or the scalar members projected per item; see \`MAX_PROTOTYPE_REPEAT_PATH_CELLS\`. |
@@ -1085,7 +1084,7 @@ Data actions). Any state op, including \`test\`, requires \`baseRevision\`. A de
 must refuse the whole patch with \`conflict\` if the user changed a touched state
 key since that revision, returning the current revision and those keys' values.
 
-There are at most ${MAX_PROTOTYPE_PATCH_OPS} ops, the frame is capped at ${MAX_PROTOTYPE_SPEC_BYTES / (1024 * 1024)} MiB, and the resulting whole
+There are at most ${MAX_PROTOTYPE_PATCH_OPS} ops, the frame is capped at ${spec.MAX_PROTOTYPE_SPEC_BYTES / (1024 * 1024)} MiB, and the resulting whole
 spec must satisfy every spec/data limit, including node count and depth. The
 host tracks a cloned copy of each id's device spec from its last acknowledged show,
 with components expanded and anchors resolved. It applies ops to a copy and

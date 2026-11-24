@@ -16,13 +16,19 @@ export function prototypeGeneratedForm(
   return binding.lastGenerated === true ? "lastGenerated" : undefined;
 }
 
-/** Binding destinations only: never inspect callback lists or arbitrary payload properties. */
+/**
+ * Binding destinations only: never inspect callback lists or arbitrary payload properties. An
+ * `{object}` data value contributes its member bindings in sorted name order, the order every
+ * platform resolves them (#18826).
+ */
 export function prototypeActionBindings(action: Record<string, unknown>): unknown[] {
   const values: unknown[] = [];
   if (
     ["setData", "appendData", "upsertData", "prependData", "setState"].includes(String(action.type))
   ) {
-    values.push(action.value);
+    const value = record(action.value);
+    const members = action.type === "setState" ? undefined : record(value?.object);
+    values.push(...(members ? sortedValues(members) : [action.value]));
   }
   if (action.type === "request") {
     values.push(...sortedValues(action.headers), ...sortedValues(action.query));

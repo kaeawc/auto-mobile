@@ -182,7 +182,10 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
   `~/Library/Caches/TemporaryItems` on macOS, `$XDG_RUNTIME_DIR` (else `/tmp/android-<user>`)
   on Linux, and the temp dir. These are the same directories the AVD launch guard reads.
 - The endpoint address comes from the file's `grpc.address` or `grpc.port`, which is the port the
-  launcher passed. `localhost:8554` is the fallback for a file with neither key.
+  launcher passed. A file with neither `grpc.address` nor a valid `grpc.port` has no endpoint.
+  Examples are an emulator started with `-no-grpc` or a third-party emulator. The gRPC tools
+  then fail with the "does not advertise a gRPC endpoint" error. Discovery never guesses 8554,
+  because that port can belong to another emulator.
 - The emulator for `emulator-<N>` is the file whose `port.serial` is `N`. Files whose pid is
   no longer running are skipped, because a crashed emulator leaves its file behind and a later
   emulator can reuse the port.

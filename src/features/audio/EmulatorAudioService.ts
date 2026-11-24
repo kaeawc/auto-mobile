@@ -54,7 +54,7 @@ export type EmulatorAudioSessionFactory = (endpoint: EmulatorGrpcEndpoint) => Em
  * How audio reaches the device: an emulator's own gRPC audio API, or for an iOS Simulator the host's
  * CoreAudio loopback devices, which every simulator on the host shares.
  */
-export type AudioRoute = "emulator-grpc" | "host-loopback";
+export type AudioRoute = "emulator-grpc" | "host-loopback" | "process-tap";
 
 export type AudioSource =
   | { kind: "file"; path: string }
@@ -125,8 +125,8 @@ export interface EmulatorAudioServiceDeps {
   /** Redacted live output, absent for emulators launched outside AutoMobile. */
   outputTail?: EmulatorOutputTail;
   createSession: EmulatorAudioSessionFactory;
-  /** A session over the host loopback devices, for iOS Simulators; absent where there is none. */
-  createHostLoopbackSession?: () => EmulatorAudioSession;
+  /** A session over the host audio devices for one iOS Simulator; absent where there is none. */
+  createHostLoopbackSession?: (deviceId: string) => EmulatorAudioSession;
   /**
    * Reads a regular file, refusing it once it exceeds `maxBytes`. The cap must hold for the read
    * itself, not a prior size check: a device file such as /dev/zero reports size 0.
@@ -309,12 +309,13 @@ export class EmulatorAudioService {
     const route = await this.routeFor(deviceId, "audio_capture_unsupported");
     const session = route.open();
     try {
-      const { pcm, timedOut } = await session.captureAudio({
+      const captured = await session.captureAudio({
         durationMs: request.durationMs,
         sampleRate: request.sampleRate,
       });
+      const { pcm, timedOut } = captured;
       const levels = analyzeLevels(pcm, { silenceThresholdDbfs: request.silenceThresholdDbfs });
-      return { ...levels, pcm, timedOut, route: route.route };
+      return { ...levels, pcm, timedOut, route: captured.route ?? route.route };
     } finally {
       await session.close();
     }
@@ -556,7 +557,7 @@ export class EmulatorAudioService {
   }> {
     const hostLoopback = this.deps.createHostLoopbackSession;
     if (hostLoopback && resolveIosDeviceKind({ deviceId }) === "simulator") {
-      return { route: "host-loopback", open: hostLoopback };
+      return { route: "host-loopback", open: () => hostLoopback(deviceId) };
     }
     const endpoint = await this.endpointFor(deviceId, code);
     return { route: "emulator-grpc", endpoint, open: () => this.deps.createSession(endpoint) };
@@ -577,8 +578,9 @@ export class EmulatorAudioService {
     if (!endpoint) {
       throw unsupported(
         code,
-        `Emulator ${deviceId} does not advertise a gRPC endpoint. Use an emulator build with gRPC ` +
-          "enabled (the default on recent builds) running on this host.",
+        `Emulator ${deviceId} does not advertise a gRPC endpoint, so it exposes no gRPC server ` +
+          "for audio. Run it on this host with gRPC enabled (the default on recent builds; do not " +
+          "pass -no-grpc).",
       );
     }
     return endpoint;

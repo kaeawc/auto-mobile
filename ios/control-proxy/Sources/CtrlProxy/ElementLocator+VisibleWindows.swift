@@ -12,6 +12,26 @@ struct VisibleAppWindow {
     let hierarchy: UIElementInfo
 }
 
+/// Screen placement of a window-relative snapshot: screen = origin + point * scale (#19064).
+struct WindowPlacement: Equatable {
+    let origin: CGPoint
+    let scale: Double
+
+    var isIdentity: Bool { origin == .zero && scale == 1 }
+
+    func screenBounds(_ bounds: ElementBounds) -> ElementBounds {
+        func map(_ value: Int, _ offset: CGFloat) -> CGFloat { offset + CGFloat(Double(value) * scale) }
+        let left = map(bounds.left, origin.x)
+        let top = map(bounds.top, origin.y)
+        return ElementBounds(clamping: CGRect(
+            x: left,
+            y: top,
+            width: map(bounds.right, origin.x) - left,
+            height: map(bounds.bottom, origin.y) - top
+        ))
+    }
+}
+
 /// Window frames from the last observation, for moving focus to a tapped background window.
 struct ObservedWindowFrames {
     let focused: ElementBounds
@@ -55,6 +75,81 @@ extension ElementLocator {
     /// stable window order; never the focused app or SpringBoard.
     nonisolated static func otherWindowCandidates(observed: Set<String>, focusedBundleId: String) -> [String] {
         observed.subtracting([focusedBundleId, "com.apple.springboard"]).sorted()
+    }
+
+    /// Where a background app's window-relative snapshot sits on screen, or nil when its window
+    /// frame is unknown or not a uniformly scaled copy of the snapshot frame: such a window cannot
+    /// be reported in screen space, so it is left out. iPadOS draws a floating window that is not
+    /// focused about 0.5% smaller than its snapshot frame (#19064), so a size match alone misses
+    /// it. `windowFrame` is a live query and only runs for an inset window.
+    nonisolated static func backgroundWindowPlacement(
+        appFrame: CGRect,
+        screenFrame: CGRect,
+        windowFrame: () -> CGRect?
+    )
+        -> WindowPlacement?
+    {
+        let appSize = GestureSize(width: Double(appFrame.width), height: Double(appFrame.height))
+        let screenSize = GestureSize(width: Double(screenFrame.width), height: Double(screenFrame.height))
+        guard appSize.isValid, appFrame.origin.x.isFinite, appFrame.origin.y.isFinite else { return nil }
+        // A screen-sized snapshot is already in screen space; adding its origin would offset
+        // every node a second time.
+        guard hasMultiPanelMismatch(app: appSize, screen: screenSize) else {
+            return WindowPlacement(origin: .zero, scale: 1)
+        }
+        guard let window = windowFrame(), !hasZeroArea(window) else { return nil }
+        let tolerance: CGFloat = 1
+        if abs(window.width - appFrame.width) <= tolerance, abs(window.height - appFrame.height) <= tolerance {
+            return WindowPlacement(
+                origin: CGPoint(x: window.minX - appFrame.minX, y: window.minY - appFrame.minY),
+                scale: 1
+            )
+        }
+        let scale = window.height / appFrame.height
+        guard scale >= minBackgroundWindowScale, scale < 1,
+              abs(window.width - appFrame.width * scale) <= tolerance else { return nil }
+        return WindowPlacement(
+            origin: CGPoint(x: window.minX - appFrame.minX * scale, y: window.minY - appFrame.minY * scale),
+            scale: Double(scale)
+        )
+    }
+
+    /// `backgroundWindowPlacement`, recording `backgroundWindowUnplacedReason` when the window
+    /// cannot be placed, so observe says a window was left out instead of dropping it silently.
+    nonisolated static func backgroundWindowPlacement(
+        appFrame: CGRect,
+        screenFrame: CGRect,
+        truncationReasons: inout Set<String>,
+        windowFrame: () -> CGRect?
+    )
+        -> WindowPlacement?
+    {
+        let placement = backgroundWindowPlacement(
+            appFrame: appFrame,
+            screenFrame: screenFrame,
+            windowFrame: windowFrame
+        )
+        if placement == nil { truncationReasons.insert(backgroundWindowUnplacedReason) }
+        return placement
+    }
+
+    /// Truncation reason for a visible background window left out because it could not be placed.
+    nonisolated static let backgroundWindowUnplacedReason = "background_window_unplaced"
+
+    /// Smallest scale accepted for a background window; anything smaller is not the focus shrink.
+    nonisolated static let minBackgroundWindowScale: CGFloat = 0.5
+
+    /// Move a background window's window-relative tree onto the screen. A keyboard, and a
+    /// keyboard-hosting window, are already in screen space and keep their bounds, as in
+    /// `translatedToScreen`.
+    nonisolated static func placedOnScreen(_ element: UIElementInfo, by placement: WindowPlacement) -> UIElementInfo {
+        guard !placement.isIdentity else { return element }
+        let appBounds = element.bounds
+        return mappingBounds(
+            element,
+            rootBounds: nil,
+            skipSubtree: { isScreenSpaceSubtree($0, appBounds: appBounds) }
+        ) { placement.screenBounds($0) }
     }
 
     /// Whether a window is on screen and not wholly behind the focused window, which is in front.
@@ -149,14 +244,29 @@ extension ElementLocator {
     }
 
     /// The background app whose window a screen point lands in, or nil when the point is in the
-    /// focused window or outside every observed window. iPadOS focuses the window a tap lands in.
+    /// focused window, within `focusedWindowTouchMargin` of it, or outside every observed window.
+    /// iPadOS focuses the window a tap lands in, but gives a touch near the focused window's edge
+    /// to the focused window (#19091), so such a tap must not switch the tracked app.
     nonisolated static func backgroundWindowOwner(x: Double, y: Double, in frames: ObservedWindowFrames) -> String? {
         guard x.isFinite, y.isFinite else { return nil }
         let px = ElementBounds.clampedInt(x)
         let py = ElementBounds.clampedInt(y)
-        guard !contains(frames.focused, x: px, y: py) else { return nil }
+        let margin = focusedWindowTouchMargin
+        let focusedTouchArea = ElementBounds(
+            left: frames.focused.left - margin,
+            top: frames.focused.top - margin,
+            right: frames.focused.right + margin,
+            bottom: frames.focused.bottom + margin
+        )
+        guard !contains(focusedTouchArea, x: px, y: py) else { return nil }
         return frames.background.first { contains($0.frame, x: px, y: py) }?.bundleId
     }
+
+    /// Points around the focused iPad window where iPadOS still gives a touch to it: about 5 pt
+    /// on iPadOS 27.2 for both a tiled and a floating window (#19091). tapOn keeps its point in a
+    /// background window farther out (`IOS_FOCUSED_WINDOW_TOUCH_MARGIN` in
+    /// src/features/action/iosBackgroundWindowTap.ts).
+    nonisolated static let focusedWindowTouchMargin = 8
 
     nonisolated static func withChildren(_ element: UIElementInfo, _ children: [UIElementInfo]?) -> UIElementInfo {
         UIElementInfo(
@@ -233,16 +343,17 @@ extension ElementLocator {
                 }, fallback: nil)
                 guard let snapshot else { continue }
                 tracker.trackObserved(bundleId)
-                let translation = Self.windowScreenTranslation(
+                // A floating background window is drawn slightly shrunk, so its snapshot maps to
+                // the screen by a scale as well as an offset (#19064).
+                guard let placement = Self.backgroundWindowPlacement(
                     appFrame: snapshot.frame,
                     screenFrame: screenFrame,
+                    truncationReasons: &truncationReasons,
                     windowFrame: {
                         catchingObjCExceptionNonThrowing({ app.windows.firstMatch.frame }, fallback: nil)
                     }
-                )
-                let frame = ElementBounds(clamping: translation.map {
-                    snapshot.frame.offsetBy(dx: $0.x, dy: $0.y)
-                } ?? snapshot.frame)
+                ) else { continue }
+                let frame = placement.screenBounds(ElementBounds(clamping: snapshot.frame))
                 guard Self.isVisibleBesideFocused(frame, focused: focusedFrame, screen: screen) else { continue }
                 let built = buildElementInfoFromSnapshot(
                     snapshot,
@@ -252,7 +363,7 @@ extension ElementLocator {
                     parentPath: bundleId,
                     disableAllFiltering: disableAllFiltering
                 )
-                let inScreen = translation.map { Self.translatedToScreen(built, by: $0) } ?? built
+                let inScreen = Self.placedOnScreen(built, by: placement)
                 let optimized = disableAllFiltering
                     ? inScreen
                     : optimizeHierarchy(inScreen, isRoot: true).first ?? inScreen
@@ -266,7 +377,9 @@ extension ElementLocator {
         private static let backgroundWindowSweepTtlNanos: UInt64 = 10_000_000_000
 
         /// After a tap, track the background app whose observed window the tap landed in, since
-        /// iPadOS focused it; both apps stay `.runningForeground`, so state cannot tell.
+        /// iPadOS focused it; both apps stay `.runningForeground`, so state cannot tell. That tap
+        /// only focuses the window and does not reach the control under it (#19075); the caller
+        /// taps again rather than this runner retrying, which could activate a control twice.
         func noteTap(x: Double, y: Double) {
             guard let bundleId = layout.takeTappedBackgroundOwner(x: x, y: y) else { return }
             switchForegroundApp(bundleId: bundleId)

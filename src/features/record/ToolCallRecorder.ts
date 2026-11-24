@@ -49,6 +49,7 @@ export function stripSessionScopedParams(
 const READ_ONLY_ACTIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   keyboard: new Set(["detect", "listProfiles", "listImes"]),
   clipboard: new Set(["get"]),
+  shareSheet: new Set(["list"]),
   systemAlerts: new Set(["get"]),
 };
 
@@ -82,6 +83,8 @@ const READ_UNLESS_SET_FIELDS: Readonly<Record<string, readonly string[]>> = {
     "magnification",
     "magnificationScale",
     "extraDim",
+    "dynamicIsland",
+    "backlight",
     "reset",
   ],
   accessibility: ["talkback", "voiceover"],

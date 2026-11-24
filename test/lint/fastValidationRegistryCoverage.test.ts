@@ -10,6 +10,8 @@ const EXCLUDED_WITH_REASON: Readonly<Record<string, string>> = {
     "PR ios-xcode-build (heavy self-hosted Mac lane, #11011): xcodegen-drift-check.sh --all on macOS (XcodeGen has no Linux build; this entry skips off-host)",
   "manual-test-python":
     "PR shell-changed-gate: prepush-shell.sh selects it when scripts/manual-test/python/ or its validator changes (hashed PyPI install + ~60 s fake-server suite; self-contained, not a real-tree scan)",
+  "docs-readability":
+    "PR docs.yml Docs Readability Report: check-readability.ts over the whole docs tree (this entry checks only the pages a branch changed, for pre-push)",
   "node-format": "PR fast-validation Check formatting step: bun run format:check",
   lychee:
     "merge.yml validate-documentation-links: online links; PR fast-validation runs lychee-offline",

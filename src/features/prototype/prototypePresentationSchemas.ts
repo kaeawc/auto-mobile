@@ -92,6 +92,7 @@ export type PrototypeCondition =
   | { platform: string; notEquals: string | number | boolean }
   | { platform: string; gt: number }
   | { platform: string; lt: number }
+  | { key: string; equalsKey: string }
   | { key: string; equals: string | number | boolean }
   | { key: string; notEquals: string | number | boolean }
   | { key: string; contains: string }
@@ -131,6 +132,7 @@ export const conditionSchema: z.ZodType<PrototypeCondition> = z.lazy(
       z.object({ platform: pointerSchema, notEquals: scalarSchema }).strict(),
       z.object({ platform: pointerSchema, gt: z.number().finite() }).strict(),
       z.object({ platform: pointerSchema, lt: z.number().finite() }).strict(),
+      z.object({ key: stateKeySchema, equalsKey: stateKeySchema }).strict(),
       z.object({ key: stateKeySchema, equals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, notEquals: scalarSchema }).strict(),
       z.object({ key: stateKeySchema, contains: z.string().min(1).max(256) }).strict(),

@@ -15,6 +15,8 @@ import {
 } from "../../models";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient, type IosCtrlProxy } from "../observe/ios";
+import { type IosSimulatorRawInput } from "../../utils/ios/simHid/IosSimulatorRawInput";
+import { resolveIosRawInput } from "./simHidRouting";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -114,6 +116,7 @@ export class HomeScreen extends BaseVisualChange {
   private readonly globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
 
   private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
+  private readonly iosRawInput?: IosSimulatorRawInput;
 
   constructor(
     device: BootedDevice,
@@ -129,6 +132,8 @@ export class HomeScreen extends BaseVisualChange {
       collaborators?: DisplayFenceDependencies & {
         /** Defaults to the device's real CtrlProxy client. */
         globalActionClient?: Pick<AndroidCtrlProxyClient, "requestGlobalAction">;
+        /** The iOS Simulator HID Home press (#19118); `null` disables it. */
+        iosRawInput?: IosSimulatorRawInput | null;
       };
     } = {},
   ) {
@@ -136,6 +141,7 @@ export class HomeScreen extends BaseVisualChange {
     this.simctl = simctl;
     this.device = device;
     this.globalActionClient = collaborators.globalActionClient;
+    this.iosRawInput = resolveIosRawInput(device, collaborators.iosRawInput);
   }
 
   async execute(call?: ActionCall): Promise<HomeScreenResult>;
@@ -402,7 +408,7 @@ export class HomeScreen extends BaseVisualChange {
     // Leaving the switcher takes up to two runner presses, each with its own verification window.
     const budgetMs = timeoutMs ?? HomeScreen.iosHomeBudgetMs(appSwitcherWasOpen);
     const deadline = this.timer.now() + budgetMs;
-    const attempts = await this.launchIosSpringboard(backend, deadline, budgetMs, {
+    const attempts = await this.dispatchSimulatorHome(backend, deadline, budgetMs, {
       signal,
       onDispatch,
     });
@@ -565,6 +571,41 @@ export class HomeScreen extends BaseVisualChange {
   /** The device's runner client, resolved at each use so a retired client is never reused. */
   private iosClient(): IosCtrlProxy {
     return IOSCtrlProxyClient.getInstance(this.device);
+  }
+
+  /**
+   * A hardware Home press through the HID helper, which also dismisses Spotlight (#19118);
+   * SpringBoard launch through simctl when the helper sent nothing. Returns the attempt count.
+   */
+  private async dispatchSimulatorHome(
+    backend: IosHomeBackend,
+    deadline: number,
+    budgetMs: number,
+    dispatch: { signal?: AbortSignal; onDispatch?: () => void },
+  ): Promise<number> {
+    if (this.iosRawInput && (await this.pressSimulatorHidHome(this.iosRawInput, dispatch))) {
+      return 1;
+    }
+    return this.launchIosSpringboard(backend, deadline, budgetMs, dispatch);
+  }
+
+  /** True when the HID helper delivered a Home press; false sends Home through simctl instead. */
+  private async pressSimulatorHidHome(
+    input: IosSimulatorRawInput,
+    { signal, onDispatch }: { signal?: AbortSignal; onDispatch?: () => void },
+  ): Promise<boolean> {
+    const outcome = await input.button("home", { mode: "preferred", signal, onDispatch });
+    if (outcome.status === "delivered") {
+      return true;
+    }
+    if (outcome.status === "indeterminate") {
+      // SpringBoard launch is idempotent, so simctl may follow a press that possibly landed.
+      logger.warn(`[HOME] sim-hid-helper Home outcome indeterminate: ${outcome.reason}`);
+    } else {
+      // Expected while the helper starts; simctl launches SpringBoard instead.
+      logger.debug(`[HOME] sim-hid-helper Home skipped: ${outcome.reason}`);
+    }
+    return false;
   }
 
   private async launchIosSpringboard(

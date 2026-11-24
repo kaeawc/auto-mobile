@@ -27,7 +27,8 @@ Decode order:
 5. Check substituted text against the per-field
    limit and the 4,194,304 UTF-16 rebuilt-text total per show. Inside a repeat, the decoder charges a data-resolved field
    once per item even without repeat placeholders. It does not charge literal fields and state placeholders.
-6. Refuse nested repeats.
+6. Refuse nested repeats unless the renderer advertises `prototype_nested_repeat_v1`; see the
+   [repeat contract](../android/prototype-ux-envelope.md#data-model-11673).
 7. Resolve with projected items cached per pointer.
 8. Guard the resolved tree.
 9. Expand repeats.
@@ -45,8 +46,9 @@ host's traversal order; the strict boundary also enforces the host data byte-cos
 
 Advertises `prototype_data_actions_v1` for `setData`, `appendData`, `prependData`, `removeData`
 ([contract](../android/prototype-ux-actions.md#data-actions-12519)), plus `prototype_data_actions_v2`
-for keyed writes with `where` and optional set `member`, generated value bindings and keyed request into. The `PrototypeRepeat` type binds a whole `{index}`
-path segment and `{item}`/`{index}` values per row at expansion, so row actions arrive concrete.
+for keyed writes with `where` and optional set `member`, generated value bindings and keyed request into, and
+`prototype_data_actions_v3` for `{object}` values. The `PrototypeRepeat` type binds a whole `{index}`
+path segment and `{item}`/`{index}` values, including `{object}` members, per row at expansion, so row actions arrive concrete.
 
 Generated bindings follow the shared [action-list scope rules](../android/prototype-ux-actions.md#data-actions-12519):
 ids and time resolve once on the device, requests capture lastGenerated for their callbacks, and
@@ -54,7 +56,7 @@ change events carry resolved values to both host mirrors. An unset read is `last
 Keyed requests use the [shared request rules](../android/prototype-ux-data-network.md#data-storage-and-network-12531),
 including metadata beside the array and secure selector guards.
 
-The `PrototypeSession` type resolves `{value}`/`{state}`/`{data}` and applies `PrototypeDataWrite` (twin of the
+The `PrototypeSession` type resolves `{value}`/`{state}`/`{data}` (each `{object}` member the same way) and applies `PrototypeDataWrite` (twin of the
 host's `applyPrototypeDataWrite`: codes `invalid_path`, `invalid_value`, `not_found`, `ambiguous_match`, `not_array`,
 `limit_exceeded`; `MAX_PROTOTYPE_DATA_WRITE_BYTES`). It then rebuilds the tree from the authored root with
 `PrototypeSpec.replacingData`, so data text, repeat rows and conditions refresh. The session refuses a write when it
@@ -113,6 +115,28 @@ Storage reset (`clear_prototype_storage`) removes both stores; dismissal retains
 The iOS saved prototype is its own app, so `deleteSaved` uninstalls it and its sandbox.
 Uninstall does not remove its Keychain items, and the app's clear endpoint is gone afterwards, so call
 `clear_prototype_storage` on the saved app before `deleteSaved` when its spec declares `storage.secure` keys.
+
+## Remote images
+
+iOS advertises `prototype_remote_image_v1` on iOS 17+. Device-routed image URLs resolve bindings
+before validation. Image loads dial checked public IP addresses and verify the connected address
+before sending; app-supplied device hooks receive image loads instead. Image requests drop
+authorization, cookie and referer headers, and every redirect hop is revalidated against the image
+policy, with at most five hops. Public HTTPS destinations are allowed; literal loopback HTTP requires
+a DEBUG or ProtoViewer development build plus an explicit cleartext configuration. Images refuse
+private addresses, and refuse daemon ports on loopback and private addresses (a public host may use them). ProtoViewer shares its request consent gate with image loads.
+
+Downloads stop at 8 MiB and have a 30 s ceiling. PNG, JPEG and WebP signatures must decode through
+ImageIO. The header must fit 64 MiB at four bytes per pixel, or eight for sources deeper than 8 bits
+per component or without depth metadata. Decoding applies EXIF orientation and downsamples to 2048
+pixels on the longest edge.
+Decoded images use a 64 MiB memory cache; the app-private URL-hashed disk LRU holds 128 MiB.
+At most six loads run across renderer configurations. Placeholder and error assets or colors render
+in the image slot. `crossfade: true` fades in over 200 ms unless Reduce Motion is enabled.
+Accessibility reports `loading`, `loaded` or `error`, without the URL. Host-routed URLs do not start
+device loads; an uploaded asset uses the existing asset renderer. Inspect has no image-count field.
+See the [remote-image contract](../android/prototype-ux-icons.md#icons-and-images) and
+[decision](../../../devlog/2026-11-05-prototype-ux-remote-image-urls.md).
 
 ## Request action capability
 
@@ -181,6 +205,7 @@ Android doc, [Data, storage and network](../android/prototype-ux-data-network.md
 | ----------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `prototype_data_actions_v1`   | `setData`, `appendData`, `prependData`, `removeData`                 | [Data actions capability](#data-actions-capability)            |
 | `prototype_data_actions_v2`   | Keyed `setData`, `removeData`                                        | [Data actions capability](#data-actions-capability)            |
+| `prototype_data_actions_v3`   | `{object}` data-action values                                        | [Data actions capability](#data-actions-capability)            |
 | `prototype_storage_v1`        | root `storage` block, `inspect` `storage`, `clear_prototype_storage` | Sandbox `Application Support/AutoMobilePrototypeAgent/storage` |
 | `prototype_network_v1`        | `request` with `via: "host"`                                         | [Request action capability](#request-action-capability)        |
 | `prototype_network_device_v1` | `request` with `via: "device"`                                       | Dedicated ephemeral `URLSession`                               |

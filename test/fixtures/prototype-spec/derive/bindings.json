@@ -1,0 +1,62 @@
+{
+  "spec": {
+    "id": "cart-bindings",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "confirm": "sample", "password": "sample", "query": "apple" },
+    "data": { "rows": [{ "name": "Apple" }, { "name": "Pear" }], "count": 0 },
+    "derive": {
+      "cartCount": {
+        "collection": {
+          "of": { "data": "/rows" },
+          "where": [{ "field": "name", "op": "contains", "value": { "state": "query" } }]
+        },
+        "reduce": { "op": "count" }
+      },
+      "cartRows": {
+        "collection": {
+          "of": { "data": "/rows" },
+          "where": [{ "field": "name", "op": "contains", "value": { "state": "query" } }]
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "button",
+          "label": "Checkout",
+          "enabledWhen": { "key": "confirm", "equalsKey": "password" },
+          "onTap": [
+            { "type": "setData", "path": "/data/count", "value": { "derived": "cartCount" } },
+            {
+              "type": "emit",
+              "name": "checkout",
+              "context": { "count": { "derived": "cartCount" } }
+            },
+            {
+              "type": "request",
+              "method": "POST",
+              "url": "https://example.com/cart",
+              "query": { "count": { "derived": "cartCount" } },
+              "body": { "derived": "cartRows" }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "changes": [
+    { "state": { "confirm": "sample", "password": "sample" }, "visible": true },
+    { "state": { "confirm": "other", "password": "sample" }, "visible": false },
+    { "state": { "confirm": "other", "password": "other" }, "visible": true },
+    { "state": { "confirm": "sample" }, "visible": false },
+    { "state": {}, "visible": false },
+    { "state": { "confirm": "1", "password": 1 }, "visible": false }
+  ],
+  "expected": {
+    "count": 1,
+    "context": { "count": 1 },
+    "body": [{ "name": "Apple" }],
+    "url": "https://example.com/cart?count=1"
+  }
+}

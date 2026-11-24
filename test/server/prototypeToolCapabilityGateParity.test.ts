@@ -37,6 +37,10 @@ const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
 const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
+  prototype_links_v1: {
+    minimalSpec: { ...base, requires: ["prototype_links_v1"], links: [] },
+    ops: [],
+  },
   prototype_glass_v1: fixture({ ...label, style: { surface: "glass" } }),
   prototype_scroll_edge_effect_v1: fixture({
     type: "scroll",
@@ -106,6 +110,21 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     ops: [],
   },
   prototype_semantics_v1: fixture({ ...label, semantics: { heading: true } }),
+  prototype_nested_repeat_v1: {
+    ...fixture({
+      type: "column",
+      repeat: { items: [{ lines: [{ sku: "a" }] }], as: "order" },
+      children: [
+        {
+          type: "column",
+          repeat: { items: { field: "lines" }, as: "line" },
+          children: [{ type: "text", text: "{line.sku}" }],
+        },
+      ],
+      id: "label",
+    }),
+    with: ["prototype_data_model_v1"],
+  },
   prototype_derive_v1: {
     minimalSpec: { ...base, derive: { results: { collection: { of: { data: "/rows" } } } } },
     ops: [],
@@ -373,6 +392,19 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
           where: { field: "id", equals: { value: 1 } },
           member: "title",
           value: { value: "new" },
+        },
+      ],
+    }),
+    with: ["prototype_data_actions_v1"],
+  },
+  prototype_data_actions_v3: {
+    ...fixture({
+      ...label,
+      onTap: [
+        {
+          type: "appendData",
+          path: "/data/rows",
+          value: { object: { title: { state: "name" }, done: { value: false } } },
         },
       ],
     }),

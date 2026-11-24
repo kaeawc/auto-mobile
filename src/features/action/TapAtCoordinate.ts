@@ -33,6 +33,8 @@ import type { Timer } from "../../utils/SystemTimer";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import type { IosSimulatorRawInput } from "../../utils/ios/simHid/IosSimulatorRawInput";
+import { simHidScreenFromObservation, withSimulatorHidTaps } from "./simHidRouting";
 import type {
   IosVoiceOverDetector,
   VoiceOverStateClient,
@@ -139,6 +141,8 @@ export interface TapAtCoordinateDependencies extends DisplayFenceDependencies {
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   androidClient?: CoordinateTapClient & { supportsCommand?: (name: string) => Promise<boolean> };
   iosClient?: IosCoordinateTapClient;
+  /** iOS Simulator HID route (#19118); null disables; default: shared, unless iosClient is set. */
+  iosRawInput?: IosSimulatorRawInput | null;
   dispatchAndroidCoordinateTap?: AndroidCoordinateTapDispatch;
   dispatchIosCoordinateTap?: IosCoordinateTapDispatch;
   dispatchIosDoubleTap?: IosDoubleTapDispatch;
@@ -216,6 +220,7 @@ export class TapAtCoordinate extends BaseVisualChange {
   };
   private readonly iosDoubleTap: IosDoubleTapDispatch;
   private readonly iosClient: IosCoordinateTapClient;
+  private iosScreen?: { width: number; height: number }; // HID touches normalize to it
   private readonly iosCoordinateTap: IosCoordinateTapDispatch;
   private readonly invalidateIosCache: () => void;
   private readonly isIosVoiceOverOn: () => Promise<boolean>;
@@ -241,7 +246,12 @@ export class TapAtCoordinate extends BaseVisualChange {
     this.androidClient =
       dependencies.androidClient ?? androidCtrlProxyClientForPlatform(device, this.adbFactory);
     const liveIosClient = () => IOSCtrlProxyClient.getInstance(device);
-    this.iosClient = dependencies.iosClient ?? liveIosClient();
+    this.iosClient = withSimulatorHidTaps(
+      device,
+      dependencies,
+      liveIosClient,
+      () => this.iosScreen,
+    );
     this.iosDoubleTap = dependencies.dispatchIosDoubleTap ?? dispatchIosDoubleTap;
     this.iosCoordinateTap = dependencies.dispatchIosCoordinateTap ?? dispatchIosCoordinateTap;
     this.invalidateIosCache =
@@ -532,6 +542,7 @@ export class TapAtCoordinate extends BaseVisualChange {
               break;
             }
             case "ios":
+              this.iosScreen = simHidScreenFromObservation(observeResult);
               iosDispatch = await this.dispatchIosTapsWithOneFreshRetry(
                 options,
                 resolved,
@@ -977,6 +988,7 @@ export class TapAtCoordinate extends BaseVisualChange {
             : `tap ${point.x} ${point.y}`;
         await this.dispatchAndroidDisplayGesture(point, duration, command, context);
       } else if (this.device.platform === "ios") {
+        this.iosScreen = simHidScreenFromObservation(observation);
         const dispatched = await this.dispatchIosCoordinateTap(action, point, {
           durationMs: duration,
           frameContext: observation.viewHierarchy?.frameContext,

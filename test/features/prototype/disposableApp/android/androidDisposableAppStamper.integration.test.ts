@@ -37,6 +37,7 @@ for (const variant of ["monogram", "asset"] as const) {
           template,
           appId: "dev.jasonpearson.automobile.app.integration",
           label: "Feedly",
+          slug: "feedly",
           icon: variant === "asset" ? { asset: "image" } : { backgroundColor: "#FFC62828" },
           permissions: [],
           enabledComponents: [],

@@ -20,13 +20,22 @@ import type {
   SetNetworkConditionInput,
 } from "./device-state/NetworkConditionState";
 import { NetworkConditionOperations } from "./device-state/NetworkConditionOperations";
+import {
+  defaultIosSimulatorNetworkShaper,
+  type IosSimulatorNetworkShaper,
+} from "./ios/IosSimulatorNetworkShaper";
 import { DoNotDisturbOperations } from "./device-state/DoNotDisturbOperations";
 import type { DoNotDisturbState } from "./device-state/DoNotDisturbState";
 import { BiometricOperations } from "./device-state/BiometricOperations";
+import { KeyboardOperations } from "./device-state/KeyboardState";
 import type { BiometricEnrollment, BiometricEnrollmentState } from "./device-state/BiometricState";
 import { ClockOperations } from "./device-state/ClockOperations";
 import { createScreenLockOperations } from "./screenLock/ScreenLockOperations";
 import { createPowerOperations } from "./power/PowerOperations";
+import {
+  readNetworkActivity,
+  type NetworkActivityReader,
+} from "./networkActivity/NetworkActivityOperations";
 import {
   DEFAULT_DEVICE_STATE_FIELDS,
   EMPTY_STATE_SELECTION_ERROR,
@@ -100,6 +109,7 @@ export {
   networkConditionProfileSchema,
   NETWORK_CONDITION_PROFILES,
   MAX_NETWORK_CONDITION_TTL_SECONDS,
+  MAX_NETWORK_BANDWIDTH_KBPS,
   IOS_APP_NETWORK_CONDITION_LIMITATIONS,
   iosAppNetworkRuleOutcome,
   parseEmulatorNetworkStatus,
@@ -141,6 +151,7 @@ export class DeviceState {
   private readonly cameraPosterFileExists?: (path: string) => boolean;
   private injectedNetworkFilterBridge?: NetworkFilterBridge;
   private readonly iosAppNetworkRule?: () => IosAppNetworkRuleCommandContext | undefined;
+  private readonly iosNetworkShaper: IosSimulatorNetworkShaper;
 
   private readonly networkCondition = new NetworkConditionOperations({
     device: () => this.device,
@@ -148,6 +159,7 @@ export class DeviceState {
     timer: () => this.timer,
     networkFilterBridge: () => this.networkFilterBridge,
     iosAppNetworkRule: () => this.iosAppNetworkRule?.(),
+    iosNetworkShaper: () => this.iosNetworkShaper,
   });
 
   private readonly location = new LocationOperations({
@@ -187,8 +199,16 @@ export class DeviceState {
 
   private readonly power: ReturnType<typeof createPowerOperations>;
 
+  private readonly keyboard: KeyboardOperations;
+
+  private readonly networkActivityReader?: NetworkActivityReader;
+
   constructor(device: BootedDevice, dependencies: DeviceStateDependencies = {}) {
     this.device = device;
+    this.keyboard = new KeyboardOperations({
+      device: () => this.device,
+      bridge: dependencies.simulatorKeyboard,
+    });
     this.iosDisplayInfoSource = dependencies.iosDisplayInfoSource;
     this.iosHingeAngleStore = dependencies.iosHingeAngleStore;
     this.screenLock = createScreenLockOperations(
@@ -228,6 +248,8 @@ export class DeviceState {
     this.iosRunnerLocation = dependencies.iosRunnerLocation;
     this.injectedNetworkFilterBridge = dependencies.networkFilterBridge;
     this.iosAppNetworkRule = dependencies.iosAppNetworkRule;
+    this.iosNetworkShaper = dependencies.iosNetworkShaper ?? defaultIosSimulatorNetworkShaper;
+    this.networkActivityReader = dependencies.networkActivity;
   }
 
   /** Created on first iOS Simulator network read so other paths never touch it. */
@@ -339,6 +361,9 @@ export class DeviceState {
         : {}),
       ...(include.includes("screenLock") ? { screenLock: await this.screenLock.read() } : {}),
       ...(include.includes("power") ? { power: await this.power.read() } : {}),
+      ...(include.includes("networkActivity")
+        ? { networkActivity: await readNetworkActivity(this.device, this.networkActivityReader) }
+        : {}),
     };
   }
 
@@ -433,6 +458,9 @@ export class DeviceState {
         : {}),
       ...(input.screenLock ? { screenLock: await this.screenLock.write(input.screenLock) } : {}),
       ...(input.power ? { power: await this.power.write(input.power) } : {}),
+      ...(input.keyboard
+        ? { keyboard: await this.keyboard.write(input.keyboard, getAbortSignal()) }
+        : {}),
     };
   }
 

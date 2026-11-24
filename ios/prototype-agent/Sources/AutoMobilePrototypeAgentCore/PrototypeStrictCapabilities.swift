@@ -8,6 +8,8 @@ enum PrototypeStrictCapabilities {
 
     static func required(_ spec: [String: JSONValue], includeAgentGates: Bool = false) -> Set<String> {
         var result = PrototypePlatformValidator.backendCapabilities(spec)
+        // Array requirements name capabilities directly; the object form declares platform needs below.
+        result.formUnion(PrototypePlatformValidator.capabilities(spec["requires"]))
         var authorizationRead = false
         var fullNotifications = spec["notifications"] != nil
         func need(_ feature: String) { result.insert("prototype_\(feature)_v1") }
@@ -25,6 +27,7 @@ enum PrototypeStrictCapabilities {
             if spec["window"]?.objectFields?["chrome"] != nil { need("window_chrome") }
             if spec["window"]?.objectFields?["transition"] != nil { need("window_motion") }
         }
+        if spec["links"] != nil { need("links") }
         if spec["strings"] != nil { need("strings") }
         for key in ["window", "theme"] {
             if let block = spec[key]?.objectFields, block["ios"] != nil || block["android"] != nil {
@@ -98,7 +101,7 @@ enum PrototypeStrictCapabilities {
             if PrototypeM3Expressive.required(fields) { result.insert(PrototypeM3Expressive.capability) }
             let type = fields["type"]?.stringValue ?? ""
             if type.isEmpty, let pointer = fields["platform"]?.stringValue { platformRead(pointer) }
-            if !PrototypeDerivedValidator.conditionReferences(fields, path: "").isEmpty { need("derive") }
+            if PrototypeDerivedValidator.requiresCapability(fields) { need("derive") }
             if PrototypeStringConditions.uses(fields) { need("string_conditions") }
             let types = [
                 "startTimer": "timers",
@@ -184,6 +187,8 @@ enum PrototypeStrictCapabilities {
             if ["setData", "appendData", "prependData", "upsertData", "removeData"]
                 .contains(type) { need("data_actions") }
             if PrototypeGeneratedValues.needsDataV2(fields) { result.insert("prototype_data_actions_v2") }
+            if ["setData", "appendData", "prependData", "upsertData"].contains(type),
+               fields["value"]?.objectFields?["object"] != nil { result.insert("prototype_data_actions_v3") }
             if type == "upsertData" || (type == "appendData" && fields["maxItems"] != nil) || PrototypeChannels
                 .needsValueCapability(fields) { need("platform_realtime") }
             if type == "prependData" { need("lazy_list") }
@@ -224,6 +229,7 @@ enum PrototypeStrictCapabilities {
                 }
                 if key == "repeat" {
                     if child.objectFields?["items"]?.objectFields?["derived"] != nil { need("derive") }
+                    if PrototypeRepeat.requiresNestedCapability(child) { need("nested_repeat") }
                     if child.objectFields?["derive"] != nil { need("format") }
                     if child.objectFields?["stagger"] != nil { need("window_motion") }
                     if let repeatSpec = child.objectFields,
@@ -275,6 +281,7 @@ enum PrototypeStrictCapabilities {
             }
         }
         if let root = spec["root"] { scan(root) }
+        if let links = spec["links"] { scan(links) }
         if let handlers = spec["platform"] { scan(handlers) }
         for event in (spec["platform"]?.objectFields?["on"]?.objectFields ?? [:]).keys {
             if event.hasPrefix("notifications.") { fullNotifications = true }

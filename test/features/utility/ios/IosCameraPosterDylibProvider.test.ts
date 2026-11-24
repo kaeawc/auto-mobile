@@ -4,6 +4,8 @@ import { join, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import {
   DefaultIosCameraPosterDylibProvider,
+  IOS_CAMERA_POSTER_GATE_LIBRARY,
+  IOS_CAMERA_POSTER_GATE_SOURCE,
   IOS_CAMERA_POSTER_SOURCE,
   sourcePathsFromModule,
 } from "../../../../src/features/utility/ios/IosCameraPosterDylibProvider";
@@ -241,5 +243,50 @@ test("the npm package ships the injection source the provider looks for", () => 
     files: string[];
   };
   expect(manifest.files).toContain(IOS_CAMERA_POSTER_SOURCE);
+  expect(manifest.files).toContain(IOS_CAMERA_POSTER_GATE_SOURCE);
   expect(readFileSync(resolve(IOS_CAMERA_POSTER_SOURCE), "utf8")).toContain("AM_CAMERA_POSTER");
+  expect(readFileSync(resolve(IOS_CAMERA_POSTER_GATE_SOURCE), "utf8")).toContain(
+    "AM_CAMERA_POSTER_DYLIB",
+  );
+});
+
+test("the device-wide gate builds libSystem-only and ignores the poster overrides", async () => {
+  const fs = new FakeFileSystem();
+  const gateSource = resolve("/repo/CameraPosterGate.c");
+  fs.setFile(gateSource, "gate source bytes");
+  const runner = new BuildRunner(fs);
+  const provider = new DefaultIosCameraPosterDylibProvider({
+    fileSystem: fs,
+    runner,
+    env: {
+      AUTOMOBILE_IOS_CAMERA_POSTER_DYLIB: "/prebuilt.dylib",
+      AUTOMOBILE_IOS_CAMERA_POSTER_SOURCE: "/override.m",
+    },
+    idGenerator: new FakeIdGenerator(),
+    sourcePaths: [gateSource],
+    directory: () => resolve("/data/ios-camera-poster"),
+    library: IOS_CAMERA_POSTER_GATE_LIBRARY,
+  });
+  const gateDigest = createHash("sha256").update("gate source bytes").digest("hex").slice(0, 12);
+  const gateOutput = join(
+    resolve("/data/ios-camera-poster"),
+    `${gateDigest}-sim-universal`,
+    "libAMCameraPosterGate.dylib",
+  );
+  expect(await provider.ensure()).toBe(gateOutput);
+  const compile = runner.getExecutedCalls()[1]!;
+  expect(compile.args).toEqual([
+    "--sdk",
+    "iphonesimulator",
+    "clang",
+    "-arch",
+    "arm64",
+    "-arch",
+    "x86_64",
+    "-dynamiclib",
+    "-mios-simulator-version-min=17.0",
+    gateSource,
+    "-o",
+    `${gateOutput}.fake-1.tmp`,
+  ]);
 });

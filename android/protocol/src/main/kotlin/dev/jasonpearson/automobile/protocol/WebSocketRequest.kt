@@ -864,3 +864,13 @@ data class SimulatePrototypePlatform(
   val event: String,
   val data: JsonObject,
 ) : WebSocketRequest()
+
+/** Host-only queue; never a prototype spec action. */
+@Serializable
+@SerialName("queue_prototype_call_outcome")
+data class QueuePrototypeCallOutcome(
+  override val requestId: String? = null,
+  val id: String,
+  val call: String,
+  val outcome: JsonObject,
+) : WebSocketRequest()

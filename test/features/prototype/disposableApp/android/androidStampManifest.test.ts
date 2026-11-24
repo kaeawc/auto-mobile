@@ -23,6 +23,7 @@ export const templateXml = `<manifest xmlns:android="http://schemas.android.com/
 </application></manifest>`;
 const input = {
   templatePackage,
+  slug: "feedly",
   appId: "dev.jasonpearson.automobile.app.feedly",
   label: 'Feedly & "News"',
   permissions: ["android.permission.POST_NOTIFICATIONS", "android.permission.INTERNET"],
@@ -117,3 +118,37 @@ async function permissionNames(xml: string): Promise<string[]> {
     (node: { $: Record<string, string> }) => node.$["android:name"],
   );
 }
+
+test("registers the slug scheme and optional schemes identically in routing metadata", async () => {
+  const xml = await stampAndroidManifest(templateXml, {
+    ...input,
+    slug: "news-reader",
+    extraLinkSchemes: ["reader"],
+  });
+  const parsed = await parseStringPromise(xml);
+  const activity = parsed.manifest.application[0].activity[0];
+  const filter = activity["intent-filter"].find(
+    (node: { action: { $: Record<string, string> }[] }) =>
+      node.action.some((action) => action.$["android:name"] === "android.intent.action.VIEW"),
+  );
+  expect(
+    filter.category.map((node: { $: Record<string, string> }) => node.$["android:name"]),
+  ).toEqual(["android.intent.category.DEFAULT", "android.intent.category.BROWSABLE"]);
+  expect(
+    filter.data.map((node: { $: Record<string, string> }) => node.$["android:scheme"]),
+  ).toEqual(["amp-news-reader", "reader"]);
+  expect(activity["meta-data"][0].$["android:value"]).toBe("amp-news-reader,reader");
+  const restamped = await parseStringPromise(
+    await stampAndroidManifest(xml, { ...input, slug: "next" }),
+  );
+  expect(restamped.manifest.application[0].activity[0]["intent-filter"]).toHaveLength(2);
+});
+
+test.each(["http", "https", "HTTPS", "not a scheme"])(
+  "refuses the unsupported inbound scheme %s",
+  async (scheme) => {
+    await expect(
+      stampAndroidManifest(templateXml, { ...input, extraLinkSchemes: [scheme] }),
+    ).rejects.toBeInstanceOf(ActionableError);
+  },
+);

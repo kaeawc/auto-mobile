@@ -191,6 +191,13 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) = Unit
 
+  override suspend fun queuePrototypeCallOutcome(
+    requestId: String?,
+    id: String,
+    call: String,
+    outcome: JsonObject,
+  ) = Unit
+
   override suspend fun simulatePrototypePlatform(
     requestId: String?,
     id: String,
@@ -536,6 +543,13 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun deleteSavedPrototype(requestId: String?, id: String) =
     record("deleteSavedPrototype", requestId, id)
+
+  override suspend fun queuePrototypeCallOutcome(
+    requestId: String?,
+    id: String,
+    call: String,
+    outcome: JsonObject,
+  ) = record("queuePrototypeCallOutcome", requestId, id, call, outcome)
 
   override suspend fun simulatePrototypePlatform(
     requestId: String?,

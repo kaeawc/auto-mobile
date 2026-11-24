@@ -8,6 +8,7 @@ import { deviceToolMutations } from "../../src/server/deviceMutationAdapters";
 import { displayConfigSchema } from "../../src/server/displayConfigTool";
 import { ACCESSIBILITY_DISPLAY_FIELDS } from "../../src/features/utility/AccessibilityDisplayPreferences";
 import { DEVICE_SETTING_KEYS } from "../../src/models/DeviceSettingDefaults";
+import { RENDER_OVERLAYS } from "../../src/utils/ios-cmdline-tools/SimulatorRenderOverlays";
 
 /** A sample argument and the journal key it must record, per platform (null: not journaled there). */
 const SETTING_FIELDS: Readonly<
@@ -29,6 +30,15 @@ const SETTING_FIELDS: Readonly<
   magnification: { arg: true, android: "magnification", ios: "magnification" },
   magnificationScale: { arg: 3, android: "magnificationScale", ios: "magnificationScale" },
   extraDim: { arg: true, android: "extraDim", ios: "extraDim" },
+  // Simulator render overlays (#19016): one row per named overlay; Android refuses them.
+  renderOverlays: {
+    arg: { blendedLayers: true },
+    android: null,
+    ios: "renderOverlay:blendedLayers",
+  },
+  // iOS Simulator only (#19018); Android refuses them before any device call.
+  dynamicIsland: { arg: "hidden", android: null, ios: "dynamicIsland" },
+  backlight: { arg: false, android: null, ios: "backlight" },
 };
 
 /** Schema fields that select a device or modify the call rather than a display setting. */
@@ -42,8 +52,11 @@ const NON_SETTING_FIELDS = [
   "deviceId",
 ];
 
+/** iOS keys are for a Simulator target, where every display field (and overlay) applies. */
 function keysFor(args: Record<string, unknown>, platform: "android" | "ios"): string[] {
-  return deviceToolMutations("displayConfig", args, platform).map((entry) => entry.key);
+  return deviceToolMutations("displayConfig", args, platform, { iosSimulator: true }).map(
+    (entry) => entry.key,
+  );
 }
 
 describe("displayConfig mutation journaling covers every field (#14790)", () => {
@@ -68,7 +81,9 @@ describe("displayConfig mutation journaling covers every field (#14790)", () => 
         expect(keysFor({ [field]: expected.arg }, platform)).toEqual(key === null ? [] : [key]);
         if (key !== null) {
           expect(
-            deviceToolMutations("displayConfig", { [field]: expected.arg }, platform)[0],
+            deviceToolMutations("displayConfig", { [field]: expected.arg }, platform, {
+              iosSimulator: true,
+            })[0],
           ).toEqual({
             kind: "device-setting",
             key,
@@ -95,7 +110,47 @@ describe("displayConfig mutation journaling covers every field (#14790)", () => 
       "density",
       "nightMode",
     ]);
-    expect(keysFor({ reset: true }, "ios")).toEqual(["contentSize", "nightMode"]);
+    // An iOS reset can also show the island, relight the display (#19018) and turn overlays off.
+    expect(keysFor({ reset: true }, "ios")).toEqual([
+      "contentSize",
+      "nightMode",
+      "dynamicIsland",
+      "backlight",
+      ...RENDER_OVERLAYS.map((overlay) => `renderOverlay:${overlay}`),
+    ]);
+    expect(keysFor({ reset: "factory" }, "ios")).toEqual([
+      "dynamicIsland",
+      "backlight",
+      ...RENDER_OVERLAYS.map((overlay) => `renderOverlay:${overlay}`),
+    ]);
+  });
+
+  test("overlay rows are journaled only for an iOS Simulator target (#19016)", () => {
+    const overlayKeys = (target: { iosSimulator?: boolean }, args: Record<string, unknown>) =>
+      deviceToolMutations("displayConfig", args, "ios", target)
+        .map((entry) => entry.key)
+        .filter((key) => key.startsWith("renderOverlay:"));
+    // A physical-device reset must not gain unobservable overlay rows that block its revert.
+    expect(overlayKeys({ iosSimulator: false }, { reset: true })).toEqual([]);
+    expect(overlayKeys({}, { reset: true })).toEqual([]);
+    expect(overlayKeys({ iosSimulator: true }, { reset: true })).toHaveLength(
+      RENDER_OVERLAYS.length,
+    );
+    // A Simulator call naming only overlays is a mutation, not a read.
+    expect(
+      deviceToolMutations("displayConfig", { renderOverlays: { blendedLayers: false } }, "ios", {
+        iosSimulator: true,
+      }),
+    ).toEqual([{ kind: "device-setting", key: "renderOverlay:blendedLayers" }]);
+  });
+
+  test("render overlays record one row per overlay named, on or off (#19016)", () => {
+    expect(
+      keysFor({ renderOverlays: { offscreenRendered: false, blendedLayers: true } }, "ios"),
+    ).toEqual(["renderOverlay:blendedLayers", "renderOverlay:offscreenRendered"]);
+    expect(keysFor({ reset: "factory" }, "ios")).toEqual(
+      expect.arrayContaining(RENDER_OVERLAYS.map((overlay) => `renderOverlay:${overlay}`)),
+    );
   });
 
   test("several geometry fields record the opaque intent once", () => {

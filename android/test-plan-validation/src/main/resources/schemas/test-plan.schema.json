@@ -809,6 +809,9 @@
                 "required": ["power"]
               },
               {
+                "required": ["keyboard"]
+              },
+              {
                 "required": ["deviceCondition"]
               },
               {
@@ -1909,6 +1912,19 @@
             }
           ]
         },
+        "keyboard": {
+          "description": "iOS Simulator hardware keyboard (connect or disconnect, with its layout) and keyboard language.",
+          "type": "object",
+          "properties": {
+            "hardwareKeyboard": { "type": "boolean" },
+            "hardwareLayout": { "type": "string", "enum": ["ansi", "iso", "jis"] },
+            "language": {
+              "type": "string",
+              "pattern": "^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$"
+            }
+          },
+          "additionalProperties": false
+        },
         "deviceCondition": {
           "description": "Session-scoped root/integrity/fault test fixtures (behind the 'device-condition' feature flag). Sent in its own setDeviceState call.",
           "type": "object",
@@ -2539,6 +2555,9 @@
           "required": ["power"]
         },
         {
+          "required": ["keyboard"]
+        },
+        {
           "required": ["deviceCondition"]
         }
       ],
@@ -2617,11 +2636,13 @@
         "downloadKbps": {
           "type": "number",
           "minimum": 0,
+          "maximum": 100000000,
           "description": "Override download cap in kbps (0 = unlimited)"
         },
         "uploadKbps": {
           "type": "number",
           "minimum": 0,
+          "maximum": 100000000,
           "description": "Override upload cap in kbps (0 = unlimited)"
         },
         "packetLossPercent": {

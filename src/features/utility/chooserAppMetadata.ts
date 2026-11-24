@@ -127,3 +127,22 @@ function parseQueryActivity(
   const label = resolveInfoLabel.kind !== "none" ? resolveInfoLabel : activityLabel;
   return { packageName, label };
 }
+
+/** Framework-owned chooser widgets do not identify the app represented by the row. */
+export function chooserRowPackages(
+  properties: { package?: unknown; packageName?: unknown; "resource-id"?: unknown },
+  hostPackage?: string,
+): string[] {
+  const id = properties["resource-id"];
+  const separator = typeof id === "string" ? id.indexOf(":id/") : -1;
+  const namespace = typeof id === "string" && separator > 0 ? id.slice(0, separator) : undefined;
+  return [properties.package, properties.packageName, namespace].filter(
+    (value): value is string =>
+      typeof value === "string" &&
+      value.length > 0 &&
+      value !== hostPackage &&
+      value !== "android" &&
+      value !== "com.android.intentresolver" &&
+      value !== "com.android.systemui",
+  );
+}

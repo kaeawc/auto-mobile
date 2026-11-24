@@ -492,6 +492,35 @@
       ]
     },
     {
+      "serialName": "queue_prototype_call_outcome",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "call",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "outcome",
+          "type": "json",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "remove_ca_cert",
       "fields": [
         {
@@ -4004,6 +4033,12 @@
         {
           "name": "status",
           "type": "json",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "platformRuntime",
+          "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformReport",
           "nullable": true,
           "hasDefault": true
         }
@@ -8858,6 +8893,12 @@
         "type": "string",
         "nullable": true,
         "hasDefault": true
+      },
+      {
+        "name": "equalsKey",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeContainer": [
@@ -9368,26 +9409,64 @@
         "hasDefault": false
       }
     ],
-    "dev.jasonpearson.automobile.protocol.PrototypePermissionRequirement": [
-      {
-        "name": "name",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
-      },
-      {
-        "name": "purpose",
-        "type": "string",
-        "nullable": false,
-        "hasDefault": false
-      }
-    ],
     "dev.jasonpearson.automobile.protocol.PrototypePlatformHandlers": [
       {
         "name": "on",
         "type": "map",
         "nullable": false,
         "hasDefault": false
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypePlatformReport": [
+      {
+        "name": "runtime",
+        "type": "enum",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "modules",
+        "type": "map",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "appState",
+        "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "permissions",
+        "type": "map",
+        "nullable": true,
+        "hasDefault": true
+      }
+    ],
+    "dev.jasonpearson.automobile.protocol.PrototypePlatformReport.Module": [
+      {
+        "name": "availability",
+        "type": "enum",
+        "nullable": false,
+        "hasDefault": false
+      },
+      {
+        "name": "mode",
+        "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "reason",
+        "type": "enum",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "inFlight",
+        "type": "int",
+        "nullable": true,
+        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypePress": [
@@ -9450,26 +9529,6 @@
         "type": "string",
         "nullable": false,
         "hasDefault": false
-      }
-    ],
-    "dev.jasonpearson.automobile.protocol.PrototypeRequires": [
-      {
-        "name": "platform",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "permissions",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
-      },
-      {
-        "name": "background",
-        "type": "list",
-        "nullable": true,
-        "hasDefault": true
       }
     ],
     "dev.jasonpearson.automobile.protocol.PrototypeRoute": [
@@ -9821,7 +9880,7 @@
       },
       {
         "name": "requires",
-        "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRequires",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       },
@@ -9875,6 +9934,12 @@
       },
       {
         "name": "strings",
+        "type": "json",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "links",
         "type": "json",
         "nullable": true,
         "hasDefault": true
@@ -10310,6 +10375,12 @@
       {
         "name": "statusBar",
         "type": "string",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "platformRuntime",
+        "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformReport",
         "nullable": true,
         "hasDefault": true
       },

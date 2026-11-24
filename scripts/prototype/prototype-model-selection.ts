@@ -134,7 +134,9 @@ export const prototypeModelSelection = {
   platformRequires: {
     languages: ["kotlin"],
     kotlinName: "PrototypeRequires",
-    doc: "The root `requires` block (#14294): platform modules, permissions and background needs.",
+    // An empty list means "none declared"; PrototypeRequiresSerializer omits it on encode.
+    fieldDefaults: { capabilities: { kotlin: "emptyList()" } },
+    doc: "The root `requires` block (#14294): platform modules, permissions, background needs and explicit\ncapabilities.",
   },
   platformPermission: {
     languages: ["kotlin"],

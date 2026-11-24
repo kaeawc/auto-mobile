@@ -8,7 +8,7 @@ rows also force fallback unless baseline cleaning already restores their effects
 On Android this covers:
 
 - packages, clipboard, rotation, screen reader and keep-awake;
-- raw global/system/secure settings and verified display rows (`density`, `nightMode` and `display:*`);
+- raw global/system/secure settings and verified display rows (`density`, `nightMode` and `display:*`); Android before 8 (API 26) has no `cmd uimode night`, so its baseline, cleaning and revert skip night mode;
 - opened URLs and launched preinstalled apps (below);
 - screen state via the next `wakeAndUnlock`.
 
@@ -179,6 +179,10 @@ unknown settings have no sanitize coverage. Sanitize covers `shared-file` (`putA
 writes into apps absent from a complete baseline installed-app inventory
 by uninstalling those apps and removing their private data. Other shared-file
 rows still force erase.
+
+Simulator render overlay rows (`renderOverlay:<name>`) revert through CoreSimulator to their
+boolean prior; an unreadable prior forces erase. See
+[iOS Simulator render overlays](plat/ios/simulator-render-overlays.md).
 
 The `opened-url` (`openLink`) row also forces erase: it names no app,
 and simctl listapps provides no URL-scheme handler ownership proof. So do the

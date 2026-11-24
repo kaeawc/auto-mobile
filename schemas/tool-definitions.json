@@ -1940,7 +1940,7 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Record up to 20 s of an Android emulator's or iOS Simulator's audio output and report its level: rmsDbfs, peakDbfs, the share of 20 ms windows with sound (activeRatio), and silent. A guest that plays nothing returns silent: true rather than an error. saveArtifact writes a WAV and returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts can glitch real-time audio. A simulator is read from the host's loopback default output, which mixes every simulator on the host. Physical devices are refused.",
+    "description": "Record up to 20 s of an Android emulator's or iOS Simulator's audio output and report its level: rmsDbfs, peakDbfs, the share of 20 ms windows with sound (activeRatio), and silent. A guest that plays nothing returns silent: true rather than an error. saveArtifact writes a WAV and returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts can glitch real-time audio. A simulator is recorded with a Core Audio process tap of its own processes (route process-tap), so other simulators and host apps are not heard; no loopback device is needed. Only that route isolates the simulator. If the helper lacks tap support or the simulator's launchd_sim process is not found, capture falls back to the host's loopback default output (route host-loopback), which mixes every simulator and host app. Check route. Physical devices are refused.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -2014,7 +2014,7 @@
         },
         "route": {
           "type": "string",
-          "enum": ["emulator-grpc", "host-loopback"]
+          "enum": ["emulator-grpc", "host-loopback", "process-tap"]
         },
         "path": {
           "type": "string"
@@ -3417,7 +3417,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed. reset: \"factory\" additionally forces platform defaults (light theme, iOS content size large, accessibility display preferences off) regardless of recorded baselines, including after a daemon restart.",
+    "description": "Read or set the visual display configuration — font/text scale, effective display density, light/dark (night mode) theme, and on Android the runtime screen size, navigation mode (gesture / 3-button / 2-button) and display-cutout emulation — for adaptive-layout, edge-to-edge and large-font accessibility testing. A call with no set field reads current values; providing fontScale, density, theme, size, navigationMode, displayCutout, or reset applies the change and returns applied + previous values so the client can restore. Android supports all three fields (density overrides are best-effort on physical devices); iOS supports theme (the Simulator via `simctl ui appearance`, physical devices through the CtrlProxy runner) and, on the Simulator only, font scale as a Dynamic Type category (via `simctl ui content_size`; fontScale maps to the nearest category and contentSize selects one exactly; reads report both). Android size, navigationMode and displayCutout use `wm size` and the system image's overlays; values the image does not ship are refused and `available` lists the ones it has; size, overlay and density changes invalidate cached observations and coordinates. On Android, reset restores font scale, density and screen size to device defaults, navigation mode and display cutout to the values recorded before they were first changed, and night mode only to the value displayConfig replaced earlier in this process; otherwise night mode is left unchanged. Releasing or rebinding the session that changed size, navigationMode or displayCutout restores them through the same record as displayProfile; sessionless changes persist until reset. Android reset never forces light mode. On the iOS Simulator, dynamicIsland hides or shows the Dynamic Island and backlight turns the display off or on. iOS Simulator reset restores light appearance and the content size category displayConfig replaced earlier in this process, shows a hidden Dynamic Island and turns an off display on; physical iOS reset restores the appearance displayConfig first replaced there (light if none). The accessibility display preferences increaseContrast, reduceMotion and boldText are read and set on Android and the iOS Simulator, and colorInversion, colorCorrection, magnification, magnificationScale and extraDim (API 31+) on Android; `supported` reports each as true (proven by read-back), partial (stored setting reads back but running apps must relaunch; reason in supportNotes) or false, and reset restores the ones displayConfig changed. reset: \"factory\" additionally forces platform defaults (light theme, iOS content size large, accessibility display preferences off) regardless of recorded baselines, including after a daemon restart. On the iOS Simulator, renderOverlays turns Core Animation render overlays (blendedLayers, offscreenRendered, misalignedImages, copiedImages, cacheHits, flashUpdatedRegions) on or off; reads report every overlay, reset turns them all off, and a session's keep-booted reset restores the state it found.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -3548,8 +3548,49 @@
           "description": "Android API 31+: Extra dim (secure reduce_bright_colors_activated).",
           "type": "boolean"
         },
+        "renderOverlays": {
+          "description": "iOS Simulator only: Core Animation render overlays, the Simulator Debug menu's color tints for rendering cost, on (true) or off (false). They tint every app on screen until turned off; screenshots show them. reset turns all of them off. Omit to leave unchanged.",
+          "type": "object",
+          "properties": {
+            "blendedLayers": {
+              "description": "Color blended layers: green opaque, red blended.",
+              "type": "boolean"
+            },
+            "offscreenRendered": {
+              "description": "Color off-screen rendered layers yellow.",
+              "type": "boolean"
+            },
+            "misalignedImages": {
+              "description": "Color misaligned images magenta, scaled images yellow.",
+              "type": "boolean"
+            },
+            "copiedImages": {
+              "description": "Color images Core Animation had to copy cyan.",
+              "type": "boolean"
+            },
+            "cacheHits": {
+              "description": "Color rasterized layer cache hits green, misses red.",
+              "type": "boolean"
+            },
+            "flashUpdatedRegions": {
+              "description": "Flash regions as they redraw (yellow).",
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        },
+        "dynamicIsland": {
+          "description": "iOS Simulator: hide or show the Dynamic Island in screen recordings and the Simulator window (screenshots never include it). Only device types with a Dynamic Island change. Omit to leave unchanged.",
+          "type": "string",
+          "enum": ["hidden", "visible"]
+        },
+        "backlight": {
+          "description": "iOS Simulator: false turns the display off (the Lock Screen, always-on where the device type has it); true turns it back on at the Lock Screen. Omit to leave unchanged.",
+          "type": "boolean"
+        },
         "reset": {
-          "description": "Pass \"factory\" to restore platform defaults no matter which baselines were recorded, including after a daemon restart or for changes made outside a session: light theme, iOS content size large, accessibility display preferences off, font scale 1.0, density and size defaults. Pass true for the baseline-only reset described next. On Android, restore font scale, density and screen size to device defaults, and navigation mode and display cutout to the values recorded before they were first changed. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
+          "description": "Pass \"factory\" to restore platform defaults no matter which baselines were recorded, including after a daemon restart or for changes made outside a session: light theme, iOS content size large, accessibility display preferences off, font scale 1.0, density and size defaults. Pass true for the baseline-only reset described next. On Android, restore font scale, density and screen size to device defaults, and navigation mode and display cutout to the values recorded before they were first changed. Restore night mode only to the value displayConfig replaced earlier in this process; otherwise leave it unchanged. Android reset never forces light mode. On the iOS Simulator, reset restores light appearance and the content size category displayConfig replaced earlier in this process, shows a hidden Dynamic Island, and turns an off display back on. On both, restore each accessibility display preference that displayConfig changed earlier in this process.",
           "anyOf": [
             {
               "type": "boolean"
@@ -3647,6 +3688,15 @@
             },
             "extraDim": {
               "$ref": "#/$defs/__schema0"
+            },
+            "renderOverlays": {
+              "type": "boolean"
+            },
+            "dynamicIsland": {
+              "type": "boolean"
+            },
+            "backlight": {
+              "type": "boolean"
             }
           },
           "required": ["fontScale", "density", "theme"],
@@ -3812,6 +3862,22 @@
             },
             "extraDim": {
               "type": "boolean"
+            },
+            "renderOverlays": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "boolean"
+              }
+            },
+            "dynamicIsland": {
+              "type": "string",
+              "enum": ["hidden", "visible"]
+            },
+            "backlight": {
+              "type": "boolean"
             }
           },
           "additionalProperties": {}
@@ -3837,7 +3903,10 @@
             "colorCorrection",
             "magnification",
             "magnificationScale",
-            "extraDim"
+            "extraDim",
+            "renderOverlays",
+            "dynamicIsland",
+            "backlight"
           ]
         }
       ],
@@ -10259,6 +10328,7 @@
               "setSensor",
               "setUIState",
               "shake",
+              "shareSheet",
               "siri",
               "snapshotOf",
               "sqlQuery",
@@ -10277,7 +10347,8 @@
               "videoRecording",
               "wakeAndUnlock",
               "wearSurface",
-              "windowMode"
+              "windowMode",
+              "xrHeadsetInput"
             ]
           }
         }
@@ -10432,6 +10503,7 @@
               "setSensor",
               "setUIState",
               "shake",
+              "shareSheet",
               "siri",
               "snapshotOf",
               "sqlQuery",
@@ -10450,7 +10522,8 @@
               "videoRecording",
               "wakeAndUnlock",
               "wearSurface",
-              "windowMode"
+              "windowMode",
+              "xrHeadsetInput"
             ]
           }
         }
@@ -10860,13 +10933,13 @@
     "annotations": {
       "readOnlyHint": true
     },
-    "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the per-app offline rules the network filter enforces, with revision and lease), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. On a multi-panel device, displays lists the panels and supported postures; on an Android foldable displays.current adds the live posture (from the committed device_state) and activePanel (key and role of the panel behind the default display), so a setPosture or fold shows up in the next read. displays.current.postureSource says where posture came from: device_state (Android committed posture), inferred_from_active_panel, or requested_hinge_angle, and is omitted when the Android posture read fails (posture unknown). On iPhone Duo, displays.current reports the active panel read live through devicectl: cover is closed; inner is half_opened (postureSource requested_hinge_angle) when the last angle setPosture applied lies strictly between 0 and 180 degrees, otherwise opened (inferred_from_active_panel). A named setPosture posture also sets that angle (closed 0, half_opened 130, opened 180). The hinge is never read; requestedHingeAngle echoes the last request. It is omitted when the active panel cannot be determined. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
+    "description": "Read device-level state including clock (Android epoch-second instant and automaticTime, readable without root; unsupported on iOS), Do Not Disturb, the connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), iOS Simulator biometric enrollment, network condition (device-wide on Android; on an iOS Simulator the device-wide socket shaper's profile once AutoMobile shaped it, otherwise the per-app offline rules the network filter enforces, with revision and lease), iOS Simulator network activity (networkActivity: every simulator process with internet sockets or traffic, its pid, name, appId when the executable is inside an installed app's bundle, its sockets as protocol, local, remote and TCP state, and bytesIn/bytesOut counted on the sockets open at read time, so connections that already closed are not in the totals; read from host ps, lsof and nettop with no network extension), and Android emulator virtual sensor values (sensors: acceleration, gyroscope, magnetic-field, orientation, temperature, proximity, light, pressure, humidity via `emu sensor get`, with unavailable listing sensors the AVD refuses; change them with setSensor). Use it as the idempotency oracle before flipping a toggle — a bare call returns doNotDisturb + connectivity, so you can check whether Airplane mode is already on instead of inferring it from the status bar. Each connectivity field is true/false, or omitted when the device could not answer (the key is absent on this API level, or the value did not parse) — omitted never means off. Android only: iOS reports connectivity unsupported, because Airplane mode / Wi-Fi / Bluetooth / Location have no simctl or devicectl read verb and a simulator shares the host's network stack. screenLock (Android) reports the lock credential type (none, pin, password, pattern, or unknown) and whether it is secure, never the credential. On a multi-panel device, displays lists the panels and supported postures; on an Android foldable displays.current adds the live posture (from the committed device_state) and activePanel (key and role of the panel behind the default display), so a setPosture or fold shows up in the next read. displays.current.postureSource says where posture came from: device_state (Android committed posture), inferred_from_active_panel, or requested_hinge_angle, and is omitted when the Android posture read fails (posture unknown). On iPhone Duo, displays.current reports the active panel read live through devicectl: cover is closed; inner is half_opened (postureSource requested_hinge_angle) when the last angle setPosture applied lies strictly between 0 and 180 degrees, otherwise opened (inferred_from_active_panel). A named setPosture posture also sets that angle (closed 0, half_opened 130, opened 180). The hinge is never read; requestedHingeAngle echoes the last request. It is omitted when the active panel cannot be determined. Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "include": {
-          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, networkCondition, clock, sensors (Android emulator only), screenLock, and power (Android: battery, saver, Doze, data saver, thermal status, tracked app standby buckets). Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
+          "description": "State fields to read; supports doNotDisturb, connectivity, biometrics, networkCondition, clock, sensors (Android emulator only), screenLock, power (Android: battery, saver, Doze, data saver, thermal status, tracked app standby buckets), and networkActivity (iOS Simulator: each process's open sockets and bytes, with appId). Defaults to doNotDisturb + connectivity, so a bare call answers whether Airplane mode / Wi-Fi / Bluetooth / Location are already on.",
           "minItems": 1,
           "type": "array",
           "items": {
@@ -10879,7 +10952,8 @@
               "clock",
               "sensors",
               "screenLock",
-              "power"
+              "power",
+              "networkActivity"
             ]
           }
         },
@@ -11011,7 +11085,8 @@
               "clock",
               "sensors",
               "screenLock",
-              "power"
+              "power",
+              "networkActivity"
             ]
           }
         },
@@ -11206,7 +11281,13 @@
             },
             "backend": {
               "type": "string",
-              "const": "network-extension"
+              "enum": ["network-extension", "socket-shaper"]
+            },
+            "rebooted": {
+              "type": "boolean"
+            },
+            "offline": {
+              "type": "boolean"
             },
             "controller": {
               "type": "object",
@@ -11346,6 +11427,9 @@
               "enum": ["image", "qr", "clear"]
             },
             "relaunchRequired": {
+              "type": "boolean"
+            },
+            "deviceWide": {
               "type": "boolean"
             },
             "surface": {
@@ -11637,6 +11721,122 @@
             },
             "errorCode": {
               "type": "string"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "keyboard": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "verified": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "method": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "hardwareKeyboard": {
+              "type": "boolean"
+            },
+            "hardwareLayout": {
+              "type": "string",
+              "enum": ["ansi", "iso", "jis"]
+            },
+            "language": {
+              "type": "string"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "networkActivity": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "verified": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "method": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "processCount": {
+              "type": "number"
+            },
+            "activeProcessCount": {
+              "type": "number"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "processes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pid": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "appId": {
+                    "type": "string"
+                  },
+                  "sockets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "protocol": {
+                          "type": "string"
+                        },
+                        "local": {
+                          "type": "string"
+                        },
+                        "remote": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["protocol", "local"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "bytesIn": {
+                    "type": "number"
+                  },
+                  "bytesOut": {
+                    "type": "number"
+                  }
+                },
+                "required": ["pid", "name", "sockets", "bytesIn", "bytesOut"],
+                "additionalProperties": false
+              }
             }
           },
           "required": ["supported"],
@@ -32833,7 +33033,17 @@
               "type": "object"
             },
             "requires": {
-              "type": "object"
+              "anyOf": [
+                {
+                  "type": "object"
+                },
+                {
+                  "type": "array"
+                }
+              ]
+            },
+            "links": {
+              "type": "array"
             },
             "platform": {
               "type": "object"
@@ -32959,10 +33169,60 @@
           "maximum": 3600000
         },
         "event": {
-          "description": "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require Android prototype_platform_simulation_v1 and a module that supports simulation",
+          "description": "simulate only: deliver this platform event instead of advancing the clock; notifications.push sends a simulated server push, media.statusChanged|ended|error drives a media player; other known module events require prototype_platform_simulation_v1 and a module that supports simulation",
           "type": "string",
           "minLength": 1,
           "maxLength": 128
+        },
+        "call": {
+          "description": "simulate only: queue an outcome for this known platform call, for example test.echo; requires prototype_platform_outcomes_v1",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "outcome": {
+          "description": "simulate call only: exactly one result (any JSON value) or error; at most 4096 UTF-8 bytes total",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "result": {}
+              },
+              "required": ["result"],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "unsupported",
+                        "unavailable",
+                        "permission_denied",
+                        "invalid_args",
+                        "cancelled",
+                        "timeout",
+                        "too_many_in_flight",
+                        "platform_error"
+                      ]
+                    },
+                    "message": {
+                      "type": "string",
+                      "maxLength": 200
+                    }
+                  },
+                  "required": ["code"],
+                  "additionalProperties": false
+                }
+              },
+              "required": ["error"],
+              "additionalProperties": false
+            }
+          ]
         },
         "data": {
           "description": "simulate event only: other module events take their event data schema where defined, otherwise any JSON object, within the 4096-byte delivered emit budget; notifications.push takes the push payload {type, data?, notification?: {title, body?, channel?, group?, badge?}}, at most 4096 bytes of compact JSON; media.* takes {player, status? (buffering|ready|ended|error), code? (for error), advanceMs? (fake engine only: advance its clock first)}",
@@ -32982,7 +33242,7 @@
           "enum": ["auto", "connection", "system"]
         },
         "id": {
-          "description": "Prototype id required for dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
+          "description": "Prototype id required for simulate, dismiss (unless all: true), awaitEvent, deleteSaved and clearStorage; optional for status and inspect only to select an Android disposable app by its installed spec id; for open, the ProtoViewer library id (viewer.libraryId) a save returned",
           "type": "string",
           "minLength": 1
         },
@@ -33164,12 +33424,14 @@
           "minLength": 1
         },
         "kind": {
-          "description": "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth, params?}; params are the top entry's route params, present only when it has any) is sent only when the top screen, depth or top params change. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several. A finished request action arrives as kind emit with eventName prototype_request",
+          "description": "awaitEvent only: filter event kind. screen_changed (name = stack id, payload {screen, depth, params?}; params are the top entry's route params, present only when it has any) is sent only when the top screen, depth or top params change. page_changed (name = pager id, payload = the new zero-based page index) is sent when a pager settles on another page. link_opened (name null, payload {url,entry}) precedes matched inbound-link actions; link_unmatched (name null, payload {url}) runs no actions. appearance_changed (name null, payload {mode, source}) is sent once whenever the shown prototype's resolved light/dark mode changes, by a device advertising prototype_appearance_v1. Input and state changes (text input, toggles, sliders etc.) arrive as kind emit with eventName change (there is no separate change kind), with payload {key,value} for one changed key or {keys,values} for several. A finished request action arrives as kind emit with eventName prototype_request",
           "type": "string",
           "enum": [
             "emit",
             "page_changed",
             "screen_changed",
+            "link_opened",
+            "link_unmatched",
             "dismissed",
             "appearance_changed",
             "change",
@@ -34101,22 +34363,89 @@
           "required": ["lastAction", "success", "timestamp"],
           "additionalProperties": false
         },
+        "platformRuntime": {
+          "description": "inspect: the runtime and its registered modules; status: the host mirror from the last show or inspect, updated by platform call events. Unknown details are omitted",
+          "type": "object",
+          "properties": {
+            "runtime": {
+              "type": "string",
+              "enum": [
+                "ctrlproxy",
+                "iosAgent",
+                "iosViewer",
+                "disposableApp",
+                "protoviewer",
+                "embedded"
+              ]
+            },
+            "appState": {
+              "type": "string"
+            },
+            "modules": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "object",
+                "properties": {
+                  "availability": {
+                    "type": "string",
+                    "enum": ["ready", "degraded", "unavailable"]
+                  },
+                  "mode": {
+                    "type": "string",
+                    "enum": ["real", "fake", "simulated"]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "permission_denied",
+                      "hardware_unavailable",
+                      "play_services_missing",
+                      "simulator",
+                      "fake_mode"
+                    ]
+                  },
+                  "inFlight": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": ["availability"],
+                "additionalProperties": false
+              }
+            },
+            "permissions": {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": ["runtime", "modules"],
+          "additionalProperties": false
+        },
         "platformStatus": {
           "description": "status and inspect: the last battery, power and audio values the device delivered through <module>.changed, and the accuracy of the last location.updated; a module is absent until its first event",
           "type": "object",
           "properties": {
             "battery": {
-              "$ref": "#/$defs/__schema99"
+              "$ref": "#/$defs/__schema100"
             },
             "power": {
-              "$ref": "#/$defs/__schema99"
+              "$ref": "#/$defs/__schema100"
             },
             "audio": {
-              "$ref": "#/$defs/__schema99"
+              "$ref": "#/$defs/__schema100"
             },
             "location": {
               "description": "The last location.updated as {accuracyM, approximate} only: a fix is present and how accurate it is, never its coordinates",
-              "$ref": "#/$defs/__schema99"
+              "$ref": "#/$defs/__schema100"
             }
           },
           "additionalProperties": false
@@ -34131,7 +34460,7 @@
           "const": "automotive"
         },
         "platformNotes": {
-          "description": "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored or substituted; paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
+          "description": "Successful show on either platform (legacy renderer differences apply to iOS only): strings.fallback applies to all platforms, lists locale and up to 20 referenced keys falling through to default (values), with paths strings.default.<key>; other notes describe platform differences: platform and construct identify the difference; effect says ignored, substituted or simulated; platform.<module> notes describe reported availability reasons and carry empty paths; other paths list affected fields in the component-expanded, anchor-resolved device spec in tree order, capped at 20, including bottomSheet.dismissOnSwipe when absent and defaulted; total is the full count only when capped; values are distinct sorted placeholder icon names for icon.name; detail explains iOS and Android behavior. Absent when nothing applies or the show failed.",
           "type": "array",
           "items": {
             "type": "object",
@@ -34141,35 +34470,43 @@
                 "enum": ["android", "ios", "all"]
               },
               "construct": {
-                "type": "string",
-                "enum": [
-                  "stack",
-                  "stack.zoom",
-                  "carousel",
-                  "node.id",
-                  "bottomSheet.dismissOnSwipe",
-                  "bottomSheet.detents",
-                  "icon.effect",
-                  "icon.name",
-                  "icon.variant",
-                  "textField.variant",
-                  "textField.label",
-                  "node.gestures",
-                  "searchBar",
-                  "searchBar.icons",
-                  "rich-text-links",
-                  "strings.fallback",
-                  "design.fallback",
-                  "platformNamespace",
-                  "scroll.edgeEffect",
-                  "adaptive",
-                  "menu",
-                  "select"
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^platform\\.[\\s\\S]{1,}$"
+                  },
+                  {
+                    "type": "string",
+                    "enum": [
+                      "stack",
+                      "stack.zoom",
+                      "carousel",
+                      "node.id",
+                      "bottomSheet.dismissOnSwipe",
+                      "bottomSheet.detents",
+                      "icon.effect",
+                      "icon.name",
+                      "icon.variant",
+                      "textField.variant",
+                      "textField.label",
+                      "node.gestures",
+                      "searchBar",
+                      "searchBar.icons",
+                      "rich-text-links",
+                      "strings.fallback",
+                      "design.fallback",
+                      "platformNamespace",
+                      "scroll.edgeEffect",
+                      "adaptive",
+                      "menu",
+                      "select"
+                    ]
+                  }
                 ]
               },
               "effect": {
                 "type": "string",
-                "enum": ["ignored", "substituted"]
+                "enum": ["ignored", "substituted", "simulated"]
               },
               "paths": {
                 "maxItems": 20,
@@ -34289,6 +34626,8 @@
                 "emit",
                 "page_changed",
                 "screen_changed",
+                "link_opened",
+                "link_unmatched",
                 "dismissed",
                 "appearance_changed",
                 "change",
@@ -34306,7 +34645,7 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema110"
+              "$ref": "#/$defs/__schema111"
             },
             "context": {
               "$ref": "#/$defs/__schema92"
@@ -35226,7 +35565,7 @@
           "type": "boolean",
           "const": true
         },
-        "__schema99": {
+        "__schema100": {
           "type": "object",
           "properties": {
             "values": {
@@ -35263,7 +35602,7 @@
           "required": ["values", "timestamp", "receivedAt"],
           "additionalProperties": false
         },
-        "__schema110": {
+        "__schema111": {
           "anyOf": [
             {
               "type": "string"
@@ -35280,7 +35619,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema110"
+                "$ref": "#/$defs/__schema111"
               }
             },
             {
@@ -35289,7 +35628,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema110"
+                "$ref": "#/$defs/__schema111"
               }
             }
           ]
@@ -36080,6 +36419,7 @@
               "setSensor",
               "setUIState",
               "shake",
+              "shareSheet",
               "siri",
               "snapshotOf",
               "sqlQuery",
@@ -36098,7 +36438,8 @@
               "videoRecording",
               "wakeAndUnlock",
               "wearSurface",
-              "windowMode"
+              "windowMode",
+              "xrHeadsetInput"
             ]
           }
         },
@@ -47053,7 +47394,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator, iOS Simulator, or physical iOS device (through the CtrlProxy runner), iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS clears it (`simctl location clear` on a Simulator, the runner on a physical device); failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, physical iOS and physical Android return unsupported. On iOS Simulator it records the poster for the next launchApp cold launch of each app, returns relaunchRequired: true, and ignores surface; running apps must be relaunched, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition is per-app only: profile offline or none with appId, within a session, refuses the app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. screenLock (Android) sets a PIN, password, or pattern with locksettings, or clears one (type none plus currentCredential); a session's own credential is cleared on its release (a failed clear is reported in the release result as screenLockRestore), an existing credential the session did not set is refused with errorCode lock_credential_preexisting, and the result reports only the type and outcome (for example set: true). The credential is redacted from logs, telemetry, and recorded plans; it is in the device's process list while locksettings runs. power (Android) fakes battery level/charger, battery saver, light or deep Doze (the tool unplugs the battery and turns the screen off first and reports those preconditions), app standby buckets and inactive state, Data Saver and thermal status, and returns a restoreReceipt of the values it replaced; a session restores them on release in reverse order and reports failures as powerRestore in the release result. Battery, Doze and thermal faking is refused on physical devices (power_physical_device_refused). Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
+    "description": "Set device state such as Do Not Disturb, Android connectivity toggles (airplaneMode, wifiEnabled, bluetoothEnabled, locationEnabled), static location or background route playback on an Android emulator, iOS Simulator, or physical iOS device (through the CtrlProxy runner), iOS Simulator biometric enrollment, and device-wide network condition. A static fix, replacement route, or stop cancels the active route. The location result may include previousRoute with endedReason and lastError; stop also reports whether a route was active. On release or rebind of a session that set a location, iOS clears it (`simctl location clear` on a Simulator, the runner on a physical device); failed clears are retried and quarantine the device until success or removal. Android emulator fixes persist after the session because the emulator console has no unset command; reset the fix explicitly if needed. Direct-mode (sessionless) calls are unchanged; an existing session marker on the device also clears later sessionless fixes on release. cameraPoster sets or clears a virtual-scene back-camera poster (image path or generated QR, wall or table surface) on a running Android emulator through the emulator console, without a restart; it persists until cleared or the AVD is cold-booted, physical iOS and physical Android return unsupported. On iOS Simulator it records the poster for the next launchApp cold launch of each app, returns relaunchRequired: true, and ignores surface; running apps must be relaunched, a console refusal (for example an AVD whose back camera is not virtualscene) is returned as an error, and the default camera pose may not face the poster. Connectivity values are desired end states and are verified by a fresh Android read; iOS connectivity writes are unsupported. Degraded network profiles (offline/veryBad/2g/3g/4g) are best-effort cellular shaping on an Android emulator, reported `partial` (they may not affect Wi-Fi/app traffic); only reset to `none` is fully verified. A session always restores the network to a clean `none` state on release/rebind. On an iOS Simulator networkCondition without appId shapes the whole simulator (every profile and override, including packetLossPercent) through a socket shaper the simulator boots with: a degrade reboots the simulator whenever its current boot lacks the shaper (rebooted: true; relaunch the app), later changes apply live, and it needs no extension, root or MDM. With appId, profile offline or none within a session refuses that one app's new connections through the opt-in network-extension filter under a renewed 15s lease; release, rebind, expiry or a missed renewal removes it, and other sessions cannot clear it. screenLock (Android) sets a PIN, password, or pattern with locksettings, or clears one (type none plus currentCredential); a session's own credential is cleared on its release (a failed clear is reported in the release result as screenLockRestore), an existing credential the session did not set is refused with errorCode lock_credential_preexisting, and the result reports only the type and outcome (for example set: true). The credential is redacted from logs, telemetry, and recorded plans; it is in the device's process list while locksettings runs. power (Android) fakes battery level/charger, battery saver, light or deep Doze (the tool unplugs the battery and turns the screen off first and reports those preconditions), app standby buckets and inactive state, Data Saver and thermal status, and returns a restoreReceipt of the values it replaced; a session restores them on release in reverse order and reports failures as powerRestore in the release result. Battery, Doze and thermal faking is refused on physical devices (power_physical_device_refused). Clock control supports only rootable Android emulators; Play Store images, physical devices and iOS return unsupported. Set accepts ISO-8601 instants within 2000-01-01T00:00:00Z .. 2100-01-01T00:00:00Z (inclusive); cumulative advance must stay in that window. Commands have second-level precision; advance requires integer byMs >= 1000 (maximum 315360000000), uses device read-back time, and verifies movement with a 2000ms tolerance; set within tolerance reports outcome=unchanged. On session release/rebind/teardown/reset, AutoMobile explicitly restores HOST-derived real time plus the original auto_time, even if it was 1, and verifies both. Failed restore is retried and quarantines the device until success or removal. Clock control restarts adbd on the emulator; connections such as port forwards may be re-established. Restore unroots adbd if AutoMobile rooted it (bounded, best-effort). Hierarchy/observe caches and freshness baselines are invalidated on every clock change. The restore slot is in memory only: daemon restart loses it; reset is recovery to HOST time plus auto_time=1 on a rootable emulator. Without a slot, unsupported targets report unsupported/nothing to reset without clock mutations; with a slot, refused root reports failure and retains pending restoration. Sessionless callers must reset explicitly. Session-bound and sessionless clock writes share one device queue and original ownership baseline; session release restores the device while sessionless ownership persists until reset or removal. Removal cancels clock work for that device incarnation. Changing the clock affects TLS/certificate validation, token expiry, and freshness checks.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -47115,12 +47456,12 @@
           "type": "object",
           "properties": {
             "profile": {
-              "description": "Device-wide network profile. Documented values: none=unshaped, offline=no data, veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), 4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`, on Android emulators. iOS Simulator accepts only offline and none, for one app named by appId.",
+              "description": "Device-wide network profile. Documented values: none=unshaped, offline=no data, veryBad≈GSM (550ms/14kbps), 2g≈EDGE (400ms/237kbps), 3g≈UMTS (200ms/1920kbps), 4g≈LTE. Degraded profiles are best-effort cellular shaping, reported `partial`, on Android emulators. On iOS Simulator every profile shapes the whole simulator; with appId only offline and none apply, to that one app.",
               "type": "string",
               "enum": ["none", "offline", "veryBad", "2g", "3g", "4g"]
             },
             "appId": {
-              "description": "iOS Simulator only, and required there: bundle id of the one app to take offline (profile=offline) or restore (profile=none). Its new connections are refused through AutoMobile's network filter; open connections continue. Needs a session.",
+              "description": "iOS Simulator only: bundle id of the one app to take offline (profile=offline) or restore (profile=none) through AutoMobile's network filter; open connections continue. Needs a session. Omit it to shape the whole simulator.",
               "type": "string",
               "minLength": 1,
               "maxLength": 256,
@@ -47142,15 +47483,17 @@
             "downloadKbps": {
               "description": "Override download cap in kbps (0=unlimited).",
               "type": "number",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 100000000
             },
             "uploadKbps": {
               "description": "Override upload cap in kbps (0=unlimited).",
               "type": "number",
-              "minimum": 0
+              "minimum": 0,
+              "maximum": 100000000
             },
             "packetLossPercent": {
-              "description": "Documented target packet loss; the emulator console cannot enforce partial loss.",
+              "description": "Packet loss. The Android emulator console cannot enforce partial loss; the iOS Simulator shaper times out this percent of new connections.",
               "type": "number",
               "minimum": 0,
               "maximum": 100
@@ -47623,6 +47966,27 @@
                   "const": "reset"
                 }
               ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "keyboard": {
+          "description": "iOS Simulator hardware keyboard (connect or disconnect, with its layout) and keyboard language. A session restores the hardware keyboard to connected and the previous keyboard and language lists on reset.",
+          "type": "object",
+          "properties": {
+            "hardwareKeyboard": {
+              "description": "Connect (true) or disconnect (false) the simulated hardware keyboard. Disconnected, a focused text field always shows the software keyboard; connected, iOS hides it after the first hardware key event.",
+              "type": "boolean"
+            },
+            "hardwareLayout": {
+              "description": "Physical layout reported for the hardware keyboard (default ansi).",
+              "type": "string",
+              "enum": ["ansi", "iso", "jis"]
+            },
+            "language": {
+              "description": "Keyboard identifier to add and select, such as en_US, fr_FR, de_DE or ja_JP. It also appends the language to AppleLanguages.",
+              "type": "string",
+              "pattern": "^[A-Za-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})*$"
             }
           },
           "additionalProperties": false
@@ -48216,7 +48580,8 @@
               "clock",
               "sensors",
               "screenLock",
-              "power"
+              "power",
+              "networkActivity"
             ]
           }
         },
@@ -48411,7 +48776,13 @@
             },
             "backend": {
               "type": "string",
-              "const": "network-extension"
+              "enum": ["network-extension", "socket-shaper"]
+            },
+            "rebooted": {
+              "type": "boolean"
+            },
+            "offline": {
+              "type": "boolean"
             },
             "controller": {
               "type": "object",
@@ -48551,6 +48922,9 @@
               "enum": ["image", "qr", "clear"]
             },
             "relaunchRequired": {
+              "type": "boolean"
+            },
+            "deviceWide": {
               "type": "boolean"
             },
             "surface": {
@@ -48842,6 +49216,122 @@
             },
             "errorCode": {
               "type": "string"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "keyboard": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "verified": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "method": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "hardwareKeyboard": {
+              "type": "boolean"
+            },
+            "hardwareLayout": {
+              "type": "string",
+              "enum": ["ansi", "iso", "jis"]
+            },
+            "language": {
+              "type": "string"
+            }
+          },
+          "required": ["supported"],
+          "additionalProperties": {}
+        },
+        "networkActivity": {
+          "type": "object",
+          "properties": {
+            "supported": {
+              "$ref": "#/$defs/__schema5"
+            },
+            "verified": {
+              "$ref": "#/$defs/__schema6"
+            },
+            "method": {
+              "$ref": "#/$defs/__schema7"
+            },
+            "warning": {
+              "$ref": "#/$defs/__schema8"
+            },
+            "error": {
+              "$ref": "#/$defs/__schema9"
+            },
+            "processCount": {
+              "type": "number"
+            },
+            "activeProcessCount": {
+              "type": "number"
+            },
+            "truncated": {
+              "type": "boolean"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "processes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pid": {
+                    "type": "number"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "appId": {
+                    "type": "string"
+                  },
+                  "sockets": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "protocol": {
+                          "type": "string"
+                        },
+                        "local": {
+                          "type": "string"
+                        },
+                        "remote": {
+                          "type": "string"
+                        },
+                        "state": {
+                          "type": "string"
+                        }
+                      },
+                      "required": ["protocol", "local"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "bytesIn": {
+                    "type": "number"
+                  },
+                  "bytesOut": {
+                    "type": "number"
+                  }
+                },
+                "required": ["pid", "name", "sockets", "bytesIn", "bytesOut"],
+                "additionalProperties": false
+              }
             }
           },
           "required": ["supported"],
@@ -49741,6 +50231,7 @@
             "setSensor",
             "setUIState",
             "shake",
+            "shareSheet",
             "siri",
             "snapshotOf",
             "sqlQuery",
@@ -49759,7 +50250,8 @@
             "videoRecording",
             "wakeAndUnlock",
             "wearSurface",
-            "windowMode"
+            "windowMode",
+            "xrHeadsetInput"
           ]
         },
         "toolNames": {
@@ -49873,6 +50365,7 @@
               "setSensor",
               "setUIState",
               "shake",
+              "shareSheet",
               "siri",
               "snapshotOf",
               "sqlQuery",
@@ -49891,7 +50384,8 @@
               "videoRecording",
               "wakeAndUnlock",
               "wearSurface",
-              "windowMode"
+              "windowMode",
+              "xrHeadsetInput"
             ]
           }
         },
@@ -54085,6 +54579,140 @@
       }
     },
     "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
+    }
+  },
+  {
+    "name": "shareSheet",
+    "title": "Control Share Sheet",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "List visible targets, select a target, or dismiss the share sheet after the app opens it. The iOS activity view controller reports sheetKind ios-activity-view-controller and requires an exact label for select. Android select requires an exact label or verified appId.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["list", "select", "dismiss"]
+        },
+        "label": {
+          "description": "Exact target label for select",
+          "type": "string",
+          "minLength": 1
+        },
+        "appId": {
+          "description": "Verified Android package for select",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9._-]+$"
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["action"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean",
+          "const": true
+        },
+        "action": {
+          "type": "string",
+          "enum": ["list", "select", "dismiss"]
+        },
+        "sheetKind": {
+          "type": "string",
+          "enum": ["android-intentresolver", "android-legacy", "ios-activity-view-controller"]
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        "selected": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "artifact": {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "format": {
+              "type": "string",
+              "const": "json"
+            },
+            "payload": {
+              "type": "string"
+            },
+            "bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "tool": {
+              "type": "string"
+            },
+            "resourceUri": {
+              "description": "automobile: resource URI to fetch this artifact's JSON in-band",
+              "type": "string"
+            }
+          },
+          "required": ["path", "format", "payload", "bytes", "tool"],
+          "additionalProperties": {}
+        }
+      },
+      "required": ["success", "action", "sheetKind"],
+      "additionalProperties": false,
+      "$defs": {
+        "__schema0": {
+          "type": "object",
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "appId": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "enum": ["app", "direct", "action"]
+            }
+          },
+          "required": ["label", "kind"],
+          "additionalProperties": false
+        }
+      }
+    },
+    "_meta": {
+      "automobile/deviceReadOnlyArgs": [
+        {
+          "argument": "action",
+          "values": ["list"]
+        }
+      ],
       "automobile/requires": ["platform:android", "platform:ios"]
     }
   },
@@ -66420,6 +67048,134 @@
           "$ref": "#/$defs/__schema1"
         }
       }
+    },
+    "_meta": {
+      "automobile/requires": ["platform:android", "platform:ios"]
+    }
+  },
+  {
+    "name": "xrHeadsetInput",
+    "title": "XR Headset Hand and Eye Input",
+    "annotations": {
+      "destructiveHint": true
+    },
+    "description": "Android XR headset emulator hand and eye input. pointer hand aims the right-hand ray at a display point and pinches; pointer eye moves the gaze point and clicks. action select aims, presses and releases; point only aims (hover); drag pinch-drags from x,y to toX,toY (hand only). Coordinates are display pixels. Sent over the emulator's gRPC streamInputEvent (emulator 35.4+); the emulator returns no acknowledgement, so observe afterwards. Refused on devices that are not XR headset emulators.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "pointer": {
+          "type": "string",
+          "enum": ["hand", "eye"],
+          "description": "hand: right-hand ray and pinch; eye: gaze point and click"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["select", "point", "drag"],
+          "description": "select: aim, press, release; point: aim only; drag: pinch-drag (hand only)"
+        },
+        "x": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16384,
+          "description": "Display x in pixels, as in observe screenSize"
+        },
+        "y": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16384,
+          "description": "Display y in pixels"
+        },
+        "toX": {
+          "description": "drag: release x",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16384
+        },
+        "toY": {
+          "description": "drag: release y",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16384
+        },
+        "holdMs": {
+          "description": "select: press length in ms, default 100",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5000
+        },
+        "durationMs": {
+          "description": "drag: duration in ms, default 300",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos", "visionos"]
+        },
+        "sessionUuid": {
+          "description": "Session",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label",
+          "type": "string"
+        }
+      },
+      "required": ["pointer", "action", "x", "y"],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "pointer": {
+          "type": "string",
+          "enum": ["hand", "eye"]
+        },
+        "action": {
+          "type": "string",
+          "enum": ["select", "point", "drag"]
+        },
+        "rpc": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string",
+          "enum": ["xr_hand_event", "xr_eye_event"]
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "x": {
+                "type": "number"
+              },
+              "y": {
+                "type": "number"
+              },
+              "buttons": {
+                "type": "number"
+              }
+            },
+            "required": ["x", "y", "buttons"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["success", "message", "pointer", "action", "rpc", "field", "events"],
+      "additionalProperties": {}
     },
     "_meta": {
       "automobile/requires": ["platform:android", "platform:ios"]

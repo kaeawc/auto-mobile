@@ -33,6 +33,9 @@ public struct CommandLineOptions: Equatable {
         case capture(deviceID: String?, encode: EncodeSettings)
         case listSimulators
         case captureSimulator(windowID: UInt32, fps: Int, audio: Bool, encode: EncodeSettings)
+        /// Headless Simulator capture from the device's main-display IOSurface
+        /// through CoreSimulator (#19015): no window, no Screen Recording permission.
+        case captureSimulatorFramebuffer(udid: String, fps: Int, encode: EncodeSettings)
         case highlightSimulator(deviceName: String, json: String)
         case help
     }
@@ -69,6 +72,7 @@ public struct CommandLineOptions: Equatable {
         var deviceID: String?
         var listSimulators = false
         var simulatorWindowID: UInt32?
+        var simulatorUDID: String?
         var simulatorFPS: Int?
         var audio = false
         var help = false
@@ -85,7 +89,7 @@ public struct CommandLineOptions: Equatable {
                 try parseHighlightArgument(arg, iterator: &iterator)
             case "--list-devices", "--device-id", "--list-simulators":
                 try parseDeviceArgument(arg, iterator: &iterator)
-            case "--simulator-window", "--simulator-fps", "--audio":
+            case "--simulator-window", "--simulator-udid", "--simulator-fps", "--audio":
                 try parseSimulatorArgument(arg, iterator: &iterator)
             case "--encode", "--max-long-side":
                 try parseEncodeArgument(arg, iterator: &iterator)
@@ -137,6 +141,14 @@ public struct CommandLineOptions: Equatable {
                     throw ParseError.invalidValue(flag: arg, value: value)
                 }
                 simulatorWindowID = parsed
+            case "--simulator-udid":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    throw ParseError.missingValue(flag: arg)
+                }
+                guard UUID(uuidString: value) != nil else {
+                    throw ParseError.invalidValue(flag: arg, value: value)
+                }
+                simulatorUDID = value
             case "--simulator-fps":
                 guard let value = iterator.next() else {
                     throw ParseError.missingValue(flag: arg)
@@ -222,6 +234,15 @@ public struct CommandLineOptions: Equatable {
             guard let encodeSettings = makeEncodeSettings() else {
                 throw ParseError.conflictingFlags("capture requires --encode h264")
             }
+            if let udid = simulatorUDID {
+                return CommandLineOptions(
+                    mode: .captureSimulatorFramebuffer(
+                        udid: udid,
+                        fps: simulatorFPS ?? defaultSimulatorFPS,
+                        encode: encodeSettings
+                    )
+                )
+            }
             if let windowID = simulatorWindowID {
                 return CommandLineOptions(
                     mode: .captureSimulator(
@@ -237,7 +258,7 @@ public struct CommandLineOptions: Equatable {
 
         private func highlightOptions() throws -> CommandLineOptions? {
             if highlightJSON != nil || highlightDeviceName != nil {
-                guard let highlightJSON, let highlightDeviceName, simulatorWindowID == nil,
+                guard let highlightJSON, let highlightDeviceName, simulatorWindowID == nil, simulatorUDID == nil,
                       !listDevices, !listSimulators, deviceID == nil,
                       simulatorFPS == nil, !audio, !encodeRequested, bitrateBps == nil,
                       bitsPerPixel == nil, maxLongSide == nil
@@ -259,17 +280,18 @@ public struct CommandLineOptions: Equatable {
                 listDevices,
                 listSimulators,
                 simulatorWindowID != nil,
+                simulatorUDID != nil,
                 deviceID != nil,
             ].filter { $0 }.count
             if modeFlagCount > 1 {
                 throw ParseError.conflictingFlags(
-                    "choose one of --list-devices, --device-id, --list-simulators, --simulator-window"
+                    "choose one of --list-devices, --device-id, --list-simulators, --simulator-window, --simulator-udid"
                 )
             }
 
-            if simulatorFPS != nil && simulatorWindowID == nil {
+            if simulatorFPS != nil && simulatorWindowID == nil && simulatorUDID == nil {
                 throw ParseError.conflictingFlags(
-                    "--simulator-fps requires --simulator-window"
+                    "--simulator-fps requires --simulator-window or --simulator-udid"
                 )
             }
             if audio && simulatorWindowID == nil {
@@ -319,6 +341,7 @@ public struct CommandLineOptions: Equatable {
         screen-capture-helper [--device-id <id>]
         screen-capture-helper --list-devices
         screen-capture-helper --simulator-window <windowID> [--simulator-fps <n>] [--audio]
+        screen-capture-helper --simulator-udid <udid> [--simulator-fps <n>]
         screen-capture-helper --list-simulators
 
     DEVICE OPTIONS (USB-connected iOS devices via AVFoundation):
@@ -329,13 +352,16 @@ public struct CommandLineOptions: Equatable {
     SIMULATOR OPTIONS (macOS iOS Simulator windows via ScreenCaptureKit):
         --list-simulators       Emit discovered simulator windows as JSON.
         --simulator-window <n>  CGWindowID of the simulator window to capture.
+        --simulator-udid <udid> Capture a booted simulator's display framebuffer
+                                through CoreSimulator: no window and no Screen
+                                Recording permission. No audio.
         --highlight-simulator <name> Run a persistent overlay host for the named Simulator.
         --highlight-json <json> Initial {requestId,id,shape} command; subsequent commands arrive on stdin.
         --simulator-fps <n>     Target frame rate (5-60, default 5). Higher
                                 values waste CPU for typical MCP workloads.
         --audio                 Capture Simulator window audio as 8 kHz mono PCM16LE.
 
-    ENCODE OPTIONS (in-helper H.264; required with --simulator-window or a device):
+    ENCODE OPTIONS (in-helper H.264; required for every capture mode):
         --encode h264           Encode H.264 (Baseline 4.2) in-process. Captures 420v
                                 (NV12) and emits Annex-B encoded-video records.
                                 Required for every capture mode.

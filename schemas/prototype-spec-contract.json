@@ -2,7 +2,7 @@
   "patterns": {
     "pathKey": "^[A-Za-z_][A-Za-z0-9_]*$(?![\\s\\S])",
     "stateKey": "^[A-Za-z_][A-Za-z0-9_]{0,63}$(?![\\s\\S])",
-    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
+    "boundKey": "^(?:[A-Za-z_][A-Za-z0-9_]{0,63}|(?=[^{]*\\{)(?:[A-Za-z0-9_]|\\{(?:route\\.[A-Za-z_][A-Za-z0-9_]*|index|outerIndex|(?!route\\.)[A-Za-z_][A-Za-z0-9_]{0,63}\\.[A-Za-z_][A-Za-z0-9_]{0,63})\\})+)$(?![\\s\\S])",
     "color": "^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$(?![\\s\\S])",
     "blankText": "^[\\u0009-\\u000D\\u0020\\u00A0\\u1680\\u2000-\\u200A\\u2028\\u2029\\u202F\\u205F\\u3000\\uFEFF]*$(?![\\s\\S])",
     "numberToken": "^-?(?:0|[1-9][0-9]*)(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$(?![\\s\\S])",
@@ -109,12 +109,22 @@
     "MAX_PROTOTYPE_NOTIFICATION_BADGE": 9999,
     "MAX_PROTOTYPE_NOTIFICATIONS_ACTIVE": 24,
     "MAX_PROTOTYPE_NOTIFICATION_UPDATES_PER_SECOND": 4,
+    "MAX_PROTOTYPE_INNER_REPEAT_ITEMS": 100,
     "MAX_PROTOTYPE_REMOTE_IMAGE_URL_LENGTH": 2048,
     "MAX_PROTOTYPE_REMOTE_IMAGE_DOWNLOAD_BYTES": 8388608,
     "PROTOTYPE_REMOTE_IMAGE_ANDROID_HEAP_DIVISOR": 8,
     "MAX_PROTOTYPE_REMOTE_IMAGE_IOS_MEMORY_BYTES": 67108864,
     "MAX_PROTOTYPE_REMOTE_IMAGE_DISK_BYTES": 134217728,
     "MAX_PROTOTYPE_REMOTE_IMAGE_LOADS": 6
+  },
+  "runtimeBudgets": {
+    "prototype_large_budget_v1": {
+      "MAX_PROTOTYPE_SPEC_BYTES": 4194304,
+      "MAX_PROTOTYPE_DATA_BYTES": 3145728,
+      "MAX_PROTOTYPE_DATA_WRITE_BYTES": 3145728,
+      "MAX_PROTOTYPE_DATA_ARRAY_ITEMS": 10000,
+      "MAX_PROTOTYPE_LIST_ITEMS": 10000
+    }
   },
   "definitions": {
     "authAccount": {
@@ -395,9 +405,11 @@
           "contains",
           "startsWith",
           "lengthGt",
-          "lengthLt"
+          "lengthLt",
+          "equalsKey"
         ],
-        "key|derived": ["contains", "startsWith", "lengthGt", "lengthLt"]
+        "key|derived": ["contains", "startsWith", "lengthGt", "lengthLt"],
+        "key": ["equalsKey"]
       },
       "fields": {
         "key": {
@@ -536,6 +548,12 @@
         },
         "derived": {
           "rule": { "kind": "key" },
+          "optional": true
+        },
+        "equalsKey": {
+          "rule": {
+            "kind": "boundKey"
+          },
           "optional": true
         }
       }
@@ -1667,6 +1685,28 @@
                           "optional": false
                         }
                       }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "link": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "derived": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
                     }
                   ]
                 }
@@ -1783,6 +1823,17 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -2135,6 +2186,129 @@
                   {
                     "kind": "object",
                     "fields": {
+                      "object": {
+                        "rule": {
+                          "kind": "record",
+                          "minEntries": 1,
+                          "maxEntries": 16,
+                          "keyPattern": "pathKey",
+                          "item": {
+                            "kind": "choice",
+                            "options": [
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "state": {
+                                    "rule": {
+                                      "kind": "boundKey"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "item": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "index": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "data": {
+                                    "rule": {
+                                      "kind": "pointer"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "value": {
+                                    "rule": {
+                                      "kind": "json",
+                                      "maxDepth": 24
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "generate": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["id"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "now": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["epochMs", "iso"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "lastGenerated": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "derived": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
                       "match": {
                         "rule": {
                           "kind": "enum",
@@ -2170,6 +2344,28 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "derived": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -2316,6 +2512,129 @@
                   {
                     "kind": "object",
                     "fields": {
+                      "object": {
+                        "rule": {
+                          "kind": "record",
+                          "minEntries": 1,
+                          "maxEntries": 16,
+                          "keyPattern": "pathKey",
+                          "item": {
+                            "kind": "choice",
+                            "options": [
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "state": {
+                                    "rule": {
+                                      "kind": "boundKey"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "item": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "index": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "data": {
+                                    "rule": {
+                                      "kind": "pointer"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "value": {
+                                    "rule": {
+                                      "kind": "json",
+                                      "maxDepth": 24
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "generate": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["id"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "now": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["epochMs", "iso"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "lastGenerated": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "derived": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
                       "match": {
                         "rule": {
                           "kind": "enum",
@@ -2351,6 +2670,28 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "derived": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -2401,7 +2742,8 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1,
-                "max": 2000
+                "max": 2000,
+                "maxLimit": "MAX_PROTOTYPE_DATA_ARRAY_ITEMS"
               },
               "optional": true
             }
@@ -2529,6 +2871,17 @@
                     {
                       "kind": "object",
                       "fields": {
+                        "link": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
                         "generate": {
                           "rule": {
                             "kind": "enum",
@@ -2631,6 +2984,28 @@
                           "rule": {
                             "kind": "json",
                             "maxDepth": 24
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "link": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "derived": {
+                          "rule": {
+                            "kind": "key"
                           },
                           "optional": false
                         }
@@ -2845,6 +3220,28 @@
                               {
                                 "kind": "object",
                                 "fields": {
+                                  "link": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "derived": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
                                   "generate": {
                                     "rule": {
                                       "kind": "enum",
@@ -2881,6 +3278,28 @@
                             ]
                           },
                           "minEntries": 1
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "derived": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -3149,6 +3568,17 @@
                     {
                       "kind": "string",
                       "max": 64
+                    },
+                    {
+                      "kind": "object",
+                      "fields": {
+                        "link": {
+                          "rule": {
+                            "kind": "key"
+                          },
+                          "optional": false
+                        }
+                      }
                     }
                   ]
                 }
@@ -3408,6 +3838,129 @@
                   {
                     "kind": "object",
                     "fields": {
+                      "object": {
+                        "rule": {
+                          "kind": "record",
+                          "minEntries": 1,
+                          "maxEntries": 16,
+                          "keyPattern": "pathKey",
+                          "item": {
+                            "kind": "choice",
+                            "options": [
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "state": {
+                                    "rule": {
+                                      "kind": "boundKey"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "item": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "index": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "data": {
+                                    "rule": {
+                                      "kind": "pointer"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "value": {
+                                    "rule": {
+                                      "kind": "json",
+                                      "maxDepth": 24
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "generate": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["id"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "now": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["epochMs", "iso"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "lastGenerated": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "derived": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
                       "match": {
                         "rule": {
                           "kind": "enum",
@@ -3443,6 +3996,28 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "derived": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -3571,6 +4146,129 @@
                   {
                     "kind": "object",
                     "fields": {
+                      "object": {
+                        "rule": {
+                          "kind": "record",
+                          "minEntries": 1,
+                          "maxEntries": 16,
+                          "keyPattern": "pathKey",
+                          "item": {
+                            "kind": "choice",
+                            "options": [
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "state": {
+                                    "rule": {
+                                      "kind": "boundKey"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "item": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "index": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "data": {
+                                    "rule": {
+                                      "kind": "pointer"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "value": {
+                                    "rule": {
+                                      "kind": "json",
+                                      "maxDepth": 24
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "generate": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["id"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "now": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": ["epochMs", "iso"]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "lastGenerated": {
+                                    "rule": {
+                                      "kind": "enum",
+                                      "values": [true]
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              },
+                              {
+                                "kind": "object",
+                                "fields": {
+                                  "derived": {
+                                    "rule": {
+                                      "kind": "key"
+                                    },
+                                    "optional": false
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
                       "match": {
                         "rule": {
                           "kind": "enum",
@@ -3606,6 +4304,28 @@
                               "kind": "pointer"
                             }
                           ]
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "link": {
+                        "rule": {
+                          "kind": "key"
+                        },
+                        "optional": false
+                      }
+                    }
+                  },
+                  {
+                    "kind": "object",
+                    "fields": {
+                      "derived": {
+                        "rule": {
+                          "kind": "key"
                         },
                         "optional": false
                       }
@@ -3656,7 +4376,8 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1,
-                "max": 2000
+                "max": 2000,
+                "maxLimit": "MAX_PROTOTYPE_DATA_ARRAY_ITEMS"
               },
               "optional": true
             },
@@ -15496,7 +16217,8 @@
                 "kind": "number",
                 "integer": true,
                 "min": 1,
-                "max": 2000
+                "max": 2000,
+                "maxLimit": "MAX_PROTOTYPE_LIST_ITEMS"
               },
               "optional": true
             },
@@ -17959,8 +18681,80 @@
         },
         "requires": {
           "rule": {
-            "kind": "ref",
-            "name": "platformRequires"
+            "kind": "choice",
+            "options": [
+              {
+                "kind": "object",
+                "fields": {
+                  "platform": {
+                    "rule": {
+                      "kind": "array",
+                      "min": 1,
+                      "max": 32,
+                      "unique": true,
+                      "item": {
+                        "kind": "string",
+                        "max": 64
+                      }
+                    },
+                    "optional": true
+                  },
+                  "permissions": {
+                    "rule": {
+                      "kind": "array",
+                      "min": 1,
+                      "max": 16,
+                      "item": {
+                        "kind": "ref",
+                        "name": "platformPermission"
+                      }
+                    },
+                    "optional": true
+                  },
+                  "background": {
+                    "rule": {
+                      "kind": "array",
+                      "min": 1,
+                      "max": 8,
+                      "unique": true,
+                      "item": {
+                        "kind": "enum",
+                        "values": [
+                          "audio",
+                          "location",
+                          "call",
+                          "connectedDevice",
+                          "transfer",
+                          "camera",
+                          "microphone",
+                          "remoteNotification"
+                        ]
+                      }
+                    },
+                    "optional": true
+                  },
+                  "capabilities": {
+                    "rule": {
+                      "kind": "array",
+                      "min": 1,
+                      "max": 128,
+                      "item": {
+                        "kind": "string"
+                      }
+                    },
+                    "optional": true
+                  }
+                }
+              },
+              {
+                "kind": "array",
+                "min": 1,
+                "max": 128,
+                "item": {
+                  "kind": "string"
+                }
+              }
+            ]
           },
           "optional": true
         },
@@ -18038,6 +18832,17 @@
           "rule": {
             "kind": "ref",
             "name": "media"
+          },
+          "optional": true
+        },
+        "links": {
+          "rule": {
+            "kind": "array",
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "prototypeLink"
+            }
           },
           "optional": true
         }
@@ -19095,7 +19900,21 @@
                 "item": {
                   "kind": "map",
                   "item": {
-                    "kind": "scalar"
+                    "kind": "choice",
+                    "options": [
+                      {
+                        "kind": "scalar"
+                      },
+                      {
+                        "kind": "array",
+                        "item": {
+                          "kind": "map",
+                          "item": {
+                            "kind": "scalar"
+                          }
+                        }
+                      }
+                    ]
                   }
                 },
                 "min": 1,
@@ -19117,6 +19936,17 @@
                 "kind": "object",
                 "fields": {
                   "derived": {
+                    "rule": {
+                      "kind": "key"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
+                  "field": {
                     "rule": {
                       "kind": "key"
                     },
@@ -19889,6 +20719,17 @@
               "optional": false
             }
           }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "link": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
         }
       ]
     },
@@ -19972,6 +20813,17 @@
                 "microphone",
                 "remoteNotification"
               ]
+            }
+          },
+          "optional": true
+        },
+        "capabilities": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 128,
+            "item": {
+              "kind": "string"
             }
           },
           "optional": true
@@ -21722,6 +22574,17 @@
               "optional": false
             }
           }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "link": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
         }
       ]
     },
@@ -22040,6 +22903,17 @@
                 "optional": false
               }
             }
+          },
+          {
+            "kind": "object",
+            "fields": {
+              "link": {
+                "rule": {
+                  "kind": "key"
+                },
+                "optional": false
+              }
+            }
           }
         ]
       }
@@ -22238,6 +23112,28 @@
               "rule": {
                 "kind": "json",
                 "maxDepth": 24
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "link": {
+              "rule": {
+                "kind": "key"
+              },
+              "optional": false
+            }
+          }
+        },
+        {
+          "kind": "object",
+          "fields": {
+            "derived": {
+              "rule": {
+                "kind": "key"
               },
               "optional": false
             }
@@ -23215,6 +24111,17 @@
               {
                 "kind": "object",
                 "fields": {
+                  "derived": {
+                    "rule": {
+                      "kind": "key"
+                    },
+                    "optional": false
+                  }
+                }
+              },
+              {
+                "kind": "object",
+                "fields": {
                   "generate": {
                     "rule": {
                       "kind": "enum",
@@ -23253,6 +24160,60 @@
           "optional": false
         }
       }
+    },
+    "prototypeLink": {
+      "kind": "object",
+      "fields": {
+        "path": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "query": {
+          "rule": {
+            "kind": "record",
+            "item": {
+              "kind": "choice",
+              "options": [
+                {
+                  "kind": "string"
+                },
+                {
+                  "kind": "object",
+                  "fields": {
+                    "type": {
+                      "rule": {
+                        "kind": "string"
+                      },
+                      "optional": false
+                    },
+                    "secret": {
+                      "rule": {
+                        "kind": "boolean"
+                      },
+                      "optional": true
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "optional": true
+        },
+        "actions": {
+          "rule": {
+            "kind": "array",
+            "min": 1,
+            "max": 32,
+            "item": {
+              "kind": "ref",
+              "name": "action"
+            }
+          },
+          "optional": false
+        }
+      }
     }
   },
   "eventKinds": [
@@ -23262,7 +24223,9 @@
     "appearance_changed",
     "screen_changed",
     "change",
-    "validation_failed"
+    "validation_failed",
+    "link_opened",
+    "link_unmatched"
   ],
   "platformModules": {
     "test": {
@@ -26433,6 +27396,34 @@
             }
           },
           "optional": true
+        }
+      }
+    },
+    "link_opened": {
+      "kind": "object",
+      "fields": {
+        "url": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        },
+        "entry": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
+        }
+      }
+    },
+    "link_unmatched": {
+      "kind": "object",
+      "fields": {
+        "url": {
+          "rule": {
+            "kind": "string"
+          },
+          "optional": false
         }
       }
     }

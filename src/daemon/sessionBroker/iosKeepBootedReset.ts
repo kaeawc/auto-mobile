@@ -1,3 +1,4 @@
+import { renderOverlayFromKey } from "./mutations/renderOverlayMutation";
 import type { MutationRecordingGaps } from "./mutations/recordingGaps";
 import { storePreferenceCoveredByBaseline } from "./mutations/appInventory";
 import {
@@ -42,6 +43,11 @@ export interface IosKeepBootedMutationPort extends Pick<
   DeviceMutationResetPort,
   "canRevert" | "revert"
 > {
+  /** Restores several Simulator render overlay rows in one CoreSimulator call (#19016). */
+  revertRenderOverlays?(
+    entries: readonly DeviceMutationInput[],
+    context: DeviceMutationResetContext,
+  ): Promise<void>;
   assertSettled(context: DeviceMutationResetContext): Promise<void>;
   sanitizeCovers(
     entry: DeviceMutationInput,
@@ -301,7 +307,11 @@ export class IosKeepBootedReset {
         );
       }
     }
+    const batched = await this.revertOverlayRows(plans, context, step);
     for (const { entry, plan } of plans) {
+      if (batched.has(entry)) {
+        continue;
+      }
       if (["installed-app", "app-group"].includes(entry.kind)) {
         logger.warn(`iOS reset handles ${entry.kind}:${entry.key} through app inventory cleaning`);
         continue;
@@ -314,6 +324,22 @@ export class IosKeepBootedReset {
         this.dependencies.mutations.revert(entry, context),
       );
     }
+  }
+
+  /** Restores every revertible overlay row in one call; returns the rows it handled. */
+  private async revertOverlayRows(
+    plans: readonly { entry: DeviceMutationEntry; plan: { status: string } }[],
+    context: DeviceMutationResetContext,
+    step: (phase: string, operation: () => Promise<void>) => Promise<void>,
+  ): Promise<ReadonlySet<DeviceMutationEntry>> {
+    const batch = this.dependencies.mutations.revertRenderOverlays?.bind(
+      this.dependencies.mutations,
+    );
+    const rows = batch ? plans.filter(isRevertibleOverlayRow).map(({ entry }) => entry) : [];
+    if (batch && rows.length > 0) {
+      await step("revert:render-overlays", () => batch(rows, context));
+    }
+    return new Set(rows);
   }
 
   private assertCompleteRecording(sessionUuid: string): void {
@@ -539,4 +565,18 @@ export class IosKeepBootedReset {
       );
     }
   }
+}
+
+function isRevertibleOverlayRow({
+  entry,
+  plan,
+}: {
+  entry: DeviceMutationEntry;
+  plan: { status: string };
+}): boolean {
+  return (
+    entry.kind === "device-setting" &&
+    renderOverlayFromKey(entry.key) !== undefined &&
+    plan.status !== "non_revertible"
+  );
 }

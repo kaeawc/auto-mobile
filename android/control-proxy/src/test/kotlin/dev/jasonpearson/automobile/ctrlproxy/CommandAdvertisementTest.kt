@@ -49,6 +49,7 @@ class CommandAdvertisementTest {
       "prototype_theme_modes_v1",
       "prototype_timers_v1",
       "prototype_platform_simulation_v1",
+      "prototype_platform_outcomes_v1",
       "prototype_tooltip_v1",
       "prototype_m3_expressive_v1",
       "prototype_pager_state_key_v1",
@@ -59,6 +60,7 @@ class CommandAdvertisementTest {
       "prototype_design_platform_v1",
       "prototype_data_actions_v1",
       "prototype_data_actions_v2",
+      "prototype_data_actions_v3",
       "prototype_network_v1",
       "prototype_network_device_v1",
       "prototype_network_upload_v1",
@@ -104,6 +106,7 @@ class CommandAdvertisementTest {
       "prototype_linkify_v1",
       "prototype_format_v1",
       "prototype_derive_v1",
+      "prototype_nested_repeat_v1",
       "prototype_chat_scroll_v1",
       "prototype_adaptive_v1",
       "prototype_drawer_v1",
@@ -207,6 +210,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_data_model_v1"))
     assertTrue(commands.contains("prototype_data_actions_v1"))
     assertTrue(commands.contains("prototype_data_actions_v2"))
+    assertTrue(commands.contains("prototype_data_actions_v3"))
     assertTrue(commands.contains("prototype_network_v1"))
     assertTrue(commands.contains("prototype_network_device_v1"))
     assertTrue(commands.contains("prototype_network_upload_v1"))
@@ -225,6 +229,7 @@ class CommandAdvertisementTest {
     assertTrue(commands.contains("prototype_linkify_v1"))
     assertTrue(commands.contains("prototype_format_v1"))
     assertTrue(commands.contains("prototype_derive_v1"))
+    assertTrue(commands.contains("prototype_nested_repeat_v1"))
     assertTrue(commands.contains("prototype_chat_scroll_v1"))
     assertTrue(commands.contains("prototype_emit_context_v1"))
     assertTrue(commands.contains("prototype_checks_v1"))

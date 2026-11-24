@@ -18,9 +18,11 @@ or one `<major>.<minor>` value.
 
 ## Decision
 
-`build-android-compileSdk` holds `<major>` or `<major>.<minor>` (now `"37.1"`). The convention
+`build-android-compileSdk` holds `<major>` or `<major>.<minor>`, now `"37.1"`. The convention
 plugins parse it and use AGP's `compileSdk { version = release(major) { minorApiLevel = minor } }`.
-video-server and install.sh use the value as the `platforms/android-<value>` directory.
+install.sh uses the value as the `platforms/android-<value>` directory. video-server looks for
+`platforms/android-<value>` first. Without it, video-server falls back to the major platform's
+`android.jar`, so it does not need `android-37.1`.
 
 ## Consequences
 

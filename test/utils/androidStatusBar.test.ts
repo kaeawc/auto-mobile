@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { isStatusBarDiffSubtreeId, isSystemUiStatusBarId } from "../../src/utils/androidStatusBar";
+import { isStatusBarDiffSubtree, isSystemUiStatusBarId } from "../../src/utils/androidStatusBar";
 
 const id = (name: string) => `com.android.systemui:id/${name}`;
 
-describe("isStatusBarDiffSubtreeId (#19123)", () => {
+describe("isStatusBarDiffSubtree (#19123, #19155)", () => {
   test.each([
     "status_bar_container",
     "status_bar",
@@ -17,7 +17,7 @@ describe("isStatusBarDiffSubtreeId (#19123)", () => {
     "signal_cluster",
     "signal_cluster_view",
   ])("skips status-bar chrome %s", (name) => {
-    expect(isStatusBarDiffSubtreeId(id(name))).toBe(true);
+    expect(isStatusBarDiffSubtree({ "resource-id": id(name) })).toBe(true);
   });
 
   test.each([
@@ -30,7 +30,33 @@ describe("isStatusBarDiffSubtreeId (#19123)", () => {
     undefined,
     42,
   ])("keeps %p", (resourceId) => {
-    expect(isStatusBarDiffSubtreeId(resourceId)).toBe(false);
+    expect(isStatusBarDiffSubtree({ "resource-id": resourceId })).toBe(false);
+  });
+
+  test.each(["clickable", "long-clickable", "checkable", "scrollable"])(
+    "keeps a status-bar-shaped id that is %s",
+    (attribute) => {
+      expect(
+        isStatusBarDiffSubtree({ "resource-id": id("wifi_toggle"), [attribute]: "true" }),
+      ).toBe(false);
+    },
+  );
+
+  test("keeps a status-bar-shaped id whose descendant has an affordance", () => {
+    const row = {
+      "resource-id": id("mobile_network_layout"),
+      node: [
+        { "resource-id": id("mobile_carrier_text"), text: "T-Mobile" },
+        { node: { "resource-id": id("mobile_toggle"), checkable: true } },
+      ],
+    };
+    expect(isStatusBarDiffSubtree(row)).toBe(false);
+  });
+
+  test("skips a known status-bar root even when it has an affordance", () => {
+    expect(isStatusBarDiffSubtree({ "resource-id": id("status_bar"), clickable: "true" })).toBe(
+      true,
+    );
   });
 
   test("leaves the skeleton's status-bar folding allowlist unchanged", () => {

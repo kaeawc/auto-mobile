@@ -267,11 +267,14 @@ waiting and no reply, later reads on that client probe for at most 2000 ms. That
 lasts until a read succeeds or the 60,000 ms cooldown expires; shorter caller
 budgets stay (#18151).
 
-The default compact action metadata section is on its own page:
+These sections are on their own pages:
 
 - [Default compact action metadata](interaction-loop-compaction.md)
+- [Settle comparison](interaction-loop-settle.md): the Android status-bar skip and `unsettledBy`
 
 ## Background
 
 - [Post-action screenshot timing](../../devlog/2026-11-10-interaction-loop-screenshot-timing.md)
 - [Stateless success reductions in the response envelope](../../devlog/2026-11-15-stateless-envelope-reductions.md)
+- [Stable wait timeout is a result, not an error](../../devlog/2026-11-24-stable-wait-timeout-not-error.md)
+- [Action diffs summarize added and removed nodes](../../devlog/2026-11-24-action-diff-summaries.md)

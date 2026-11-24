@@ -10,6 +10,8 @@ export interface CarPlayDisplayReport {
   display: string;
   /** The simulator screen id of the car display, as the probe reports it. */
   displayId: number;
+  /** Present when the car was powered on with a back button, a home button and a knob. */
+  headUnitInputs?: true;
 }
 
 export interface CarPlayDisplayDependencies {
@@ -75,10 +77,12 @@ export async function activateCarPlayDisplay(
   udid: string,
   dependencies: CarPlayDisplayDependencies,
   bounds: CarPlayDisplayBounds,
+  request: { headUnitInputs?: boolean } = {},
 ): Promise<CarPlayDisplayReport> {
   bounds.signal?.throwIfAborted();
+  const headUnitInputs = request.headUnitInputs === true;
   await withinBounds(dependencies.timer, bounds, `CarPlay power-on on ${udid}`, (options) =>
-    dependencies.powerer.powerOn(udid, options),
+    dependencies.powerer.powerOn(udid, headUnitInputs ? { ...options, headUnitInputs } : options),
   );
   let state: CarPlayProjectionState | undefined;
   for (let attempt = 1; attempt <= CAR_DISPLAY_PROBE_ATTEMPTS; attempt++) {
@@ -87,7 +91,8 @@ export async function activateCarPlayDisplay(
       dependencies.probe.probe(udid, options),
     );
     if (isCarDisplay(state)) {
-      return { display: state.identity, displayId: state.displayId };
+      const report = { display: state.identity, displayId: state.displayId };
+      return headUnitInputs ? { ...report, headUnitInputs: true } : report;
     }
     const lastAttempt = attempt === CAR_DISPLAY_PROBE_ATTEMPTS;
     if (

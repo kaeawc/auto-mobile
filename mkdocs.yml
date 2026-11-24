@@ -540,6 +540,7 @@ nav:
       - "2026-11-23: Generate the devlog index and nav from the entries": devlog/2026-11-23-generated-devlog-index.md
       - "2026-11-23: Driverless simulator audio capture": devlog/2026-11-23-driverless-simulator-audio-capture.md
       - "2026-11-23: Docs readability in the pre-push shell lane": devlog/2026-11-23-docs-readability-prepush.md
+      - "2026-11-23: CarPlay head-unit inputs on the simulator": devlog/2026-11-23-carplay-head-unit-inputs.md
       - "2026-11-21: Prototype media runtime placement spike": devlog/2026-11-21-prototype-media-runtime-placement-spike.md
       - "2026-11-21: iOS Simulator audio routing open questions": devlog/2026-11-21-ios-simulator-audio-routing-open-questions.md
       - "2026-11-20: Fixture capture mode": devlog/2026-11-20-fixture-capture-mode.md

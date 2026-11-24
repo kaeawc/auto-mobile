@@ -147,6 +147,8 @@ describe("Interaction journal intents (#14359)", () => {
       "dismiss_notification_shade",
       // Rotary input moves focus only (#14920).
       ...ROTARY_BUTTONS,
+      // The CarPlay voice button opens Siri over the current screen (#19059).
+      "siri",
     ];
     const persistent = ["power", "lock", "volume_up", "volume_down", "action"];
     const buttons = pressButtonInput.shape.button.options;

@@ -31096,7 +31096,7 @@
     "annotations": {
       "destructiveHint": true
     },
-    "description": "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; durationMs long-presses any remote button (100-10000 ms); steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
+    "description": "Press a device or navigation button. On tvOS, use up/down/left/right to navigate focus, select, menu, home or playPause; durationMs long-presses any remote button (100-10000 ms); steps are unsupported. On Android (TV remotes), up/down/left/right/select send D-pad keys and playPause, fastForward, rewind, next and previous send media keys; select with durationMs is a long press of D-pad center (API 35+). On iOS simulators, volume_up, volume_down, and power use hardware-button events; menu is unsupported on iOS. action and camera are iOS-only (Action button, Camera Control) and return unsupported_button where the device lacks that hardware. Android-only system actions: lock, power_dialog, quick_settings, screenshot, split_screen (raw system toggle; windowMode places a chosen app) and dismiss_notification_shade; each needs the API level and CtrlProxy APK that supports it and otherwise returns unsupported_system_action. Android Automotive only: rotary_rotate_cw / rotary_rotate_ccw (steps detents), rotary_nudge_up/down/left/right and rotary_select drive a rotary controller; other devices refuse them. display \"carPlay\" (iOS 26.x simulator, after startDevice carPlay with headUnitInputs) sends back, home, siri and the rotary_* knob inputs to the CarPlay head unit; siri works only there. lock leaves the device locked (wakeAndUnlock); power_dialog and quick_settings stay open until back/home.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -31135,11 +31135,12 @@
             "rotary_nudge_down",
             "rotary_nudge_left",
             "rotary_nudge_right",
-            "rotary_select"
+            "rotary_select",
+            "siri"
           ]
         },
         "steps": {
-          "description": "Detents for rotary_rotate_cw / rotary_rotate_ccw (default 1).",
+          "description": "Detents for rotary_rotate_cw / rotary_rotate_ccw (default 1), on AAOS or the CarPlay knob.",
           "type": "integer",
           "minimum": 1,
           "maximum": 50
@@ -31151,7 +31152,7 @@
           "maximum": 10000
         },
         "display": {
-          "description": "Target panel key, role, or active; Android only. Sends the key to that display and checks it for the visual change. \"headUnit\" sends it to the Android Auto head unit",
+          "description": "Target panel key, role, or active (Android): sends the key to that display and checks it for the visual change. \"headUnit\" sends it to the Android Auto head unit; \"carPlay\" sends back, home, siri or a rotary_* knob input to an iOS 26.x simulator's CarPlay screen",
           "type": "string"
         },
         "platform": {

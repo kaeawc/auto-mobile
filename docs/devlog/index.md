@@ -35,6 +35,7 @@ regenerates the table below.
 | 2026-11-23 | decision | [Generate the devlog index and nav from the entries](2026-11-23-generated-devlog-index.md) |
 | 2026-11-23 | decision | [Driverless simulator audio capture](2026-11-23-driverless-simulator-audio-capture.md) |
 | 2026-11-23 | decision | [Docs readability in the pre-push shell lane](2026-11-23-docs-readability-prepush.md) |
+| 2026-11-23 | decision | [CarPlay head-unit inputs on the simulator](2026-11-23-carplay-head-unit-inputs.md) |
 | 2026-11-21 | decision | [Prototype media runtime placement spike](2026-11-21-prototype-media-runtime-placement-spike.md) |
 | 2026-11-21 | concept | [iOS Simulator audio routing open questions](2026-11-21-ios-simulator-audio-routing-open-questions.md) |
 | 2026-11-20 | decision | [Fixture capture mode](2026-11-20-fixture-capture-mode.md) |

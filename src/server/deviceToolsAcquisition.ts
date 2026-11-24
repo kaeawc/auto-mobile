@@ -512,9 +512,9 @@ function preparationFailure(
   error: unknown,
   platform: StartDeviceArgs["platform"],
   budgets: DevicePreparationBudgets,
-  deviceLeft: AcquisitionDeviceLeft | undefined,
-  signal: AbortSignal | undefined,
+  outcome: { deviceLeft: AcquisitionDeviceLeft | undefined; signal: AbortSignal | undefined },
 ): Error {
+  const { deviceLeft, signal } = outcome;
   const failure =
     error instanceof ActionableError || error instanceof TerminalSessionError
       ? error
@@ -637,7 +637,10 @@ async function prepareDevice(
     if (!lifecycleReservations) {
       signal?.throwIfAborted();
     }
-    throw preparationFailure(error, args.platform, budgets, deviceLeft, coordinatedSignal);
+    throw preparationFailure(error, args.platform, budgets, {
+      deviceLeft,
+      signal: coordinatedSignal,
+    });
   } finally {
     const cleanup = async () => {
       const releaseReadiness = async () => {

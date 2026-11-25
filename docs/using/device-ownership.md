@@ -100,10 +100,10 @@ that session and a call that presents the session's owner token.
 
 - Read on the owning connection, or leave `sessionUuid` out and pass `deviceId`
   for a sessionless read.
-- Once the owner has disconnected (a finished `--cli` call, for example),
-  another connection may read under the session.
 - A `sessionUuid` that names no device session (such as an IDE observer session)
   still reads sessionlessly.
+- A read naming a session whose device was lost fails like a control call.
+  It never reads another device.
 
 ## When a session is released
 

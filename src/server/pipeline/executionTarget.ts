@@ -33,6 +33,7 @@ import {
   isSessionlessReadTargetHeld,
   lateReadSessionDevice,
   multipleDevicesError,
+  readAwaitsSessionRecovery,
   resolveSessionlessDeviceRead,
 } from "./readTarget";
 import { callerHeldPlanSession, refuseEndedPlanBase } from "../planSessionOwnership";
@@ -301,7 +302,21 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       state.readOnly && state.sessionUuid && shouldResolveDevice
         ? await admitReadSession(state.sessionUuid, execution)
         : undefined;
-    return state.readSession === null ? this.readWithoutLiveSession(state) : undefined;
+    return state.readSession === null ? this.readWithoutAdmittedSession(state) : undefined;
+  }
+
+  /**
+   * A read naming a session that lost its device never falls back to sessionless selection,
+   * which could pick another device (#19191): it takes the shared session path instead.
+   */
+  private async readWithoutAdmittedSession(
+    state: TargetResolution,
+  ): Promise<ExecutionTargetContext | undefined> {
+    if (await readAwaitsSessionRecovery(state.sessionUuid)) {
+      state.readAwaitsSessionRecovery = true;
+      return undefined;
+    }
+    return this.readWithoutLiveSession(state);
   }
 
   /** A read naming no live device session (an IDE observer session) runs as a sessionless read. */
@@ -431,21 +446,9 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     devicePool: NonNullable<ReturnType<typeof defaultDaemonContext.fullDevicePool>>,
   ): Promise<void> {
     const { name, signal } = state.input;
-    const { execution, readSession, providedDeviceId } = state;
+    const { execution, providedDeviceId } = state;
     logger.info(`[ToolRegistry] Entering session-based device assignment for ${sessionUuid}`);
-    if (!readSession) {
-      refuseControlCallBeforeAdmission(name, providedDeviceId, sessionUuid);
-    }
-    // A terminal ID keeps its durable TerminalSessionError. Only an ID that
-    // was live during daemon restart can reach context creation without a
-    // live session; never-issued IDs are rejected before assignment.
-    const admittedSession =
-      readSession ??
-      (await sessionManager.admitIssuedSessionForAutomation(sessionUuid, execution, { signal }));
-    if (execution && !readSession) {
-      // Only an admitted control call's end is session use (#10824, #10964).
-      executionTracker.markSessionAdmitted(execution.executionId);
-    }
+    const admittedSession = await this.admitCallSession(state, sessionUuid, sessionManager);
     assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, {
       sessionDeviceId: admittedSession?.assignedDevice,
       sessionPlatform: admittedSession?.platform,
@@ -473,6 +476,39 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
     if (context.devicePlatform) {
       state.platform = context.devicePlatform;
     }
+  }
+
+  /**
+   * The session this call runs under before context creation. A terminal ID keeps its durable
+   * TerminalSessionError. Only an ID that was live during daemon restart can reach context
+   * creation without a live session; never-issued IDs are rejected before assignment. A read
+   * awaiting its session's recovery has no admitted session: context creation recovers it or
+   * refuses (#19191).
+   */
+  private async admitCallSession(
+    state: TargetResolution,
+    sessionUuid: string,
+    sessionManager: NonNullable<ReturnType<typeof defaultDaemonContext.sessionManager>>,
+  ): Promise<NonNullable<Awaited<ReturnType<typeof admitReadSession>>> | undefined> {
+    const { name, signal } = state.input;
+    const { execution, readSession, providedDeviceId, readAwaitsSessionRecovery } = state;
+    if (readAwaitsSessionRecovery) {
+      return undefined;
+    }
+    if (readSession) {
+      return readSession;
+    }
+    refuseControlCallBeforeAdmission(name, providedDeviceId, sessionUuid);
+    const admittedSession = await sessionManager.admitIssuedSessionForAutomation(
+      sessionUuid,
+      execution,
+      { signal },
+    );
+    if (execution && !readSession) {
+      // Only an admitted control call's end is session use (#10824, #10964).
+      executionTracker.markSessionAdmitted(execution.executionId);
+    }
+    return admittedSession;
   }
 
   private async assertAdmittedSessionHeld(

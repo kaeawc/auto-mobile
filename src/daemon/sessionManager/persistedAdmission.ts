@@ -473,8 +473,11 @@ export class PersistedSessionAdmission {
   /**
    * What a call naming a UUID that cannot be admitted is answered with. A control call naming a
    * row past its deadline gets the typed terminal refusal; a never-issued id gets `neverIssued`.
-   * A read is never refused for an expired row: it gets `neverIssued` too, which its caller turns
-   * into a sessionless read, exactly as before the expired answer existed (#11361).
+   * A read is not refused for an idle-expired row: it gets `neverIssued` too, which its caller
+   * turns into a sessionless read, exactly as before the expired answer existed (#11361). A row
+   * whose restart recovery window ran out lost its device, so a read naming it gets the same
+   * terminal refusal as a control call rather than reading whichever device it could select
+   * (#19191).
    */
   unadmittedSessionError(
     sessionId: string,
@@ -482,10 +485,13 @@ export class PersistedSessionAdmission {
     neverIssued: UnissuedSessionError,
     access?: SessionAccess,
   ): Error {
-    if (access === "read-only") {
+    const expired = persisted && this.expiredReleaseFromPersisted(sessionId, persisted);
+    if (
+      !expired ||
+      (access === "read-only" && expired.releaseReason !== "restart-recovery-timeout")
+    ) {
       return neverIssued;
     }
-    const expired = persisted && this.expiredReleaseFromPersisted(sessionId, persisted);
-    return expired ? new TerminalSessionError(sessionId, expired) : neverIssued;
+    return new TerminalSessionError(sessionId, expired);
   }
 }

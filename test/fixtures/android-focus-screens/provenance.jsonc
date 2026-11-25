@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "FocusScreen reads from a focusNavigate walk over a settling slider",
+  "source": "README.md, PR #18471",
+  "capturedOn": [
+    {
+      "device": "android-tv tv_1080p emulator",
+      "os": "Android TV (API 36)",
+      "formFactor": "tv",
+    },
+  ],
+  "date": "2026-11-16",
+}

@@ -1,0 +1,9 @@
+{
+  "provenance": "captured",
+  "summary": "tvOS XCUITest runner connected handshake, focus hierarchies and press results",
+  "source": "PR #16062, PR #16237, PR #17758, PR #18040, PR #18042, issue #15887",
+  "capturedOn": [
+    { "device": "Apple TV 4K (3rd generation) simulator", "os": "tvOS 26.5", "formFactor": "tv" },
+  ],
+  "date": "2026-10-31",
+}

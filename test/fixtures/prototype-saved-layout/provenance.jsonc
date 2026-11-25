@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Saved iOS prototype on-disk layout golden (spec JSON plus base64 assets)",
+  "source": "PR #12344",
+  "reason": "authored format golden for the TS writer and Swift reader",
+}

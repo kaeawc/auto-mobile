@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "base64 APKs signed by apksigner 35.0.1 with throwaway keys, plus apksigner verify output",
+  "source": "README.md, PR #11039",
+  "generator": "test/fixtures/android-apk-signing/generate.sh.txt (apksigner 35.0.1)",
+}

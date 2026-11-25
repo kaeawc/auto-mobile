@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "HTTP probe script output for 200, 404, close-without-response, silent and SSH-banner loopback servers",
+  "source": "PR #17236",
+  "capturedOn": [
+    {
+      "device": "Linux host (OpenBSD netcat, not an Android device)",
+      "os": "Linux, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-11-06",
+}

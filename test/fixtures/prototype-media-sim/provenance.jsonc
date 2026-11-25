@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Fake media engine scripts on a virtual clock with expected events",
+  "source": "PR #18371",
+  "reason": "authored vectors for the fake media engine shared by TS, Kotlin and Swift",
+}

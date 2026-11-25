@@ -1,0 +1,48 @@
+{
+  "provenance": "handWritten",
+  "summary": "am dumpheap and perfetto --background output for heapDump and performanceTrace",
+  "source": "README.md",
+  "reason": "Reconstructed from AOSP ActivityManagerShellCommand dumpheap and the perfetto client's --background pid line; no device was available",
+  "recapture": "#18722",
+  "parts": {
+    "am-dumpheap-unknown-process.txt": {
+      "provenance": "captured",
+      "summary": "am dumpheap IllegalArgumentException for an unknown process",
+      "source": "PR #18746",
+      "capturedOn": [
+        {
+          "device": "API 35 google_apis arm64 emulator (Pixel 6 profile)",
+          "os": "Android API 35",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-11-19",
+    },
+    "dumpsys-package-profileable-flags.txt": {
+      "provenance": "captured",
+      "summary": "dumpsys package flags lines of a profileable app",
+      "source": "README.md, PR #19002 (#18747)",
+      "capturedOn": [
+        {
+          "device": "API 35 google_apis emulator",
+          "os": "Android API 35",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-11-22",
+    },
+    "native-heap-unavailable.txt": {
+      "provenance": "captured",
+      "summary": "the 170-byte placeholder am dumpheap -n writes when native heap is unavailable",
+      "source": "README.md, PR #19002 (#18747)",
+      "capturedOn": [
+        {
+          "device": "API 35 google_apis emulator",
+          "os": "Android API 35",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-11-22",
+    },
+  },
+}

@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "settings list secure from a stock API 37 google_apis image, including colon keys",
+  "source": "PR #14965",
+  "derivedFrom": "manual-test batch 20261022b settings list secure capture (API 37 google_apis)",
+  "edits": "trimmed to a few keys",
+}

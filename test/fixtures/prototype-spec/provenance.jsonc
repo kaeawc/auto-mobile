@@ -1,0 +1,32 @@
+{
+  "provenance": "synthetic",
+  "summary": "Prototype spec corpus: valid and invalid specs, patches and per-feature cases for the TS, Kotlin and Swift validators and renderers",
+  "source": "PR #11323, scripts/README.md, scripts/capture-prototype-strict-fixtures.ts",
+  "reason": "authored specs for pure validation and rendering logic; some invalid/ strict cases were derived by scripts/capture-prototype-strict-fixtures.ts from the TS validator and copied in by hand",
+  "parts": {
+    "corpus.json": {
+      "provenance": "generated",
+      "summary": "Inventory of valid and invalid fixtures and valid capabilities",
+      "source": "scripts/capture-prototype-strict-fixtures.ts",
+      "generator": "scripts/capture-prototype-strict-fixtures.ts --in-place --inventory-only",
+    },
+    "strings/plural-categories.json": {
+      "provenance": "generated",
+      "summary": "String-table plural categories per language",
+      "source": "scripts/README.md",
+      "generator": "scripts/prototype/generate-plural-categories-fixture.ts",
+    },
+    "repeat/nested-cell-limit.json": {
+      "provenance": "generated",
+      "summary": "Nested repeat at the cell limit",
+      "source": "scripts/README.md",
+      "generator": "scripts/prototype/generate-nested-repeat-boundaries.ts",
+    },
+    "invalid/nested-repeat-cell-limit.json": {
+      "provenance": "generated",
+      "summary": "Nested repeat one cell over the limit",
+      "source": "scripts/README.md",
+      "generator": "scripts/prototype/generate-nested-repeat-boundaries.ts",
+    },
+  },
+}

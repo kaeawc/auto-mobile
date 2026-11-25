@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Shared coordination schedule-feasibility cases (lock cycles, barriers) with expected validity and messages",
+  "source": "PR #10578, description field in cases.json",
+  "reason": "authored test-plan cases for pure validator logic shared by TS and Kotlin",
+}

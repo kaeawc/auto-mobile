@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "Host pmset, ioreg, lsof and ps eww output for the manual-test host preflight and device evidence",
+  "source": "PR #12244, PR #12363, PR #12372",
+  "capturedOn": [
+    {
+      "device": "macOS host (MacBook with battery)",
+      "os": "macOS, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-13",
+}

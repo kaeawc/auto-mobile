@@ -1,0 +1,16 @@
+{
+  "provenance": "derived",
+  "summary": "CI job logs (unit-shard ENOENT, host-integration assertion on ubuntu and windows, GitHub release 504) for classify-failure.sh",
+  "source": "PR #12484, test/bats/classify-failure.bats",
+  "derivedFrom": "real GitHub Actions job logs of the failing ubuntu and windows runs",
+  "edits": "trimmed to the lines around the failure",
+  "parts": {
+    "github-release-504-ktfmt.log": {
+      "provenance": "derived",
+      "summary": "Fast Validation ktfmt install log hitting repeated GitHub Releases 504s",
+      "source": "PR #17627, issue #17624",
+      "derivedFrom": "job log lines quoted in issue #17624",
+      "edits": "rebuilt from the quoted lines; the job artifact was not fetched",
+    },
+  },
+}

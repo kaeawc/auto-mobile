@@ -1,0 +1,16 @@
+{
+  "provenance": "derived",
+  "summary": "Host ps and top rows for booted simulator process trees, read by the simulator fleet footprint and capacity code",
+  "source": "README.md, PR #11000, PR #15297",
+  "derivedFrom": "ps -axo pid=,ppid=,rss=,pcpu=,command= and top -l 1 -stats pid,mem captured back to back on 2026-10-25 on a macOS host with one booted simulator (#15288)",
+  "edits": "kept launchd and the one launchd_sim tree (266 processes) plus top's header; other host processes removed",
+  "parts": {
+    "ps-snapshot-two-booted-simulators.txt": {
+      "provenance": "handWritten",
+      "summary": "ps rows for host processes plus two simulator process trees",
+      "source": "README.md, PR #11000",
+      "reason": "Host rows are captured, but no simulator was booted, so the launchd_sim rows (pids 90001+) follow the documented command shape with synthetic sizes",
+      "recapture": "#19262",
+    },
+  },
+}

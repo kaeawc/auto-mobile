@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "MCP tool names each entry point (server, CLI, scripts) registers, in registration order",
+  "source": "PR #12663, test/server/registerAllTools.test.ts",
+  "generator": "tool registry names dumped from the pre-#12663 origin/main code; updated by the PRs that add or remove tools",
+}

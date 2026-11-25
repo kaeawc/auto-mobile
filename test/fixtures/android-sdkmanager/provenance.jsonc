@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "system-images/android-34 and android-36 rows of sdkmanager --list available packages",
+  "source": "README.md, PR #15033",
+  "derivedFrom": "sdkmanager --list stdout on a macOS host, 2026-10-22",
+  "edits": "kept only the system-images/android-34/* and android-36/* rows of the Available packages section",
+}

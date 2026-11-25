@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "protoviewer save failures: adb cat exit-1 error and the No pushed prototype rejection",
+  "source": "PR #15193",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5610) driven from a macOS host",
+      "os": "Android API 37",
+      "formFactor": "phone"
+    }
+  ],
+  "date": "2026-10-23"
+}

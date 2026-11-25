@@ -1,0 +1,18 @@
+{
+  "provenance": "captured",
+  "summary": "uiautomator dumps of Pixel Launcher workspace page 2",
+  "source": "README.md, issue #14887 comments 3 and 4",
+  "capturedOn": [
+    {
+      "device": "Android device",
+      "os": "Android API 34",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Android device",
+      "os": "Android API 37",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-31",
+}

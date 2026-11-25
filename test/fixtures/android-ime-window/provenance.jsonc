@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "raw hierarchy of the Playground with Gboard open",
+  "source": "PR #9712 (manual-test batch 28)",
+  "capturedOn": [
+    {
+      "device": "Android emulator",
+      "os": "Android API 36",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-05",
+}

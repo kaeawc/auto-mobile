@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "Changed-file lists of PRs #12426, #12443, #12458, #12474 and #12480 for affected-test selection (no current reader; test/scripts/affectedTests.test.ts inlines them)",
+  "source": "PR #12489",
+  "capturedOn": [
+    {
+      "device": "host (git/GitHub PR changed-file list)",
+      "os": "host OS not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-15",
+}

@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Prototype platform runtime report reference cases",
+  "source": "PR #18705",
+  "reason": "authored reference vectors shared by TS, Kotlin and Swift",
+}

@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "CtrlProxy request_hierarchy responses with wrapper pruning on and off, API 30-36",
+  "source": "PR #16067, issue #13956",
+  "derivedFrom": "raw CtrlProxy websocket request_hierarchy captures of the Playground launch screen on Pixel 6 google_apis arm64 userdebug AVDs, API 30-36 (issue #13956)",
+  "edits": "null-valued keys removed and whitespace stripped before posting; decoded from the issue's gzip+base64 blocks",
+}

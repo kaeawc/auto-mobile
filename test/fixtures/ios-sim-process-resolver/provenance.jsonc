@@ -1,0 +1,10 @@
+{
+  "provenance": "captured",
+  "summary": "Simulator launchctl list and host ps rows for resolving a simulator app's process",
+  "source": "PR #18794",
+  "capturedOn": [
+    { "device": "iPhone 17 simulator (Settings running)", "os": "iOS 26.5", "formFactor": "phone" },
+    { "device": "macOS host (ps)", "os": "macOS, version not recorded", "formFactor": "host" },
+  ],
+  "date": "2026-11-19",
+}

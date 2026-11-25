@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "netstat -ano -p TCP and -p TCPv6 output, CRLF as captured",
+  "source": "PR #10763, issue #10717",
+  "capturedOn": [
+    {
+      "device": "Windows GitHub Actions runner (run 37843585188)",
+      "os": "Windows, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-08",
+}

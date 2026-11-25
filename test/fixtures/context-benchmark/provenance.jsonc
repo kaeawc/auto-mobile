@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Two-tool MCP tools/list JSON-RPC response line for the context token counter",
+  "source": "PR #17698, test/scripts/benchmark-context-thresholds.test.ts",
+  "reason": "authored minimal response (with a multi-byte character) that pins exact compact byte and token counts",
+}

@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "GitHub API responses (ruleset, PRs, runs, jobs, commit statuses) served by a gh stub to the time-to-green report",
+  "source": "test/bats/ci-time-to-green.bats, PR #11650, PR #12151",
+  "derivedFrom": "GitHub REST API responses for kaeawc/auto-mobile (run 38101597054, PR #11624 and others)",
+  "edits": "reduced to the fields the report reads",
+}

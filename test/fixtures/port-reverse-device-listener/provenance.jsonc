@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "Device listener script output (/proc/net/tcp, tcp6 missing-file error, pm list packages -U) for the listener parser",
+  "source": "PR #17236",
+  "derivedFrom": "DEVICE_LISTENERS_SCRIPT run on a Linux 6.18 kernel host (not an Android device; same procfs table format)",
+  "edits": "rows with non-loopback addresses dropped whole; kept rows unedited",
+}

@@ -1,0 +1,42 @@
+{
+  "provenance": "captured",
+  "summary": "Verbatim observe, observe raw and tool results from Android emulators and iOS simulators, one subdirectory per scenario",
+  "source": "nested READMEs, PR #9050, PR #17132, PR #18313, PR #18674, PR #18264 (subdirectories added 2026-10-03 to 2026-11-19)",
+  "capturedOn": [
+    { "device": "iPhone 18 Pro simulator", "os": "iOS 27.0 (24A434)", "formFactor": "phone" },
+    { "device": "iPhone simulator (390x844 pt)", "os": "iOS 27.0", "formFactor": "phone" },
+    { "device": "iPhone Duo simulator, inner display", "os": "iOS 27.1", "formFactor": "foldable" },
+    { "device": "iPhone 17 simulator", "os": "iOS 26.5 (23F77)", "formFactor": "phone" },
+    { "device": "Android emulator (google_apis)", "os": "Android API 35", "formFactor": "phone" },
+    { "device": "Pixel 9 emulator (1080x2424)", "os": "Android API 36", "formFactor": "phone" },
+  ],
+  "date": "2026-10-03",
+  "parts": {
+    "ios-prototype-sheet/ios-sheet-prototype-over-playground.runner-optimized.json": {
+      "provenance": "generated",
+      "summary": "The raw sheet capture after the iOS runner's ElementLocator.optimizeHierarchy",
+      "source": "ios-prototype-sheet/README.txt",
+      "generator": "HierarchyWindowLayerTests in ios/control-proxy (AUTOMOBILE_UPDATE_FIXTURES=1)",
+    },
+    "ios-keyboard-tabbar/plan.json": {
+      "provenance": "synthetic",
+      "summary": "The i17 tool plan manual-test batch 4 ran to reach the keyboard-up state",
+      "source": "ios-keyboard-tabbar/README.md",
+      "reason": "authored tool plan, not device output",
+    },
+    "playground-control-shapes": {
+      "provenance": "derived",
+      "summary": "Control Shapes demo observe (full, skeleton) and focusNavigate results",
+      "source": "playground-control-shapes/README.txt, PR #18303",
+      "derivedFrom": "daemon structuredContent on a Pixel 7 API 35 emulator (l18299-api35), 2026-11-13",
+      "edits": "screenshotPath replaced with <screenshot-path>",
+    },
+    "swipeon-container-floating-bar-18338": {
+      "provenance": "derived",
+      "summary": "Playground Chat observe and swipeOn result with a clickable bar inside the scroll container",
+      "source": "PR #18344",
+      "derivedFrom": "observe and swipeOn on an API 35 google_apis emulator, 2026-11-14",
+      "edits": "screenshot path replaced",
+    },
+  },
+}

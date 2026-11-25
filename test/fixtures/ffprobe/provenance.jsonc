@@ -1,0 +1,9 @@
+{
+  "provenance": "captured",
+  "summary": "ffprobe JSON format duration of a recording",
+  "source": "PR #8717",
+  "capturedOn": [
+    { "device": "host (ffprobe)", "os": "host OS not recorded", "formFactor": "host" },
+  ],
+  "date": "2026-10-01",
+}

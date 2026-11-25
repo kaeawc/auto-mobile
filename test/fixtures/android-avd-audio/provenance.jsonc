@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "AVD config.ini of a Pixel 8 android-37.0 google_apis arm64 AVD",
+  "source": "PR #15529",
+  "derivedFrom": "a real AVD config.ini (PR #15529)",
+  "edits": "avd.id and avd.name replaced with <build>, disk.dataPartition.path with <temp>",
+}

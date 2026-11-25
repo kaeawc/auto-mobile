@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "cmd display get-displays in open and closed postures from one boot",
+  "source": "README.md, PR #9220",
+  "capturedOn": [
+    {
+      "device": "Pixel 10 Pro Fold AVD (am-fold-pixel10pf)",
+      "os": "Android API 36",
+      "formFactor": "foldable",
+    },
+  ],
+  "date": "2026-10-03",
+}

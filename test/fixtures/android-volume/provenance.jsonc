@@ -1,0 +1,22 @@
+{
+  "provenance": "captured",
+  "summary": "getprop and cmd media_session volume --get stdout/stderr per audio stream",
+  "source": "README.md, PR #15806",
+  "capturedOn": [
+    {
+      "device": "Wear OS ARM64 emulators (emulator-5620, emulator-5622, sdk_gwear_arm64)",
+      "os": "Wear OS (API 37)",
+      "formFactor": "watch",
+    },
+  ],
+  "date": "2026-10-28",
+  "parts": {
+    "api37-audio-set-volume-3-5.issue.txt": {
+      "provenance": "derived",
+      "summary": "cmd audio set-volume 3 5 success line",
+      "source": "README.md",
+      "derivedFrom": "issue #15804 comment output (API 37 sdk_gwear_arm64 emulator)",
+      "edits": "transcribed from the issue comment; trailing newline added",
+    },
+  },
+}

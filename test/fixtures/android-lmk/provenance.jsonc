@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "lowmemorykiller kill lines from logcat and /proc/meminfo under memory pressure",
+  "source": "PR #16401, issue #16329; the test names them captured",
+  "capturedOn": [
+    {
+      "device": "AVD lmk-n5-16329-api34 (google_apis arm64, 2.4 GB)",
+      "os": "Android API 34 (userdebug)",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-02",
+}

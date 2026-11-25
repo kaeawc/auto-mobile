@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "Host ps pid/ppid/time rows with a booted simulator's launchd_sim tree",
+  "source": "PR #15103, test/ctrlProxy/ios/IosRunnerLaunchProgress.test.ts",
+  "capturedOn": [
+    {
+      "device": "macOS host with a booted iOS simulator",
+      "os": "iOS 26.5 runtime (23F77)",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-23",
+}

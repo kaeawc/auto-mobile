@@ -1,0 +1,21 @@
+{
+  "provenance": "captured",
+  "summary": "CarPlay template snapshot route responses from the iOS SDK",
+  "source": "PR #17960, test/models/CarPlayTemplates.test.ts",
+  "capturedOn": [
+    {
+      "device": "iPhone 18 Pro simulator (CarPlayFixture app)",
+      "os": "iOS 27.0",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-11",
+  "parts": {
+    "templates-tabbar-and-pushed-list.json": {
+      "provenance": "generated",
+      "summary": "SDK CarPlay serializer output for a tab bar over a pushed list",
+      "source": "PR #17960",
+      "generator": "ios/auto-mobile-sdk CarPlayTemplateMapper run on an iOS 27.0 simulator over in-memory CPTabBarTemplate/CPListTemplate/CPGridTemplate instances with the CarPlayFixture's content (the CarPlay scene never connected)",
+    },
+  },
+}

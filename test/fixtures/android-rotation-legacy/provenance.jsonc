@@ -1,0 +1,18 @@
+{
+  "provenance": "captured",
+  "summary": "unset user_rotation and dumpsys input SurfaceOrientation lines on API 24-27",
+  "source": "PR #19072",
+  "capturedOn": [
+    {
+      "device": "pixel_2 AVD (google_apis arm64)",
+      "os": "Android API 24",
+      "formFactor": "phone",
+    },
+    {
+      "device": "pixel_2 AVD (google_apis arm64)",
+      "os": "Android API 27",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-23",
+}

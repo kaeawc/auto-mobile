@@ -1,0 +1,18 @@
+{
+  "provenance": "captured",
+  "summary": "getevent -p/-lt and dumpsys input touch-node captures across rotation and fold posture",
+  "source": "README.md, PR #10181",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5600, AVD am-api36-ga-arm64, 1080x2400)",
+      "os": "Android API 36",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Android emulator (emulator-5602, foldable)",
+      "os": "Android API 36",
+      "formFactor": "foldable",
+    },
+  ],
+  "date": "2026-10-06",
+}

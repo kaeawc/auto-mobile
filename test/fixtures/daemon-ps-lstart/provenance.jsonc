@@ -1,0 +1,7 @@
+{
+  "provenance": "captured",
+  "summary": "ps -p <pid> -o lstart= for one process under three TZ values",
+  "source": "test/daemon/psLstartFixtures.ts, PR #10116",
+  "capturedOn": [{ "device": "macOS host", "os": "macOS 26.6.2", "formFactor": "host" }],
+  "date": "2026-10-06",
+}

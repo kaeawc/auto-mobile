@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Ten original app concepts, each a concept.json, a today.json slice and a README",
+  "source": "PR #15680, per-concept README.md",
+  "reason": "authored prototype specs for the three parity suites",
+}

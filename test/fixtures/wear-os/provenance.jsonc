@@ -1,0 +1,16 @@
+{
+  "provenance": "handWritten",
+  "summary": "dumpsys display Display Manager State for a round and a rectangular watch display",
+  "source": "PR #15086, file headers",
+  "reason": "hand-reconstructed from AOSP DisplayInfo/DisplayDeviceInfo toString without a Wear emulator; the FLAG_ROUND placement was a hypothesis",
+  "recapture": "#19261",
+  "parts": {
+    "dumpsys-display-captured-round.txt": {
+      "provenance": "derived",
+      "summary": "displayId 0 DisplayInfo record carrying FLAG_ROUND",
+      "source": "PR #15697, issue #15682",
+      "derivedFrom": "dumpsys display on the Wear OS 7.0 emulator (android-37.0 android-wear-signed arm64, wearos_small_round, 384x384) from the #15682 manual test",
+      "edits": "reduced to the one DisplayInfo line and truncated with ...; PR #15697 calls it captured-style",
+    },
+  },
+}

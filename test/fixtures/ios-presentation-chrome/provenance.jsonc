@@ -1,0 +1,11 @@
+{
+  "provenance": "captured",
+  "summary": "View hierarchies with an open SwiftUI Menu or confirmationDialog and its presentation shadow",
+  "source": "PR #18000, PR #18094",
+  "capturedOn": [
+    { "device": "iPhone 16 Pro simulator", "os": "iOS 18.6", "formFactor": "phone" },
+    { "device": "iPhone 17 Pro simulator", "os": "iOS 26.5", "formFactor": "phone" },
+    { "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" },
+  ],
+  "date": "2026-11-11",
+}

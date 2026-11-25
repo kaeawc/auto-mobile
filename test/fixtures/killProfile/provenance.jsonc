@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "adb dumpsys, appops, standby-bucket, alarm, package and power read-backs for killProfile steps",
+  "source": "PR #17230, PR #17342",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5590), fresh google_apis arm64 AVD",
+      "os": "Android API 35",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-05",
+}

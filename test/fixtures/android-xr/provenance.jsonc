@@ -1,0 +1,39 @@
+{
+  "provenance": "captured",
+  "summary": "Android XR headset and glasses captures: AVD/image metadata, observe and tap results, glasses input",
+  "source": "README.md, PRs #17794 to #18199",
+  "capturedOn": [
+    {
+      "device": "Android XR headset AVD (xr_headset_device, system-images;android-34;google-xr;arm64-v8a)",
+      "os": "Android XR (API 34)",
+      "formFactor": "xr-headset",
+    },
+    {
+      "device": "Android AI glasses AVD (ai_glasses_device, android-36 ai-glasses image)",
+      "os": "Android API 36",
+      "formFactor": "xr-glasses",
+    },
+    {
+      "device": "macOS arm64 host (sdkmanager, avdmanager, AVD config)",
+      "os": "macOS, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-11-10",
+  "parts": {
+    "avdmanager-list-avd-xr-headset.txt": {
+      "provenance": "derived",
+      "summary": "avdmanager list avd entry for the XR headset AVD",
+      "source": "README.md, PR #17794",
+      "derivedFrom": "avdmanager list avd on a macOS arm64 host, 2026-11-10",
+      "edits": "home directory replaced with <home>",
+    },
+    "observe-home-launcher-hidden-systemui.json": {
+      "provenance": "derived",
+      "summary": "observe project:full in the headset home space with hidden System UI windows",
+      "source": "README.md, PR #18008",
+      "derivedFrom": "observe project:full on the XR headset AVD, 2026-11-11",
+      "edits": "only windows 21, 24 and 29 kept; other window siblings and duplicate root siblings deleted",
+    },
+  },
+}

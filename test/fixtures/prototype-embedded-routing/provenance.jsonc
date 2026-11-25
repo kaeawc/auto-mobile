@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Embedded renderer request routing cases (via, host handler, expected route)",
+  "source": "PR #13864",
+  "reason": "authored routing decision table for Kotlin and Swift",
+}

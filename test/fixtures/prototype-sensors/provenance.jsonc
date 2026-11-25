@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Sensor throttle, rounding and shake-detector reference samples",
+  "source": "PR #15722",
+  "reason": "authored reference vectors replayed by Kotlin and Swift",
+}

@@ -1,0 +1,29 @@
+{
+  "provenance": "captured",
+  "summary": "AAOS dumpsys driving-state, UX-restriction and DO-activity output, and observe output for the driving block",
+  "source": "PR #16874, PR #18063, issue #18045",
+  "capturedOn": [{ "device": "AAOS emulator (android-automotive, userdebug, non-Play; emulator-5558)", "os": "Android API 34", "formFactor": "automotive" }],
+  "date": "2026-11-04",
+  "parts": {
+    "car-app-templates": {
+      "provenance": "derived",
+      "summary": "Observe output for six Car App Library templates (menu, list, grid, pane, place list, list while driving)",
+      "source": "PR #17504, issue #16744",
+      "derivedFrom": "observe captures on the API 34 ext9 android-automotive userdebug emulator in issue #16744",
+      "edits": "trimmed; the templates host's resource-id prefix abbreviated to host: (expanded by test/helpers/carAppTemplateFixtures.ts)"
+    },
+    "car-app-host-templates": {
+      "provenance": "derived",
+      "summary": "Observe output for the same six Car App Library templates, used by the host-rendered template marker",
+      "source": "PR #17506, issue #16744",
+      "derivedFrom": "observe captures on the API 34 android-automotive emulator in issue #16744",
+      "edits": "trimmed; the templates host's resource-id prefix abbreviated to host:"
+    },
+    "plans/garage-flow.yaml": {
+      "provenance": "synthetic",
+      "summary": "Garage car-app test plan with a vehicle deviceCondition step",
+      "source": "PR #18064, issue #18047",
+      "reason": "authored test-plan input for schema validation"
+    }
+  }
+}

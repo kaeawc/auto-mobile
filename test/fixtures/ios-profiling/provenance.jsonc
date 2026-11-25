@@ -1,0 +1,10 @@
+{
+  "provenance": "captured",
+  "summary": "Simulator launchctl list and host leaks output for heapDump",
+  "source": "README.md, PR #18777",
+  "capturedOn": [
+    { "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" },
+    { "device": "macOS host (leaks)", "os": "macOS, version not recorded", "formFactor": "host" },
+  ],
+  "date": "2026-11-20",
+}

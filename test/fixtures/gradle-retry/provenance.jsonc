@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "Gradle build log for a foojay-resolver plugin that could not be resolved on CI",
+  "source": "PR #12217, test/bats/run-gradle-with-retry.bats",
+  "derivedFrom": "real GitHub Actions Gradle failure log",
+  "edits": "trimmed",
+}

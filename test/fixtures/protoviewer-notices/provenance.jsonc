@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "swift package show-dependencies JSON for a first-party-only graph and a graph with one dependency",
+  "source": "PR #15370, test/scripts/protoviewerNotices.test.ts",
+  "reason": "authored SwiftPM graph input for the notices generator; the real graph has no third-party dependency to capture",
+}

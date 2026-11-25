@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "Golden refusal messages or parsed shapes of every input/* route param case",
+  "source": "PR #12814, PR #18921, test/daemon/inputRouteParams.test.ts",
+  "generator": "case matrix in test/daemon/helpers/inputRouteParamCases.ts run against the pre-schema hand-written parsers",
+}

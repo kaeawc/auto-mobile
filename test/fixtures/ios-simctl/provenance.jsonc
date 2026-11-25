@@ -1,0 +1,61 @@
+{
+  "provenance": "captured",
+  "summary": "xcrun simctl list JSON, defaults exports, residue reads, unified log, crash report, launchctl and failure stderr from iOS, tvOS, watchOS and visionOS simulators",
+  "source": "README.md, PR #11005, PR #11032, PR #15321, PR #17076, PR #19103",
+  "capturedOn": [
+    {
+      "device": "macOS host (xcrun simctl list)",
+      "os": "Xcode version not recorded",
+      "formFactor": "host",
+    },
+    { "device": "iPhone 18 Pro simulator", "os": "iOS 27.0", "formFactor": "phone" },
+    {
+      "device": "iOS simulator, model not recorded (residue captures)",
+      "os": "iOS 26.5",
+      "formFactor": "phone",
+    },
+    { "device": "iPhone 17 Pro simulator (Xcode 27.2)", "os": "iOS 27.2", "formFactor": "phone" },
+    {
+      "device": "Apple Watch Series 11 (46mm) simulator",
+      "os": "watchOS 26.5",
+      "formFactor": "watch",
+    },
+    { "device": "Apple TV 4K (3rd generation) simulator", "os": "tvOS 26.5", "formFactor": "tv" },
+    {
+      "device": "Apple Vision Pro 4K simulator",
+      "os": "visionOS 26.5",
+      "formFactor": "xr-headset",
+    },
+  ],
+  "date": "2026-10-09",
+  "parts": {
+    "log-show-compact-mobilesafari-ios27.txt": {
+      "provenance": "derived",
+      "summary": "Five MobileSafari compact log lines",
+      "source": "README.md, PR #15348",
+      "derivedFrom": "getLogs result of the 0.0.88 all-tools smoke run (iPhone 18 Pro simulator, iOS 27.0, 2026-10-25)",
+      "edits": "reconstructed from the parsed result: each line is the captured timestamp and message joined by one space",
+    },
+    "defaults-delete-absent-key-ios27.txt": {
+      "provenance": "derived",
+      "summary": "simctl defaults delete error for an absent key",
+      "source": "README.md",
+      "derivedFrom": "status.timing.reset.fallbackReason from manual-test batch 20261021e (iPhone 18 Pro simulator, iOS 27.0)",
+      "edits": "the iOS reset command failed: wrapper removed",
+    },
+    "residue-safari-container.txt": {
+      "provenance": "derived",
+      "summary": "simctl get_app_container output for Safari's data container",
+      "source": "README.md",
+      "derivedFrom": "simctl get_app_container <udid> com.apple.mobilesafari data on an iOS 27.0 / 26.5 simulator (2026-10-22)",
+      "edits": "host user path replaced by /Users/runner",
+    },
+    "failures": {
+      "provenance": "derived",
+      "summary": "simctl boot, shutdown and erase failure stderr",
+      "source": "README.md, PR #18506",
+      "derivedFrom": "stderr quoted in the #14116 capture comment (macOS 26.6.2, Xcode 26.6, iOS 27.0 iPhone 18 Pro simulator)",
+      "edits": "device id, home directory user and bad-device argument replaced with <UDID>, <user> and <arg>",
+    },
+  },
+}

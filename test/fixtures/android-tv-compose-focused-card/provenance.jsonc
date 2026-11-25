@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "focusedElement and skeleton row of a focused Compose for TV card with no own label",
+  "source": "README.md, issue #18028",
+  "derivedFrom": "observe structuredContent on emulator-5558 (Android TV API 36) reported in #18028",
+  "edits": "excerpted to focusedElement and the skeleton row at the same bounds; whitespace only otherwise",
+}

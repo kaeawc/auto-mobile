@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "SessionBroker prepare, status, capacity refusal, release and released-status replies",
+  "source": "README.md, PR #12497",
+  "generator": "the real SessionBroker run through createFakeBrokerScenarioContext (test/helpers/fakeBrokerScenarioContext.ts) with an in-memory SQLite store and the shared fake native port",
+}

@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "merged AndroidManifest.xml of the prototype app shell stamp template",
+  "source": "PR #17297, test/features/prototype/disposableApp/android/androidStampManifest.test.ts",
+  "capturedOn": [
+    {
+      "device": "AGP build of android/prototype-app-shell (packageBaseStampTemplate)",
+      "os": "host OS not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-11-06",
+}

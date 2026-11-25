@@ -1,0 +1,14 @@
+{
+  "provenance": "generated",
+  "summary": "Typed daemon refusal wire payloads (<code>.json) and non-tool-result refusal surfaces, shared by the TS, Kotlin and Swift contract tests",
+  "source": "PR #11229, test/daemon/refusalWireContract.test.ts",
+  "generator": "bun scripts/generate-refusal-wire-fixtures.ts (builders in test/helpers/refusalWireFixtures.ts); surfaces/ via UPDATE_CAPTURED_FIXTURES=1 on test/daemon/refusalWireContract.test.ts and the owning tests",
+  "parts": {
+    "expectations.json": {
+      "provenance": "synthetic",
+      "summary": "Expected runner disposition, read fields and known runner gaps per refusal code",
+      "source": "description field in expectations.json",
+      "reason": "authored classification table for runner refusal handling",
+    },
+  },
+}

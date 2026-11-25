@@ -1,0 +1,7 @@
+{
+  "provenance": "handWritten",
+  "summary": "logcat -v threadtime excerpt with main and crash buffers and a FATAL EXCEPTION",
+  "source": "PR #14341",
+  "reason": "written in a cloud sandbox with no emulator (PR #14341); the Playground stack frame dev.jasonpearson.Crash.run(Crash.kt:12) and the feed lines do not exist in the app",
+  "recapture": "#19261",
+}

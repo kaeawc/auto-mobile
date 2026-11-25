@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "SDK-encoded network capture event batches (URLSession, WebSocket, NWConnection) and the SdkNetworkRequestEvent key list",
+  "source": "README.md",
+  "generator": "ios/auto-mobile-sdk NetworkCaptureRecorderTests.testWritesSerializedNetworkCaptureFixtures (AUTOMOBILE_FIXTURE_OUT_DIR)",
+}

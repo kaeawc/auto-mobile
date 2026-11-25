@@ -1,0 +1,27 @@
+{
+  "provenance": "captured",
+  "summary": "Wear OS notification stream (uiautomator and CtrlProxy), tile/watch-face/complication adb transcripts, observe surface captures and dumpsys wear_service",
+  "source": "PR #16879, PR #17330, PR #17357, PR #17361, PR #17505, PR #17534, PR #17570, PR #17609, PR #17789, PR #17922, PR #17973, issue #16824",
+  "capturedOn": [
+    {
+      "device": "Wear OS emulator (android-wear-signed, wearos_small_round, 384x384)",
+      "os": "Wear OS 7.0 (API 37)",
+      "formFactor": "watch",
+    },
+    {
+      "device": "Wear OS round emulator (android-wear-signed, 454x454)",
+      "os": "Wear OS 7.0 (API 37)",
+      "formFactor": "watch",
+    },
+  ],
+  "date": "2026-11-05",
+  "parts": {
+    "wear-service/issue-17518-watch-faces-excerpt.txt": {
+      "provenance": "derived",
+      "summary": "watch_faces section excerpt of dumpsys wear_service",
+      "source": "PR #17569, issue #17518",
+      "derivedFrom": "dumpsys wear_service on the Wear OS 7.0 / API 37 emulator, quoted in issue #17518",
+      "edits": "excerpt only; extracted byte-for-byte from the issue's code block",
+    },
+  },
+}

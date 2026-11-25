@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "PointerProbe logcat of one uinput pen stroke per display rotation",
+  "source": "PR #16267",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5556, arm64; AVD profile not recorded)",
+      "os": "Android API 37",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-01",
+}

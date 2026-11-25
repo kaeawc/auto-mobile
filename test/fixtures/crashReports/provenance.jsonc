@@ -1,0 +1,16 @@
+{
+  "provenance": "handWritten",
+  "summary": "Android dumpsys dropbox crash entries and iOS Simulator .ips crash reports read by the crash report parsers and finder",
+  "source": "PR #14343, PR #16091",
+  "reason": "The dropbox files and ios-simulator-sigabrt.ips were hand-built from the documented dropbox/tombstone and .ips formats, not captured from a device (PR #14343)",
+  "recapture": "#14103",
+  "parts": {
+    "ios-simulator-playground-sigabrt-captured.ips": {
+      "provenance": "derived",
+      "summary": "Playground SIGABRT .ips report from an iOS Simulator",
+      "source": "PR #16091",
+      "derivedFrom": "a real Playground SIGABRT .ips captured on #14103 (iOS 27.0 simulator, macOS 26.6.2)",
+      "edits": "header verbatim; threads trimmed to the faulting thread's 8 frames, usedImages omitted, home path shown as /Users/USER",
+    },
+  },
+}

@@ -1,0 +1,15 @@
+{
+  "provenance": "captured",
+  "summary": "stdout, stderr and exit codes of simctl openurl, push, privacy, ui, status_bar and pbcopy on Apple TV",
+  "source": "PR #17537",
+  "capturedOn": [{ "device": "Apple TV simulator", "os": "tvOS 26.5", "formFactor": "tv" }],
+  "date": "2026-11-08",
+  "parts": {
+    "push.payload": {
+      "provenance": "synthetic",
+      "summary": "The APNs payload passed to simctl push",
+      "source": "PR #17537",
+      "reason": "Authored command input, not tool output",
+    },
+  },
+}

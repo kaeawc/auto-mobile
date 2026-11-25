@@ -1,0 +1,25 @@
+{
+  "provenance": "captured",
+  "summary": "observe --project full hierarchies of the Android chooser/intentresolver and iOS UIActivityViewController share sheets",
+  "source": "PR #18749, fixture deviceId and sdkInt fields",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5716), google_apis",
+      "os": "Android API 30",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Android emulator (emulator-5714), google_apis",
+      "os": "Android API 34",
+      "formFactor": "phone",
+    },
+    { "device": "Android emulator (emulator-5712)", "os": "Android API 37", "formFactor": "phone" },
+    { "device": "iOS simulator, model not recorded", "os": "iOS 26.5", "formFactor": "phone" },
+    {
+      "device": "iOS simulator, model not recorded",
+      "os": "iOS 27, minor version not recorded",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-23",
+}

@@ -1,0 +1,32 @@
+{
+  "provenance": "captured",
+  "summary": "uiautomator dumps of the launcher Add to home screen pin dialog",
+  "source": "README.md, PR #13534, PR #16063 (#12261 comment copies)",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5554), Pixel Launcher",
+      "os": "Android API 37",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Android emulator from #12261 comment 5, Pixel Launcher",
+      "os": "Android API 33",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Android emulator from #12261 comment 5, AOSP Launcher3",
+      "os": "Android API 30",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-18",
+  "parts": {
+    "pin-dialog-api37-observe-full.json": {
+      "provenance": "derived",
+      "summary": "observe project:full MCP envelope with the API 37 pin dialog on screen",
+      "source": "README.md, PR #13981",
+      "derivedFrom": "observe project:full on emulator-5554 (API 37), 2026-10-18 (PR #13534)",
+      "edits": "host-computed layoutWarnings regenerated (#13981)",
+    },
+  },
+}

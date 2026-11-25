@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "tools/list names and automobile:tools catalog entries for an Android TV session",
+  "source": "README.md, issue #18029",
+  "derivedFrom": "tools/list and automobile:tools payloads on emulator-5558 (Android TV API 36) reported in #18029",
+  "edits": "catalog entries limited to the tools missing from the list plus observe and tapOn; whitespace only otherwise",
+}

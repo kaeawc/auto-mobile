@@ -1,0 +1,7 @@
+{
+  "provenance": "handWritten",
+  "summary": "plutil JSON of an installed DeepLinkDemo.app Info.plist and its codesign entitlements for getDeepLinks",
+  "source": "README.md, PR #14349",
+  "reason": "Hand-authored stand-in for an installed .app bundle (Info.plist via plutil, entitlements via codesign); not captured (#14094)",
+  "recapture": "#18775",
+}

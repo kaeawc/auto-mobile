@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "focusNavigate and tapOn results on a Compose for TV home with an off-screen card",
+  "source": "README.md, issue #18027",
+  "capturedOn": [
+    {
+      "device": "Android TV 1080p AVD (system-images;android-36;android-tv;arm64-v8a, emulator-5558)",
+      "os": "Android TV (API 36)",
+      "formFactor": "tv",
+    },
+  ],
+  "date": "2026-11-11",
+}

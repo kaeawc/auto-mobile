@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "getevent -lt touch streams for taps that repeat the slot's coordinates",
+  "source": "README.md, issues #9143 and #9311",
+  "capturedOn": [
+    {
+      "device": "AVD am-api36-ga-arm64",
+      "os": "Android API 36",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-03",
+}

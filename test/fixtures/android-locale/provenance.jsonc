@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "getprop, cmd locale and settings output after each step of a manual locale test",
+  "source": "PR #10295, test/helpers/androidLocaleCapture.ts",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5600)",
+      "os": "Android, API level not recorded",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-06",
+}

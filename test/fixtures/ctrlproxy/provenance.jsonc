@@ -1,0 +1,41 @@
+{
+  "provenance": "captured",
+  "summary": "dumpsys accessibility output with CtrlProxy bound (API 36) and bound/unbound (API 27)",
+  "source": "PR #7927",
+  "capturedOn": [
+    {
+      "device": "Android emulator (google_apis arm64)",
+      "os": "Android API 36",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-09-27",
+  "parts": {
+    "accessibility-api27-bound.txt": {
+      "provenance": "captured",
+      "summary": "API 27 dumpsys accessibility with CtrlProxy in services:{...}",
+      "source": "PR #19079, test/ctrlProxy/CtrlProxyLegacyDumpsys.test.ts",
+      "capturedOn": [
+        {
+          "device": "Android emulator (google_apis arm64, 1 core, 1536 MB)",
+          "os": "Android API 27",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-11-23",
+    },
+    "accessibility-api27-unbound.txt": {
+      "provenance": "captured",
+      "summary": "API 27 dumpsys accessibility with no bound service",
+      "source": "PR #19079, test/ctrlProxy/CtrlProxyLegacyDumpsys.test.ts",
+      "capturedOn": [
+        {
+          "device": "Android emulator (google_apis arm64, 1 core, 1536 MB)",
+          "os": "Android API 27",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-11-23",
+    },
+  },
+}

@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "Shared criticalSection lock and barrier parameter cases with expected validity and messages for the TS and Kotlin plan validators",
+  "source": "PR #10587, description field in cases.json",
+  "generator": "an uncommitted scratch generator run against the daemon PlanValidator; pinned by test/utils/plan/PlanValidatorCoordinationParams.test.ts and CoordinationParamsParityTest",
+}

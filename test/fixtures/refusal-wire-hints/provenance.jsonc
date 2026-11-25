@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "retryAfterMs hint table: usable hints and backoff steps the Android and iOS runners must agree on",
+  "source": "PR #11609, description field in hints.json",
+  "reason": "authored decision table for runner backoff logic",
+}

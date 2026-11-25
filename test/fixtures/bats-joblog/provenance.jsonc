@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "GNU Parallel joblog from the ubuntu bats-unit-joblog CI artifact",
+  "source": "test/bats/run-bats.bats, PR #11504",
+  "derivedFrom": "bats-unit-joblog artifact of merge.yml run 38085793737",
+  "edits": "trimmed to sequences 1-12 of the parallel pass",
+}

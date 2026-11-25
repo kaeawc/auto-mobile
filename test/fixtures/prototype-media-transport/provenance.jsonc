@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Chunked media asset transport cases (signatures, begins, streams)",
+  "source": "PR #18685, _comment in the file",
+  "reason": "hand-maintained contract cases shared by TS and Kotlin",
+}

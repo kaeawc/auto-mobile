@@ -1,0 +1,120 @@
+{
+  "provenance": "captured",
+  "summary": "cmd device_state, emu sensor hinge-angle0 and dumpsys display/SurfaceFlinger output from fold, phone and AAOS AVDs",
+  "source": "README.md (foldpf 2026-09-30, hinge-angle0 issue #9018, api37-fold 2026-11-24)",
+  "capturedOn": [
+    {
+      "device": "Pixel 10 Pro Fold AVD (am-fold-pixel10pf)",
+      "os": "Android API 36",
+      "formFactor": "foldable",
+    },
+    {
+      "device": "Pixel 9 Pro Fold AVD",
+      "os": "Android API 37",
+      "formFactor": "foldable",
+    },
+    {
+      "device": "am-resizable AVD",
+      "os": "Android API 36",
+      "formFactor": "foldable",
+    },
+  ],
+  "date": "2026-09-30",
+  "parts": {
+    "aaos-multidisplay": {
+      "provenance": "captured",
+      "summary": "dumpsys display and cmd display get-displays with -multidisplay",
+      "source": "README.md, issue #17606",
+      "capturedOn": [
+        {
+          "device": "AAOS AVD l17606-aaos",
+          "os": "Android Automotive API 34 (android-34-ext9)",
+          "formFactor": "automotive",
+        },
+      ],
+      "date": "2026-11-08",
+    },
+    "fold-pixel10pf-api36": {
+      "provenance": "captured",
+      "summary": "open/closed display, SurfaceFlinger, device_state and hinge captures from one boot",
+      "source": "fold-pixel10pf-api36/README.md",
+      "capturedOn": [
+        {
+          "device": "Pixel 10 Pro Fold AVD (emulator-5602)",
+          "os": "Android API 36",
+          "formFactor": "foldable",
+        },
+      ],
+      "date": "2026-10-03",
+    },
+    "fold-surfaceflinger.txt": {
+      "provenance": "captured",
+      "summary": "dumpsys SurfaceFlinger --display-id lines of the fold AVD",
+      "source": "PR #8341; byte-identical to fold-pixel10pf-api36/fold-open-surfaceflinger.txt",
+      "capturedOn": [
+        {
+          "device": "Pixel 10 Pro Fold AVD",
+          "os": "Android API 36",
+          "formFactor": "foldable",
+        },
+      ],
+      "date": "2026-09-30",
+    },
+    "fold-displays.txt": {
+      "provenance": "handWritten",
+      "summary": "cmd display get-displays for an open fold",
+      "source": "README.md, PR #8289",
+      "reason": "provenance undocumented; its cover id 4619827259835644673 is not corroborated by any capture",
+      "recapture": "#19261",
+    },
+    "fold-states.txt": {
+      "provenance": "handWritten",
+      "summary": "cmd device_state print-states for a fold",
+      "source": "PR #8289",
+      "reason": "written for PR #8289; differs from the real capture foldpf-print-states.txt",
+      "recapture": "#19261",
+    },
+    "fold-open-display-device-info.txt": {
+      "provenance": "handWritten",
+      "summary": "dumpsys display mDisplayDevices for an open fold",
+      "source": "PR #8333, PR #8341",
+      "reason": "record heads are verbatim device lines; the fields after them are representative, not captured",
+      "recapture": "#19261",
+    },
+    "dual-display-device-info.txt": {
+      "provenance": "handWritten",
+      "summary": "dumpsys display mDisplayDevices for a dual-display device",
+      "source": "PR #8333, PR #8341",
+      "reason": "PR #8333 says the fixtures were not captured from a device",
+      "recapture": "#19261",
+    },
+    "phone-display-device-info.txt": {
+      "provenance": "handWritten",
+      "summary": "dumpsys display mDisplayDevices for a phone",
+      "source": "PR #8333, PR #8341",
+      "reason": "PR #8333 says the fixtures were not captured from a device",
+      "recapture": "#19261",
+    },
+    "phone-displays.txt": {
+      "provenance": "handWritten",
+      "summary": "cmd display get-displays for a phone",
+      "source": "PR #8289",
+      "reason": "written for PR #8289 with no capture record",
+      "recapture": "#19261",
+    },
+    "phone-states.txt": {
+      "provenance": "handWritten",
+      "summary": "cmd device_state print-states for a phone with no states",
+      "source": "PR #8289",
+      "reason": "written for PR #8289 with no capture record",
+      "recapture": "#19261",
+    },
+    "phone-surfaceflinger.txt": {
+      "provenance": "handWritten",
+      "summary": "dumpsys SurfaceFlinger --display-id line for a phone",
+      "source": "PR #8289",
+      "reason": "written for PR #8289 with no capture record",
+      "recapture": "#19261",
+    },
+  },
+}

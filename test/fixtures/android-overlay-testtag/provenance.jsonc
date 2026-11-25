@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "five CtrlProxy prototype nodes whose Compose testTags arrive only as resource-id",
+  "source": "PR #10628, test/features/element-resolution/testTagResourceIdFallback.test.ts",
+  "derivedFrom": "CtrlProxy hierarchy captured on emulator-5602 (API 36, Pixel Fold inner panel) at main 4383fadc6",
+  "edits": "kept only the five prototype nodes, under a bare hierarchy.node array",
+}

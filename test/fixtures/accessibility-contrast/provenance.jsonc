@@ -1,0 +1,26 @@
+{
+  "provenance": "captured",
+  "summary": "Contrast-audit screenshots (Playground keyboard down/up, dark Settings search) with element bounds from the same observations",
+  "source": "PR #10290, PR #10691, test/features/accessibility/ContrastDarkSettingsSearch.test.ts",
+  "capturedOn": [
+    { "device": "Android emulator, phone (1080x2400)", "os": "Android, API level not recorded", "formFactor": "phone" },
+    { "device": "Android emulator, foldable inner display (2076x2152, 480dpi)", "os": "Android, API level not recorded", "formFactor": "foldable" }
+  ],
+  "date": "2026-10-06",
+  "parts": {
+    "contrast-audit-settings-home-scrim-android37.png": {
+      "provenance": "captured",
+      "summary": "Settings home under the ANR scrim, manual-test batch 20261021d",
+      "source": "issue #14738, PR #14775",
+      "capturedOn": [{ "device": "Android emulator (emulator-5612)", "os": "Android API 37", "formFactor": "phone" }],
+      "date": "2026-10-21"
+    },
+    "contrast-audit-settings-home-light-summary-android37.png": {
+      "provenance": "captured",
+      "summary": "Settings home in light theme, manual-test batch 20261022a",
+      "source": "issue #14738, PR #14849",
+      "capturedOn": [{ "device": "Android emulator", "os": "Android API 37", "formFactor": "phone" }],
+      "date": "2026-10-22"
+    }
+  }
+}

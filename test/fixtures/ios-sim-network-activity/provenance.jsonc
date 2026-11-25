@@ -1,0 +1,29 @@
+{
+  "provenance": "captured",
+  "summary": "Host lsof, ps and nettop output for a simulator app holding one HTTP connection",
+  "source": "README.md, PR #19116",
+  "capturedOn": [
+    {
+      "device": "macOS host with an iPhone 17 simulator (Xcode 27.2)",
+      "os": "iOS 27.2 runtime",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-11-23",
+  "parts": {
+    "ps-simulator-tree.txt": {
+      "provenance": "derived",
+      "summary": "ps rows for launchd and the simulator's launchd_sim tree",
+      "source": "README.md",
+      "derivedFrom": "ps -axo pid=,ppid=,rss=,pcpu=,command= on the same host and run",
+      "edits": "kept only launchd and the 310 processes under the simulator's launchd_sim; home directory replaced with /Users/user/",
+    },
+    "nettop-process-bytes.txt": {
+      "provenance": "derived",
+      "summary": "nettop per-process byte counters",
+      "source": "README.md",
+      "derivedFrom": "nettop -P -L 1 -x -J bytes_in,bytes_out on the same host and run",
+      "edits": "kept the header, launchd, syslogd and the simulator's rows; other host processes removed",
+    },
+  },
+}

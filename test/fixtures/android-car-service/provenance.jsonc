@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "cmd car_service and related adb output on an AAOS user build, including the non-user-build refusals",
+  "source": "PR #16133, issue #16121",
+  "capturedOn": [
+    {
+      "device": "AAOS emulator, user build",
+      "os": "Android Automotive, API level not recorded (#16121 reports android-35-ext15)",
+      "formFactor": "automotive",
+    },
+  ],
+  "date": "2026-10-31",
+}

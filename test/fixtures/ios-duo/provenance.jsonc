@@ -1,0 +1,29 @@
+{
+  "provenance": "captured",
+  "summary": "observe outputs and raw runner hierarchies from the iPhone Duo cover and inner panels",
+  "source": "PR #10811, PR #17114, PR #17210, PR #17215, PR #17339, PR #18570, PR #18854",
+  "capturedOn": [
+    {
+      "device": "iPhone Duo simulator",
+      "os": "iOS 27.1 (the #8379 capture's version not recorded)",
+      "formFactor": "foldable",
+    },
+  ],
+  "date": "2026-10-08",
+  "parts": {
+    "observe-sessionless-inner-landscape-17846.json": {
+      "provenance": "derived",
+      "summary": "Sessionless observe of the inner panel in landscape",
+      "source": "PR #17849",
+      "derivedFrom": "issue #17846 observe output (iPhone Duo simulator)",
+      "edits": "host path replaced; otherwise verbatim",
+    },
+    "observe-runner-launch-queued-inner-landscape-17880.json": {
+      "provenance": "derived",
+      "summary": "observe with a runner_launch_queued hierarchy error on the inner panel",
+      "source": "PR #17887",
+      "derivedFrom": "issue #17880 observe output (iPhone Duo simulator)",
+      "edits": "screenshot path shortened to <screenshots> in the issue; otherwise verbatim",
+    },
+  },
+}

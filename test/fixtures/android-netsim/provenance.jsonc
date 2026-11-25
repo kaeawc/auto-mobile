@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "netsim_N.ini discovery file a private netsimd wrote, holding its grpc.port",
+  "source": "PR #17562 (commit: captured from a real netsimd on macOS)",
+  "capturedOn": [
+    {
+      "device": "macOS host (private netsimd -i 150)",
+      "os": "macOS, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-11-08",
+}

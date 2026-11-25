@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "adb content insert/query/delete, seeder broadcast and SMS role-holder output for seedContent",
+  "source": "PR #17981 device runs on issue #14119; test/features/contentSeed/SeedContent.test.ts calls them real captures",
+  "capturedOn": [
+    {
+      "device": "Pixel 8 AVD (google_apis arm64)",
+      "os": "Android API 35",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-11",
+}

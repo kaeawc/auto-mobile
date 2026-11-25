@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "Small solid-colour and gradient PNGs for contrast, overlay and touch-target audit checks",
+  "source": "PR #111",
+  "generator": "test/fixtures/generate-test-images.ts",
+}

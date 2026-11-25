@@ -23,6 +23,7 @@ import { DOCTOR_EXEC_TIMEOUT_MS } from "../../utils/diagnosticTimeouts";
 import { createIosDoctorDependencies } from "./iosDoctorDependencies";
 import { checkIosCtrlProxyRunner, checkIosObserveRoundTrip } from "./iosRunnerChecks";
 import { checkIosNetworkFilter } from "./iosNetworkFilterChecks";
+import { checkExpiredIosDisposableApps } from "./disposableApps";
 
 // Re-exported so doctor consumers (and tests) can reference the feature command
 // set without reaching into the runner client module.
@@ -776,6 +777,16 @@ export async function runIosChecks(
   await run(() => checkAppleDeveloperAccount(dependencies, options));
   await run(() => checkProvisioningProfiles(dependencies, options));
   await run(() => checkBootedSimulators(dependencies, options));
+  if (dependencies.disposableApps) {
+    remainingDoctorProbe(options);
+    results.push(
+      ...(await checkExpiredIosDisposableApps(options, {
+        platform: dependencies.platform,
+        simctl: dependencies.createSimctlClient(),
+        lister: dependencies.disposableApps,
+      })),
+    );
+  }
   if (dependencies.simFleet) {
     const simFleet = dependencies.simFleet;
     await run(() => checkIosSimulatorFleetCost(simFleet, options));

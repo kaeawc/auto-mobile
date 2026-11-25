@@ -100,6 +100,23 @@ for (const file of readdirSync(invalidDir).filter((name) => name.startsWith("nes
   );
 }
 
+const duplicateKeyFixtures: {
+  name: string;
+  spec: Raw;
+  error?: { path: string; message: string };
+}[] = JSON.parse(
+  readFileSync(
+    new URL("../../fixtures/prototype-spec/repeat/nested-duplicate-keys.json", import.meta.url),
+    "utf8",
+  ),
+);
+for (const fixture of duplicateKeyFixtures) {
+  test(`nested-duplicate-keys: ${fixture.name}`, () =>
+    expect(validatePrototypeSpec(fixture.spec)).toMatchObject(
+      fixture.error ? { success: false, error: fixture.error } : { success: true },
+    ));
+}
+
 function nestedSpec(
   outerCount: number,
   innerCount: number,

@@ -152,6 +152,19 @@ enum PrototypeRepeat {
         )
     }
 
+    /// The same checks for one lazy list row, whose template `validateDerivedRows` never expands (#18665).
+    static func validateDerivedRow(
+        _ template: JSONValue, path: String, listPath: String, row: PrototypeRepeatInstance,
+        formatter: PrototypeValueFormatter, environment: PrototypeFormatEnvironment
+    )
+        throws
+    {
+        try validateDerivedTree(
+            template, path: path, formatter: formatter, environment: environment,
+            outer: row, names: [], repeatPath: listPath
+        )
+    }
+
     private static func validateDerivedTree(
         _ node: JSONValue, path: String, formatter: PrototypeValueFormatter,
         environment: PrototypeFormatEnvironment, outer: PrototypeRepeatInstance?,

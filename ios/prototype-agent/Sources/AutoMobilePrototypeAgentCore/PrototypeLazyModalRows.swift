@@ -16,7 +16,9 @@ final class PrototypeLazyModalRows {
         let count = PrototypeLazyList.keys(node: list, data: data).count
         var next: [Int: (json: JSONValue, node: PrototypeNode)] = [:]
         for index in 0 ..< count {
-            guard let resolved = PrototypeLazyList.resolvedRow(node: list, data: data, index: index) else { continue }
+            // A row whose derived keys collide is skipped here; its visible cell already warns once.
+            guard let resolved = try? PrototypeLazyList.resolvedRow(node: list, data: data, index: index)
+            else { continue }
             if let cached = rows[index], cached.json == resolved.json {
                 next[index] = cached
             } else if let node = try? JSONDecoder().decode(

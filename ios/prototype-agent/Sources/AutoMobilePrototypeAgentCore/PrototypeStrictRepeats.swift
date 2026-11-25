@@ -159,7 +159,9 @@ struct PrototypeStrictRepeats {
     }
 
     func identity(_ node: [String: JSONValue], path: String, scope own: Scope) throws {
-        if let key = node["repeat"]?.objectFields?["key"]?.stringValue, !own.derived.contains(key) {
+        if let key = node["repeat"]?.objectFields?["key"]?.stringValue, own.derived.contains(key) {
+            try derivedIdentity(node, path: path, scope: own, key: key)
+        } else if let key = node["repeat"]?.objectFields?["key"]?.stringValue {
             var seen: [[UInt16]: Int] = [:]
             for (index, item) in own.items.enumerated() {
                 guard let value = item[key] else {
@@ -177,6 +179,38 @@ struct PrototypeStrictRepeats {
                 }
                 seen[identity] = index
             }
+        }
+    }
+
+    /// A derived key's string is formatted on the device, but one entry formats equal inputs to equal
+    /// strings, so two rows that feed it the same input always share a key (#18665).
+    private func derivedIdentity(_ node: [String: JSONValue], path: String, scope own: Scope, key: String) throws {
+        let of = node["repeat"]?.objectFields?["derive"]?.objectFields?[key]?.objectFields?["of"]?.objectFields
+        guard let of, own.items.count >= 2 else { return }
+        let constant = of["value"] != nil
+        let field = of["item"]?.stringValue
+        if !constant, field == nil || own.derived.contains(field ?? "") { return }
+        var seen: [String: Int] = [:]
+        for (index, item) in own.items.enumerated() {
+            guard let input = constant ? "constant" : Self.derivedKeyInput(item[field ?? ""]) else { continue }
+            if let first = seen[input] {
+                throw PrototypeContractValidator.invalid(
+                    "\(path).repeat.key",
+                    "Derived repeat key \(PrototypeContractValidator.quoted(key)) has the same input for items \(first) and \(index)"
+                )
+            }
+            seen[input] = index
+        }
+    }
+
+    /// The row's input to a derived key, or nil when it is not a comparable scalar.
+    private static func derivedKeyInput(_ value: JSONValue?) -> String? {
+        switch value {
+        case let .string(text)?: "string:\(text)"
+        case let .bool(flag)?: "boolean:\(flag)"
+        // Interpolating a Double keeps -0 ("-0.0") apart from 0, as a formatter renders it.
+        case let .number(number)?: "number:\(number)"
+        default: nil
         }
     }
 

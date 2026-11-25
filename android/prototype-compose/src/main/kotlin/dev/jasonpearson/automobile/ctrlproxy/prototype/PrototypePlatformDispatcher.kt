@@ -77,7 +77,9 @@ internal class PrototypePlatformDispatcher(
     if (closed) return false
     val module = registry.module(event.name) ?: return false
     if (!module.simulate(event)) return false
-    deliverEvent(module, event, simulated = true)
+    // The realtime module delivers a simulated frame through its own sink, routes and all, in
+    // order with real frames (#14269); its state here is always empty and must not be published.
+    if (module !is PrototypeRealtimeModule) deliverEvent(module, event, simulated = true)
     return true
   }
 

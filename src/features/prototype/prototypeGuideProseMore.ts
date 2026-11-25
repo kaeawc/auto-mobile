@@ -315,8 +315,8 @@ it, before anything is shown or sent.
 
 ### Realtime channels
 
-The validated contract requires \`prototype_platform_realtime_v1\`; current Android and iOS
-runtimes do not advertise it. A root \`channels\` map holds at most four named channels and
+The validated contract requires \`prototype_platform_realtime_v1\`; Android CtrlProxy advertises it
+(and \`prototype_platform_realtime_device_v1\`), the iOS agent does not yet. A root \`channels\` map holds at most four named channels and
 requires \`requires.platform:["realtime"]\`. Each channel declares \`kind:"websocket"|"sse"\`
 and \`url\` (ws/wss or http/https respectively), using request URL placeholders and length rules.
 Optional fields: \`protocols\` (WebSocket only, up to four), \`headers\` (up to 16, request rules
@@ -333,6 +333,9 @@ Calls use \`{type:"platform",call:"realtime.connect"|"realtime.disconnect",args:
 and \`realtime.send\` with \`args:{channel:"chat",body:{value:json}}\` (WebSocket only).
 Read live counters with \`{platform:"/realtime/chat/framesIn"}\`; state keys are status, attempt,
 framesIn, framesDropped, closeCode, closeReason and error. Events are realtime.status and realtime.frame.
+On Android, \`simulate\` with \`event:"realtime.frame"\` and \`data:{channel, data, event?, id?}\` feeds a
+declared channel a frame (a string is the frame text) that is decoded, counted and routed like a
+server frame, even with no connection; a simulated \`realtime.status\` is refused.
 The same capability gates \`appendData.maxItems\` and \`upsertData {path,key,value,maxItems?}\`.
 Upsert replaces the first row whose key pointer matches the incoming value, otherwise appends;
 missing incoming identity is an error. maxItems is 1..2000 and drops oldest rows before limits apply.

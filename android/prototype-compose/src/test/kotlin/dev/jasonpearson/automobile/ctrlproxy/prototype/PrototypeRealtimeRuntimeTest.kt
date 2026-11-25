@@ -312,6 +312,51 @@ class PrototypeRealtimeRuntimeTest {
   }
 
   @Test
+  fun `a simulated frame runs the channel's routes and reaches the host marked simulated`() =
+    runTest {
+      val transport = FakeTransport()
+      val events = mutableListOf<PrototypeEvent>()
+      val runtime = runtime(transport, spec("manual"), events = events)
+      runtime.shown()
+      runCurrent()
+      val frame =
+        obj(
+          "channel" to JsonPrimitive("chat"),
+          "data" to obj("id" to JsonPrimitive(1), "text" to JsonPrimitive("hi")),
+        )
+      assertTrue(runtime.simulatePlatformEvent("realtime.frame", frame))
+      advanceTimeBy(PrototypeChannelLimits.flushMs + 1L)
+      runCurrent()
+      assertEquals(emptyList<String>(), warnings)
+      assertTrue("a simulated frame opens no connection", transport.opened.isEmpty())
+      assertEquals(listOf("hi"), runtime.messages())
+      assertEquals(1, runtime.chat()?.get("framesIn")?.jsonPrimitive?.content?.toInt())
+      val delivered =
+        events
+          .mapNotNull { it.payload as? JsonObject }
+          .filter {
+            it["event"]?.jsonPrimitive?.content == "realtime.frame"
+          }
+      assertEquals(1, delivered.size)
+      assertEquals(JsonPrimitive(true), delivered.single()["simulated"])
+    }
+
+  @Test
+  fun `a simulated status or a frame for an undeclared channel is refused`() = runTest {
+    val transport = FakeTransport()
+    val runtime = runtime(transport, spec("manual"))
+    runtime.shown()
+    runCurrent()
+    val status = obj("channel" to JsonPrimitive("chat"), "status" to JsonPrimitive("open"))
+    assertEquals(false, runtime.simulatePlatformEvent("realtime.status", status))
+    val elsewhere = obj("channel" to JsonPrimitive("other"), "data" to JsonPrimitive("x"))
+    assertEquals(false, runtime.simulatePlatformEvent("realtime.frame", elsewhere))
+    runCurrent()
+    assertEquals(0, runtime.chat()?.get("framesIn")?.jsonPrimitive?.content?.toInt())
+    assertEquals("idle", runtime.chat()?.get("status")?.jsonPrimitive?.content)
+  }
+
+  @Test
   fun `realtime calls connect, send and disconnect a manual channel`() = runTest {
     val transport = FakeTransport()
     val events = mutableListOf<PrototypeEvent>()

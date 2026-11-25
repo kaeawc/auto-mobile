@@ -485,16 +485,22 @@ class PrototypeRuntime(
         if (current.active) publishRealtimeState(channel, state)
       }
 
-      override suspend fun event(name: String, data: JsonObject) = exclusively {
-        val channel = (data["channel"] as? JsonPrimitive)?.content
-        if (channel == null || !channelLive(channel)) return@exclusively
-        try {
-          deliverPlatformEvent(name, data)
-        } catch (refused: IllegalArgumentException) {
-          // A refused `platform.on` write changes nothing; the channel keeps delivering frames.
-          warn("Refused $name handler: ${refused.message}")
+      override suspend fun event(name: String, data: JsonObject) = deliver(name, data, false)
+
+      override suspend fun simulatedEvent(name: String, data: JsonObject) =
+        deliver(name, data, true)
+
+      private suspend fun deliver(name: String, data: JsonObject, simulated: Boolean) =
+        exclusively {
+          val channel = (data["channel"] as? JsonPrimitive)?.content
+          if (channel == null || !channelLive(channel)) return@exclusively
+          try {
+            deliverPlatformEvent(name, data, simulated)
+          } catch (refused: IllegalArgumentException) {
+            // A refused `platform.on` write changes nothing; the channel keeps delivering frames.
+            warn("Refused $name handler: ${refused.message}")
+          }
         }
-      }
 
       override suspend fun run(channel: String, actions: JsonArray, event: JsonElement) =
         exclusively {

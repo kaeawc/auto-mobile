@@ -28,7 +28,14 @@ import kotlinx.serialization.json.JsonPrimitive
 class PrototypeRealtimeConfig(
   val transports: PrototypeChannelTransports,
   val random: Random = Random.Default,
-)
+) {
+  companion object {
+    /** Channels, realtime calls and reads; advertised by a runtime that owns channels. */
+    const val CAPABILITY = "prototype_platform_realtime_v1"
+    /** `via: "device"` channels; advertised by a runtime whose device transport opens them. */
+    const val DEVICE_CAPABILITY = "prototype_platform_realtime_device_v1"
+  }
+}
 
 /**
  * The `realtime` module of one runtime (#14269), constructed per runtime like the device module, so
@@ -72,6 +79,8 @@ internal class PrototypeRealtimeModule(
       newId = newId,
     )
   private val inbox = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+  /** The declared channel ids, read without a lock so [simulate] can refuse an unknown one. */
+  @Volatile private var declared: Set<String> = emptySet()
 
   init {
     // Each entry is isolated: a throw ends that entry only, so a later close() still runs.
@@ -91,6 +100,7 @@ internal class PrototypeRealtimeModule(
 
   /** The spec's channels as declared at a show or patch; unchanged ones are left alone. */
   fun update(channels: Map<String, PrototypeChannelDeclaration>) {
+    declared = channels.keys.toSet()
     inbox.trySend { controller.update(channels) }
   }
 
@@ -108,6 +118,25 @@ internal class PrototypeRealtimeModule(
     controller.beginClose()
     inbox.close()
     scope.launch(NonCancellable, start = CoroutineStart.UNDISPATCHED) { controller.close() }
+  }
+
+  /**
+   * `prototype simulate` of `realtime.frame {channel, data, event?, id?}` (#14269). A string `data`
+   * is the frame text and any other JSON its compact text, so a `json` channel decodes it as it
+   * would a server frame. The frame is queued behind the inbox, because the caller holds the
+   * interaction lock, and the controller delivers it, routes and all; the dispatcher does not
+   * deliver it again. A simulated `realtime.status` is refused: it would put the slot out of step
+   * with the real connection.
+   */
+  override suspend fun simulate(event: PlatformEvent): Boolean {
+    if (event.name != PrototypeChannelController.FRAME_EVENT) return false
+    val channel = (event.data["channel"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    val data = event.data["data"]
+    if (channel == null || data == null || channel !in declared) return false
+    val text = if (data is JsonPrimitive && data.isString) data.content else data.toString()
+    val frameEvent = (event.data["event"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    val id = (event.data["id"] as? JsonPrimitive)?.takeIf { it.isString }?.content
+    return inbox.trySend { controller.simulateFrame(channel, text, frameEvent, id) }.isSuccess
   }
 
   override suspend fun call(call: PlatformCall): PlatformCallResult {
@@ -161,7 +190,7 @@ internal class PrototypeRealtimeModule(
 
   companion object {
     const val NAME = "realtime"
-    const val CAPABILITY = "prototype_platform_realtime_v1"
+    const val CAPABILITY = PrototypeRealtimeConfig.CAPABILITY
     const val CONNECT = "realtime.connect"
     const val DISCONNECT = "realtime.disconnect"
     const val SEND = "realtime.send"

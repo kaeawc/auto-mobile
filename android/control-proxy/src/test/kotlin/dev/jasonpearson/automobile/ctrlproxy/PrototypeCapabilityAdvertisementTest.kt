@@ -24,6 +24,27 @@ class PrototypeCapabilityAdvertisementTest {
   }
 
   @Test
+  fun `realtime capabilities come from the wired channel transports`() {
+    val wired =
+      WebSocketServer(
+          port = 0,
+          scope = scope,
+          options =
+            WebSocketServerOptions(
+              sdkInt = { 36 },
+              realtimeCapabilities = PROTOTYPE_REALTIME_CAPABILITIES,
+            ),
+        )
+        .supportedCommands()
+    assertTrue("prototype_platform_realtime_v1" in wired)
+    assertTrue("prototype_platform_realtime_device_v1" in wired)
+    val bare =
+      WebSocketServer(port = 0, scope = scope, options = WebSocketServerOptions(sdkInt = { 36 }))
+        .supportedCommands()
+    assertFalse(bare.any { it.startsWith("prototype_platform_realtime") })
+  }
+
+  @Test
   fun `CtrlProxy advertises overlay window controls and keyboard dismissal`() {
     val commands =
       WebSocketServer(port = 0, scope = scope, options = WebSocketServerOptions(sdkInt = { 36 }))

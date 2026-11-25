@@ -50,6 +50,12 @@ interface PrototypeChannelSink {
   /** A `realtime.status` or `realtime.frame` event for `platform.on` handlers. */
   suspend fun event(name: String, data: JsonObject)
 
+  /**
+   * A `realtime.frame` that `prototype simulate` injected (#14269); the host hears it marked
+   * simulated. Sinks that predate it deliver it as an ordinary [event].
+   */
+  suspend fun simulatedEvent(name: String, data: JsonObject) = event(name, data)
+
   /** Route, callback or `statusKey` actions to apply with [event] as the handler's event. */
   suspend fun run(channel: String, actions: JsonArray, event: JsonElement)
 
@@ -218,6 +224,20 @@ class PrototypeChannelController(
     sendError(slot, data)
   }
 
+  /**
+   * `prototype simulate` of a frame on [channel] (#14269): handled like a frame the transport
+   * delivered (size cap, decoding, `framesIn`, routes and coalescing) whatever the channel's
+   * connection status, in order with real frames, and marked simulated for the host. A frame for a
+   * channel that is no longer declared is dropped with a warning.
+   */
+  fun simulateFrame(channel: String, data: String, event: String?, id: String?) {
+    inbox.trySend {
+      val slot = slots[channel]
+      if (slot == null) sink.warn("Simulated frame for undeclared channel $channel was dropped")
+      else received(slot, data, event, id, simulated = true)
+    }
+  }
+
   /** Dismiss or reset: closes every connection; the sink hears nothing more. */
   suspend fun close() {
     if (closeStarted) return
@@ -346,7 +366,13 @@ class PrototypeChannelController(
     slot.declaration.onOpen?.let { sink.run(slot.id, it, eventOf(slot)) }
   }
 
-  private suspend fun received(slot: Slot, data: String, event: String?, id: String?) {
+  private suspend fun received(
+    slot: Slot,
+    data: String,
+    event: String?,
+    id: String?,
+    simulated: Boolean = false,
+  ) {
     val generation = slot.generation
     if (id != null) slot.lastEventId = id
     dirty += slot.id
@@ -362,16 +388,14 @@ class PrototypeChannelController(
       return
     }
     slot.framesIn++
+    val frame = buildJsonObject {
+      put("channel", slot.id)
+      put("data", decoded)
+      event?.let { put("event", it) }
+      id?.let { put("id", it) }
+    }
     val delivered = report {
-      sink.event(
-        FRAME_EVENT,
-        buildJsonObject {
-          put("channel", slot.id)
-          put("data", decoded)
-          event?.let { put("event", it) }
-          id?.let { put("id", it) }
-        },
-      )
+      if (simulated) sink.simulatedEvent(FRAME_EVENT, frame) else sink.event(FRAME_EVENT, frame)
     }
     if (!isCurrent(slot, generation)) return
     if (delivered) {

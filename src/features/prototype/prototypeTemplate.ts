@@ -41,6 +41,38 @@ export function record(value: unknown): Raw | undefined {
     : undefined;
 }
 
+/**
+ * JSON equality: ignores object key order and compares numbers by value, including negative zero.
+ * Shared by patch `test` ops and `equalsKey` conditions, which compare structurally on every host
+ * (#18933).
+ */
+export function prototypeJsonEqual(left: unknown, right: unknown): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (Array.isArray(left)) {
+    return (
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => prototypeJsonEqual(value, right[index]))
+    );
+  }
+  const a = record(left);
+  const b = record(right);
+  return (
+    !!a &&
+    !!b &&
+    Object.keys(a).length === Object.keys(b).length &&
+    Object.keys(a).every(
+      (key) => Object.hasOwn(b, key) && prototypeJsonEqual(ownValue(a, key), ownValue(b, key)),
+    )
+  );
+}
+
+function ownValue(object: Raw, key: string): unknown {
+  return Object.hasOwn(object, key) ? object[key] : undefined;
+}
+
 function token(inner: string, binding: Binding): Segment | undefined {
   if (binding.index && inner === "index") {
     return { kind: "index" };

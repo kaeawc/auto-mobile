@@ -10,7 +10,8 @@ import type { PrototypePlatformError } from "./prototypePlatform";
  * also in `storage.keys`, a `secureAuth` entry names a secure key and needs the `biometric` module,
  * and no secure key may bind into an emit context, route params, platform args or a data-write
  * value, or into a `request` that does not opt in with `allowSecureInRequest: true`. Kotlin and Swift
- * `PrototypeSecureStorageRules` mirror these checks, except the data-write value check (#18669).
+ * `PrototypeSecureStorageRules` mirror these checks; `secure-storage-data-derived.json` in the shared
+ * invalid corpus pins a secure key reached through `{derived}` (#18933).
  */
 export function prototypeSecureStorageError(root: Raw): PrototypePlatformError | undefined {
   const storage = record(root.storage);

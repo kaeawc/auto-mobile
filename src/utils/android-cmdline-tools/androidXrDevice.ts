@@ -12,6 +12,13 @@ import { deviceIncarnationToken } from "../deviceIncarnation";
 export const XR_SPATIAL_FEATURE = "android.software.xr.api.spatial";
 
 /**
+ * The hardware feature the Android AI glasses image declares instead of {@link XR_SPATIAL_FEATURE}
+ * (#19196). It marks a display-less or projected XR peripheral, not a spatial headset, so it is
+ * deliberately not part of {@link isAndroidXr} (tap and text routing stay as CtrlProxy decides).
+ */
+export const XR_PERIPHERAL_FEATURE = "android.hardware.type.xr_peripheral";
+
+/**
  * System features do not change while a device is up. A cached answer holds only for the device
  * pool incarnation it was read in, so a new boot on a reused serial is probed again; the expiry
  * guards the case with no incarnation (direct mode) where a serial is reused for a different

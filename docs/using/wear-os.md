@@ -197,8 +197,8 @@ Enable `ambient` with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)), 
 Use `action: "exit"` to wake the device. On a watch, `enter` sends `KEYCODE_SLEEP` and `exit` sends
 `KEYCODE_WAKEUP`. The tool then reads wakefulness and the watch face's ambient state once.
 
-The tool runs only on a Wear OS watch. On a phone, tablet, TV or automotive device it returns an
-error naming the form factor and changes nothing. When the device does not report its form factor,
+The tool runs only on a Wear OS watch. On any other device, Android XR glasses included, it
+returns an error naming the form factor and changes nothing. When the device does not report its form factor,
 AutoMobile accepts a session recorded as a watch and refuses any other. Check `formFactor` with
 `listDevices`.
 

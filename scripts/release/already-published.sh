@@ -2,13 +2,13 @@
 #
 # Answer whether a release target already has <version> published.
 #
-# release.yml publishes to six targets in one sequential job, and `npm publish`
+# release.yml publishes to seven targets in one sequential job, and `npm publish`
 # is not idempotent. A failure late in that sequence leaves the run unrepeatable:
 # the rerun dies on the first already-published target instead of resuming past
 # it. Each guarded step consults this script and skips what is already done.
 #
 # Usage:
-#   already-published.sh <npm|maven|mcp> <version>
+#   already-published.sh <npm|npm-prototype-web|maven|mcp> <version>
 #
 # Prints "published" or "missing" on stdout.
 #
@@ -34,6 +34,8 @@
 set -euo pipefail
 
 NPM_PACKAGE="@kaeawc/auto-mobile"
+# The browser embed library, published in lockstep after the main package (#16455).
+NPM_PROTOTYPE_WEB_PACKAGE="@kaeawc/auto-mobile-prototype-web"
 MAVEN_GROUP_PATH="dev/jasonpearson/auto-mobile"
 MAVEN_ARTIFACTS=(
   auto-mobile-protocol
@@ -49,12 +51,12 @@ MAVEN_BASE_URL="${MAVEN_BASE_URL:-https://repo1.maven.org/maven2}"
 MCP_REGISTRY_URL="${MCP_REGISTRY_URL:-https://registry.modelcontextprotocol.io}"
 
 usage() {
-  echo "usage: $(basename "$0") <npm|maven|mcp> <version>" >&2
+  echo "usage: $(basename "$0") <npm|npm-prototype-web|maven|mcp> <version>" >&2
 }
 
 check_npm() {
-  local version="$1" out
-  if out=$(npm view "${NPM_PACKAGE}@${version}" version 2>&1); then
+  local package="$1" version="$2" out
+  if out=$(npm view "${package}@${version}" version 2>&1); then
     # A hit prints the version; an empty body means npm resolved nothing.
     if [[ -n "$out" ]]; then
       echo published
@@ -67,12 +69,14 @@ check_npm() {
   # Match npm's own error code, not a bare "404". npm appends a debug-log path
   # whose millisecond field can itself be 404 (…T10_27_54_404Z-debug-0.log),
   # which would make any npm failure -- ENOTFOUND, auth, 500 -- read as missing.
+  # A package that was never published answers E404 too, so its first release
+  # reads as missing.
   if printf '%s\n' "$out" | grep 'E404' >/dev/null; then
     echo missing
     return 0
   fi
 
-  echo "ERROR: npm view failed for ${NPM_PACKAGE}@${version}: ${out}" >&2
+  echo "ERROR: npm view failed for ${package}@${version}: ${out}" >&2
   return 1
 }
 
@@ -177,7 +181,8 @@ main() {
   fi
 
   case "$target" in
-    npm) check_npm "$version" ;;
+    npm) check_npm "$NPM_PACKAGE" "$version" ;;
+    npm-prototype-web) check_npm "$NPM_PROTOTYPE_WEB_PACKAGE" "$version" ;;
     maven) check_maven "$version" ;;
     mcp) check_mcp "$version" ;;
     *)

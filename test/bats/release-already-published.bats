@@ -74,6 +74,29 @@ EOF
   [[ "$output" != *missing* ]]
 }
 
+@test "npm-prototype-web: queries the web library package at the version (#16455)" {
+  stub_npm 0 "0.0.45"
+  run "$SCRIPT" npm-prototype-web 0.0.45
+  [ "$status" -eq 0 ]
+  [ "$output" = "published" ]
+  grep -Fq 'view @kaeawc/auto-mobile-prototype-web@0.0.45 version' "$BATS_TEST_TMPDIR/npm.args"
+}
+
+@test "npm-prototype-web: a never-published package reports missing (#16455)" {
+  stub_npm 1 "npm error code E404 - Not found - '@kaeawc/auto-mobile-prototype-web@*' is not in this registry."
+  run "$SCRIPT" npm-prototype-web 0.0.45
+  [ "$status" -eq 0 ]
+  [ "$output" = "missing" ]
+}
+
+@test "npm-prototype-web: a non-404 failure fails closed (#16455)" {
+  stub_npm 1 "npm error code ETIMEDOUT"
+  run "$SCRIPT" npm-prototype-web 0.0.45
+  [ "$status" -ne 0 ]
+  [[ "$output" != *published* ]]
+  [[ "$output" != *missing* ]]
+}
+
 @test "maven: all five artifacts present reports published" {
   stub_curl 200
   MAVEN_BASE_URL="http://maven-stub" run "$SCRIPT" maven 0.0.44
@@ -215,7 +238,7 @@ exit 1
 STUB
   chmod +x "$STUB_DIR/npm"
   awk '/^check_npm\(\)/ { copy=1 } copy { print } copy && /^}/ { exit }' "$SCRIPT" > "$BATS_TEST_TMPDIR/npm-helper.sh"
-  run bash -euo pipefail -c 'source "$1"; NPM_PACKAGE=@kaeawc/auto-mobile; check_npm 0.0.45' _ "$BATS_TEST_TMPDIR/npm-helper.sh"
+  run bash -euo pipefail -c 'source "$1"; check_npm @kaeawc/auto-mobile 0.0.45' _ "$BATS_TEST_TMPDIR/npm-helper.sh"
   [ "$status" -eq 0 ]
   [ "$output" = missing ]
 }

@@ -1284,3 +1284,25 @@ run_validate_release_tag() {
   run env GITHUB_OUTPUT="$BATS_TEST_TMPDIR/out3" TAG=1.0.0-rc.1 bash -c "$script"
   [ "$status" -ne 0 ]
 }
+
+@test "release publishes prototype-web after the main package, guarded and gated (#16455)" {
+  require_mikefarah_yq
+  local workflow=".github/workflows/release.yml"
+  run yq -r '.jobs."verify-and-release".steps[].name' "$workflow"
+  [ "$status" -eq 0 ]
+  local names="$output" npm_line mcp_line web_line
+  npm_line="$(grep -nx 'Publish to npm' <<<"$names" | cut -d: -f1)"
+  mcp_line="$(grep -nx 'Publish to MCP Registry' <<<"$names" | cut -d: -f1)"
+  web_line="$(grep -nx 'Publish prototype-web to npm' <<<"$names" | cut -d: -f1)"
+  [ -n "$web_line" ]
+  [ "$web_line" -gt "$npm_line" ]
+  [ "$web_line" -gt "$mcp_line" ]
+
+  run yq -r '.jobs."verify-and-release".steps[] | select(.name == "Publish prototype-web to npm") | .if' "$workflow"
+  [ "$output" = "\${{ vars.PROTOTYPE_WEB_PUBLISH == 'true' }}" ]
+
+  run yq -r '.jobs."verify-and-release".steps[] | select(.name == "Publish prototype-web to npm") | .run' "$workflow"
+  [[ "$output" == *'state=$(scripts/release/already-published.sh npm-prototype-web "$VERSION")'* ]]
+  [[ "$output" == *'scripts/release/stage-prototype-web.sh "$VERSION" "$stage"'* ]]
+  [[ "$output" == *'npm publish --provenance --access public "$stage"'* ]]
+}

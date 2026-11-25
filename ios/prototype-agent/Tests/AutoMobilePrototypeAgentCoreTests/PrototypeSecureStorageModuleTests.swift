@@ -42,6 +42,21 @@ final class PrototypeSecureStorageModuleTests: XCTestCase {
         }
     }
 
+    func testPresentationsKeepTheirOwnLockedFlagOverTheSharedStore() throws {
+        let store = FakeSecureValueStore()
+        let shared = PrototypePlatformRegistry(modules: [PrototypeSecureStorageModule(store: store)])
+        let first = shared.forPresentation()
+        let second = shared.forPresentation()
+        let firstModule = try XCTUnwrap(first.modules["secureStorage"] as? PrototypeSecureStorageModule)
+        let secondModule = try XCTUnwrap(second.modules["secureStorage"] as? PrototypeSecureStorageModule)
+        firstModule.restored(locked: ["state:pin"])
+        secondModule.restored(locked: [])
+        XCTAssertEqual(firstModule.state, ["locked": .bool(true)])
+        XCTAssertEqual(secondModule.state, ["locked": .bool(false)])
+        XCTAssertTrue(first.secureStorage as? FakeSecureValueStore === store)
+        XCTAssertTrue(second.secureStorage as? FakeSecureValueStore === store)
+    }
+
     private final class Services: PrototypeHapticsPlayer, PrototypeSoundPlayer,
         PrototypeConnectivitySource, PrototypeLinkOpener, PrototypeSettingsURLOpener, PrototypeClipboard
     {

@@ -54,6 +54,10 @@ struct PrototypeStorageReport: Equatable {
 /// actually changed are stored; a restore stores nothing new and never counts as a change.
 final class PrototypeStorageCoordinator {
     static let defaultDebounceMilliseconds = 400
+    /// The first wait before retrying a failed secure write; each further failure doubles it (#18669).
+    static let secureRetryMilliseconds = 1000
+    /// The longest wait between secure write retries.
+    static let maxSecureRetryMilliseconds = 30000
 
     private struct EntryKey {
         let raw: String
@@ -69,12 +73,34 @@ final class PrototypeStorageCoordinator {
         var securePersisted: [String: JSONValue]
         var secureLive: [String: JSONValue]
         var secureDirty: Set<String> = []
+        /// Keys whose Keychain item a failed delete left behind, retried on each flush (#18650).
+        var secureDeletes: Set<String> = []
+        /// False when the show could not read the Keychain, so which items exist is unknown.
+        var secureReadable = true
         /// What the store holds for the id, as of the last successful write or the restore.
         var persisted: [String: JSONValue]
         /// The live value of each listed key at the last observation (absent: no value).
         var live: [String: JSONValue]
         var dirty: Set<String> = []
         var skipped: Set<String> = []
+
+        var hasUnsaved: Bool { !dirty.isEmpty || !secureDirty.isEmpty || !secureDeletes.isEmpty }
+
+        /// Keys whose Keychain item should be gone: a carried-over failed delete or a dirty removal.
+        var pendingSecureDeletes: Set<String> {
+            secureDeletes.union(secureDirty.filter { secureLive[$0] == nil })
+        }
+    }
+
+    /// What a show read from the secure store.
+    private struct SecureLoad {
+        var stored: PrototypeStoredValues?
+        var dropped: [PrototypeStorageDrop] = []
+        /// Every key the read returned, invalidated ones included.
+        var keys: Set<String> = []
+        /// The version of each item the read returned.
+        var versions: [String: Int] = [:]
+        var readable = true
     }
 
     private let secure: (any PrototypeSecureValueStore)?
@@ -85,6 +111,10 @@ final class PrototypeStorageCoordinator {
     private let maxBytes: Int
     private var tracking: Tracking?
     private var timer: PrototypeTimerHandle?
+    private var secureRetryAttempt = 0
+    /// Dropped secure items whose delete failed, by prototype id: each key with the version it was
+    /// dropped at, so the retry never removes a newer item written under the same key (#18650).
+    private var staleSecure: [String: [String: Int]] = [:]
 
     init(
         store: PrototypeStorageStore,
@@ -123,12 +153,17 @@ final class PrototypeStorageCoordinator {
         flush()
         // A flush that failed leaves keys dirty. A same-id replacement restores from those values
         // (not the stale record on disk) and keeps retrying the write.
-        let unsaved = tracking.flatMap { $0.id == spec.id && (!$0.dirty.isEmpty || !$0.secureDirty.isEmpty) ? $0 : nil }
+        let unsaved = tracking.flatMap { $0.id == spec.id && $0.hasUnsaved ? $0 : nil }
         tracking = nil
         let plaintext = loadStored(id: spec.id)
         let loaded = loadSecure(spec: spec, plaintext: plaintext)
         let stored = loaded.stored
-        var restored = PrototypeStorageRestore.restore(spec: spec, stored: Self.overlay(unsaved, on: stored))
+        let secureKeys: [EntryKey] = secure == nil ? [] : spec.storage.map(Self.secureEntryKeys) ?? []
+        // Only keys the replacement still persists take a failed flush's secure values and deletes.
+        let tracked = Set(secureKeys.map(\.raw))
+        var restored = PrototypeStorageRestore.restore(
+            spec: spec, stored: Self.overlay(unsaved, on: stored, tracked: tracked)
+        )
         var shown = spec
         if restored.data != spec.data, let data = restored.data {
             do {
@@ -145,7 +180,9 @@ final class PrototypeStorageCoordinator {
                         secure: $0.secure, invalidated: $0.invalidated
                     )
                 }
-                restored = PrototypeStorageRestore.restore(spec: spec, stored: Self.overlay(unsaved, on: stateOnly))
+                restored = PrototypeStorageRestore.restore(
+                    spec: spec, stored: Self.overlay(unsaved, on: stateOnly, tracked: tracked)
+                )
                 restored.dropped = first.dropped + first.applied.filter { !restored.applied.contains($0) }
                     .map { PrototypeStorageDrop(key: $0, reason: .mismatch) }
             }
@@ -154,8 +191,8 @@ final class PrototypeStorageCoordinator {
         let secureKept = (stored?.secure ?? [:]).filter {
             restored.applied.contains($0.key) && spec.storage?.secure?.contains($0.key) == true
         }
-        for key in Set(restored.dropped.map(\.key)).intersection(loaded.secureKeys).subtracting(secureKept.keys) {
-            deleteSecure(id: spec.id, key: key)
+        for key in Set(restored.dropped.map(\.key)).intersection(loaded.keys).subtracting(secureKept.keys) {
+            deleteSecure(id: spec.id, key: key, version: loaded.versions[key])
         }
         let kept = (stored?.values ?? [:]).filter {
             restored.applied.contains($0.key) && !(spec.storage?.secure ?? []).contains($0.key)
@@ -163,7 +200,6 @@ final class PrototypeStorageCoordinator {
         reconcile(id: spec.id, block: spec.storage, stored: plaintext, kept: kept)
         if let block = spec.storage {
             let keys = Self.entryKeys(block)
-            let secureKeys = secure == nil ? [] : Self.secureEntryKeys(block)
             var next = Tracking(
                 id: spec.id, version: block.version, keys: keys,
                 secureKeys: secureKeys, listedSecureKeys: block.secure ?? [],
@@ -175,14 +211,19 @@ final class PrototypeStorageCoordinator {
                     stacks: Self.initialStacks(shown, restored: restored.stacks)
                 )
             )
-            // Restored values that are still not on disk stay dirty so the write is retried.
+            next.secureReadable = loaded.readable
+            // Restored values that are still not on disk stay dirty so the write is retried. Secure
+            // strings compare by exact bytes: a canonically equivalent respelling is still unsaved.
             let unsavedKeys = unsaved?.dirty ?? []
             next.dirty = Set(restored.applied.filter { unsavedKeys.contains($0) && next.live[$0] != kept[$0] })
             next.secureDirty = Set(restored.applied.filter {
-                unsaved?.secureDirty.contains($0) == true && next.secureLive[$0] != secureKept[$0]
+                unsaved?.secureDirty.contains($0) == true
+                    && !PrototypeSession.scalarIdentical(next.secureLive[$0], secureKept[$0])
             })
+            // A failed delete stays pending; `overlay` kept its key out of the restore.
+            next.secureDeletes = (unsaved?.pendingSecureDeletes ?? []).intersection(tracked)
             tracking = next
-            if !next.dirty.isEmpty || !next.secureDirty.isEmpty { scheduleFlush() }
+            if next.hasUnsaved { scheduleFlush() }
         }
         return PrototypeStoragePreparation(
             spec: shown, state: restored.state, applied: restored.applied, dropped: restored.dropped,
@@ -190,16 +231,23 @@ final class PrototypeStorageCoordinator {
         )
     }
 
-    /// The stored record with the unsaved (dirty) live values of a failed flush laid over it.
-    private static func overlay(_ unsaved: Tracking?, on stored: PrototypeStoredValues?) -> PrototypeStoredValues? {
+    /// The stored record with the unsaved (dirty) live values of a failed flush laid over it. Secure
+    /// values and pending deletes apply only to the `tracked` keys the replacement persists: a key it
+    /// made biometric-bound or no longer lists gets only what the Keychain holds, which this show drops.
+    private static func overlay(
+        _ unsaved: Tracking?, on stored: PrototypeStoredValues?, tracked: Set<String>
+    )
+        -> PrototypeStoredValues?
+    {
         guard let unsaved else { return stored }
         var values = stored?.version == unsaved.version ? stored?.values ?? [:] : [:]
         for raw in unsaved.dirty {
             values[raw] = unsaved.live[raw]
         }
         var secure = stored?.secure ?? [:]
-        for raw in unsaved.secureDirty {
-            secure[raw] = unsaved.secureLive[raw]
+        for raw in unsaved.secureDirty.union(unsaved.secureDeletes) where tracked.contains(raw) {
+            // A pending delete (no live value) keeps the stale item out of the restore.
+            secure[raw] = unsaved.secureDirty.contains(raw) ? unsaved.secureLive[raw] : nil
         }
         return PrototypeStoredValues(
             version: unsaved.version, values: values, secure: secure, invalidated: stored?.invalidated
@@ -259,7 +307,10 @@ final class PrototypeStorageCoordinator {
         let live = Self.liveValues(current.keys, state: session.state, data: session.data, stacks: session.stacks)
         let moved = current.keys.map(\.raw).filter { live[$0] != current.live[$0] }
         let secureLive = Self.liveValues(current.secureKeys, state: session.state, data: nil, stacks: [:])
-        let secureMoved = current.secureKeys.map(\.raw).filter { secureLive[$0] != current.secureLive[$0] }
+        // Exact bytes: a canonically equivalent respelling is a new secure value to store.
+        let secureMoved = current.secureKeys.map(\.raw).filter {
+            !PrototypeSession.scalarIdentical(secureLive[$0], current.secureLive[$0])
+        }
         guard !moved.isEmpty || !secureMoved.isEmpty else { return }
         current.secureLive = secureLive
         current.secureDirty.formUnion(secureMoved)
@@ -277,6 +328,21 @@ final class PrototypeStorageCoordinator {
         }
     }
 
+    /// A Keychain write fails while the device is locked, and nothing else may flush before iOS ends
+    /// the suspended app, so failed secure writes retry on the clock with a doubling delay (#18669).
+    private func scheduleSecureRetry(_ current: Tracking) {
+        guard !current.secureDirty.isEmpty || !current.secureDeletes.isEmpty else {
+            secureRetryAttempt = 0
+            return
+        }
+        let delay = min(Self.secureRetryMilliseconds << min(secureRetryAttempt, 5), Self.maxSecureRetryMilliseconds)
+        secureRetryAttempt += 1
+        timer = clock.schedule(afterMilliseconds: delay) { [weak self] in
+            self?.timer = nil
+            self?.flush()
+        }
+    }
+
     /// Writes the changed keys now. A key whose value would take the id over `maxBytes` is not stored
     /// (its previous stored value stays) and is reported in `skippedKeys`; a key with no live value
     /// (a removed data member) is deleted from the record.
@@ -286,6 +352,7 @@ final class PrototypeStorageCoordinator {
         guard var current = tracking else { return }
         flushSecure(&current)
         tracking = current
+        scheduleSecureRetry(current)
         guard !current.dirty.isEmpty else { return }
         var candidate = current.persisted
         var skipped = current.skipped
@@ -340,12 +407,20 @@ final class PrototypeStorageCoordinator {
             log("clearing unreadable stored values for \(id): \(error)")
         }
         try store.delete(id: id)
-        count += try secure?.deleteAll(id: id) ?? 0
+        // Each store's tracking follows its own delete, so a failed secure clear below cannot leave
+        // the deleted plaintext values for a later flush to write back.
         if var current = tracking, current.id == id {
             current.persisted = [:]
+            current.dirty = []
+            current.skipped.subtract(current.keys.map(\.raw))
+            tracking = current
+        }
+        count += try secure?.deleteAll(id: id) ?? 0
+        staleSecure[id] = nil
+        if var current = tracking, current.id == id {
             current.securePersisted = [:]
             current.secureDirty = []
-            current.dirty = []
+            current.secureDeletes = []
             current.skipped = []
             tracking = current
         }
@@ -364,7 +439,8 @@ final class PrototypeStorageCoordinator {
             keys: keys,
             totalBytes: keys.reduce(0) { $0 + $1.bytes },
             skippedKeys: (current.keys.map(\.raw) + current.listedSecureKeys).filter { current.skipped.contains($0) },
-            secure: current.listedSecureKeys.map { key in
+            // Omitted while the Keychain is unreadable: an item's absence is not known.
+            secure: (current.secureReadable ? current.listedSecureKeys : []).map { key in
                 let value = current.securePersisted[key]?.stringValue
                 return (key: key, present: value != nil, bytes: value?.utf8.count ?? 0)
             }
@@ -393,14 +469,11 @@ final class PrototypeStorageCoordinator {
         }
     }
 
-    private func loadSecure(
-        spec: PrototypeSpec, plaintext: PrototypeStoredValues?
-    )
-        -> (stored: PrototypeStoredValues?, dropped: [PrototypeStorageDrop], secureKeys: Set<String>)
-    {
-        guard let secure else { return (plaintext, [], []) }
+    private func loadSecure(spec: PrototypeSpec, plaintext: PrototypeStoredValues?) -> SecureLoad {
+        guard let secure else { return SecureLoad(stored: plaintext) }
         do {
-            let read = try secure.readAll(id: spec.id)
+            var read = try secure.readAll(id: spec.id)
+            retryStaleCleanup(id: spec.id, entries: &read.entries)
             var values: [String: JSONValue] = [:]
             var dropped: [PrototypeStorageDrop] = []
             let all = Set(read.entries.keys).union(read.invalidated)
@@ -425,23 +498,43 @@ final class PrototypeStorageCoordinator {
             }
             stored.secure = values
             stored.invalidated = read.invalidated.sorted()
-            return (stored, dropped, all)
+            return SecureLoad(
+                stored: stored, dropped: dropped, keys: all, versions: read.entries.mapValues(\.version)
+            )
         } catch {
             // Temporary Keychain failures leave items intact. Log only the numeric code, never a value.
             log("could not read secure storage (OSStatus: \((error as NSError).code))")
-            return (plaintext, [], [])
+            return SecureLoad(stored: plaintext, readable: false)
         }
     }
 
-    private func deleteSecure(id: String, key: String) {
-        do { try secure?.delete(id: id, key: key) }
-        catch { log("could not delete secure storage entry") }
+    /// Retries the failed deletes of dropped items before anything restores. Each is scoped to the
+    /// version it was dropped at: an item written under the same key since then is newer and stays.
+    private func retryStaleCleanup(id: String, entries: inout [String: PrototypeSecureEntry]) {
+        guard let pending = staleSecure.removeValue(forKey: id) else { return }
+        for (key, version) in pending where entries[key]?.version == version {
+            // The stale item never restores; a delete that fails again stays pending.
+            entries[key] = nil
+            deleteSecure(id: id, key: key, version: version)
+        }
+    }
+
+    private func deleteSecure(id: String, key: String, version: Int?) {
+        do {
+            try secure?.delete(id: id, key: key)
+        } catch {
+            log("could not delete secure storage entry")
+            // Retried at the next show of `id`, before anything restores.
+            if let version { staleSecure[id, default: [:]][key] = version }
+        }
     }
 
     private func flushSecure(_ current: inout Tracking) {
         guard let secure else { return }
-        for key in current.secureKeys.map(\.raw) where current.secureDirty.contains(key) {
-            let value = current.secureLive[key]
+        let pending = current.secureDirty.union(current.secureDeletes)
+        for key in current.secureKeys.map(\.raw) where pending.contains(key) {
+            // A pending delete the user has not edited since removes the item.
+            let value = current.secureDirty.contains(key) ? current.secureLive[key] : nil
             if let value,
                value.stringValue == nil || (value.stringValue?.utf8.count ?? 0) > PrototypeStorageRestore
                .maxSecureValueBytes
@@ -458,7 +551,10 @@ final class PrototypeStorageCoordinator {
                 }
                 current.securePersisted[key] = value
                 current.secureDirty.remove(key)
+                current.secureDeletes.remove(key)
                 current.skipped.remove(key)
+                // This write replaces any dropped item still waiting for cleanup under the key.
+                staleSecure[current.id]?[key] = nil
             } catch {
                 // Retain dirty state for the next flush or same-id replacement; never log a value.
                 log("could not write secure storage entry")

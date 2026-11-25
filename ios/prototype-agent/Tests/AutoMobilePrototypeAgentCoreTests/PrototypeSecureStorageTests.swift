@@ -75,7 +75,7 @@ final class PrototypeSecureStorageTests: XCTestCase {
 
     func testInvalidatedValueIsDroppedAndDeleted() throws {
         let secure = FakeSecureValueStore()
-        secure.invalidated = ["state:token"]
+        secure.invalidated["vault"] = ["state:token"]
         let result = try coordinator(secure).prepare(secureRuntimeSpec())
         XCTAssertEqual(result.state["token"], .string("authored"))
         XCTAssertEqual(result.dropped, [.init(key: "state:token", reason: .invalidated)])
@@ -232,7 +232,7 @@ final class PrototypeSecureStorageTests: XCTestCase {
         }
         let secure = FakeSecureValueStore()
         secure.records["vault"] = ["state:token": .init(version: 1, value: "tok-test-1")]
-        secure.invalidated = ["state:pin"]
+        secure.invalidated["vault"] = ["state:pin"]
         let plain = PlainStore()
         plain.records["vault"] = PrototypeStoredValues(version: 1, values: [
             "data:/rows": storedRows,
@@ -262,7 +262,8 @@ final class PrototypeSecureStorageTests: XCTestCase {
         )
         let first = coordinator(FakeSecureValueStore())
         _ = first.prepare(spec)
-        XCTAssertNil(first.report(id: "plain")?.wireObject["secure"])
+        let report = try XCTUnwrap(first.report(id: "plain"))
+        XCTAssertNil(report.wireObject["secure"])
     }
 
     func testPlaintextWriteFailureDoesNotPreventSecureFlushOrRestore() throws {
@@ -284,6 +285,154 @@ final class PrototypeSecureStorageTests: XCTestCase {
         plain.writeFailure = false
         first.flush()
         XCTAssertEqual(plain.records["vault"]?.values, ["state:count": .number(1)])
+    }
+
+    func testInvalidationsAreScopedByPrototypeId() throws {
+        let secure = FakeSecureValueStore()
+        secure.records["vault"] = ["state:token": .init(version: 1, value: "tok-test-1")]
+        secure.invalidated["other"] = ["state:token"]
+        let first = coordinator(secure)
+        let result = try first.prepare(secureRuntimeSpec())
+        XCTAssertEqual(result.state["token"], .string("tok-test-1"))
+        XCTAssertTrue(result.dropped.isEmpty)
+        XCTAssertEqual(try first.clear(id: "vault"), 1)
+        XCTAssertEqual(try secure.readAll(id: "other").invalidated, ["state:token"])
+    }
+
+    func testFailedSecureDeleteStaysPendingAcrossSameIdShow() throws {
+        let secure = FakeSecureValueStore()
+        let first = coordinator(secure)
+        var session = try changed(first, spec: secureRuntimeSpec())
+        first.flush()
+        let ops = JSONValue.array([.object(["op": .string("remove"), "path": .string("/state/token")])])
+        XCTAssertTrue(session.patch(id: "vault", baseRevision: session.dataRevision, ops: ops).0.reply.success)
+        first.sessionChanged(session)
+        secure.deleteFailure = true
+        first.flush()
+        let result = try first.prepare(secureRuntimeSpec())
+        XCTAssertEqual(result.state["token"], .string("authored"))
+        XCTAssertFalse(result.applied.contains("state:token"))
+        secure.deleteFailure = false
+        first.flush()
+        XCTAssertNil(secure.records["vault"]?["state:token"])
+        XCTAssertEqual(try coordinator(secure).prepare(secureRuntimeSpec()).state["token"], .string("authored"))
+    }
+
+    func testFailedVersionCleanupIsRetriedBeforeTheOldVersionCanRestore() throws {
+        let secure = FakeSecureValueStore()
+        secure.records["vault"] = ["state:token": .init(version: 1, value: "tok-test-1")]
+        secure.deleteFailure = true
+        let first = coordinator(secure)
+        XCTAssertEqual(try first.prepare(secureRuntimeSpec(version: 2)).state["token"], .string("authored"))
+        XCTAssertNotNil(secure.records["vault"]?["state:token"])
+        secure.deleteFailure = false
+        let result = try first.prepare(secureRuntimeSpec(version: 1))
+        XCTAssertEqual(result.state["token"], .string("authored"))
+        XCTAssertFalse(result.applied.contains("state:token"))
+        XCTAssertNil(secure.records["vault"]?["state:token"])
+    }
+
+    func testFailedCleanupRetryKeepsANewerItemUnderTheSameKey() throws {
+        let secure = FakeSecureValueStore()
+        secure.records["vault"] = ["state:token": .init(version: 1, value: "tok-test-1")]
+        secure.deleteFailure = true
+        let first = coordinator(secure)
+        _ = try first.prepare(secureRuntimeSpec(version: 2))
+        secure.deleteFailure = false
+        // Another presentation sharing the store writes a version 2 item under the same key.
+        let other = coordinator(secure)
+        _ = try changed(other, spec: secureRuntimeSpec(version: 2), token: "tok-test-2")
+        other.flush()
+        let result = try first.prepare(secureRuntimeSpec(version: 2))
+        XCTAssertEqual(result.state["token"], .string("tok-test-2"))
+        XCTAssertEqual(secure.records["vault"]?["state:token"], PrototypeSecureEntry(version: 2, value: "tok-test-2"))
+    }
+
+    func testPendingSecureValueIsNotLaidOverAKeyTheReplacementMadeBiometric() throws {
+        let secure = FakeSecureValueStore()
+        secure.writeFailure = true
+        let first = coordinator(secure)
+        _ = try changed(first, spec: secureRuntimeSpec())
+        first.flush()
+        let result = try first.prepare(secureRuntimeSpec(biometric: true))
+        XCTAssertTrue(result.locked.isEmpty)
+        XCTAssertEqual(result.state["pin"], .string(""))
+        XCTAssertEqual(result.state["token"], .string("tok-test-1"))
+        secure.writeFailure = false
+        first.flush()
+        XCTAssertEqual(secure.records["vault"]?["state:token"]?.value, "tok-test-1")
+        XCTAssertNil(secure.records["vault"]?["state:pin"])
+    }
+
+    func testCanonicallyEquivalentSecureRespellingIsStoredByExactBytes() throws {
+        let secure = FakeSecureValueStore()
+        let first = coordinator(secure)
+        var session = try changed(first, spec: secureRuntimeSpec(), token: "\u{E9}")
+        first.flush()
+        let decomposed = "e\u{301}"
+        let ops = JSONValue.array([.object([
+            "op": .string("replace"), "path": .string("/state/token"), "value": .string(decomposed),
+        ])])
+        XCTAssertTrue(session.patch(id: "vault", baseRevision: session.dataRevision, ops: ops).0.reply.success)
+        first.sessionChanged(session)
+        // The failed write must survive a same-id show even though the Keychain holds an equal string.
+        secure.writeFailure = true
+        first.flush()
+        _ = try first.prepare(secureRuntimeSpec())
+        secure.writeFailure = false
+        first.flush()
+        let stored = try XCTUnwrap(secure.records["vault"]?["state:token"]?.value)
+        XCTAssertEqual(Array(stored.utf8), Array(decomposed.utf8))
+    }
+
+    func testFailedSecureClearDoesNotWriteBackClearedPlaintext() throws {
+        let secure = FakeSecureValueStore()
+        let plain = PlainStore()
+        let first = PrototypeStorageCoordinator(
+            store: plain,
+            clock: SecureStorageClock(),
+            secure: secure,
+            log: { _ in }
+        )
+        var session = try changed(first, spec: secureRuntimeSpec())
+        first.flush()
+        _ = session.setStates([("count", .number(2))])
+        first.sessionChanged(session)
+        secure.deleteAllFailure = true
+        XCTAssertThrowsError(try first.clear(id: "vault"))
+        first.flush()
+        XCTAssertNil(plain.records["vault"])
+        XCTAssertTrue(try XCTUnwrap(first.report(id: "vault")).keys.isEmpty)
+    }
+
+    func testUnreadableKeychainOmitsTheSecureReport() throws {
+        let secure = FakeSecureValueStore()
+        secure.records["vault"] = ["state:token": .init(version: 1, value: "tok-test-1")]
+        secure.readFailure = true
+        let first = coordinator(secure)
+        _ = try first.prepare(secureRuntimeSpec())
+        let report = try XCTUnwrap(first.report(id: "vault"))
+        XCTAssertTrue(report.secure.isEmpty)
+        XCTAssertNil(report.wireObject["secure"])
+        secure.readFailure = false
+        _ = try first.prepare(secureRuntimeSpec())
+        XCTAssertEqual(first.report(id: "vault")?.secure.map(\.present), [true, false])
+    }
+
+    func testFailedSecureWriteRetriesOnTheClockWithoutAnotherChange() throws {
+        let secure = FakeSecureValueStore()
+        secure.writeFailure = true
+        let clock = SecureStorageClock()
+        let first = coordinator(secure, clock: clock)
+        _ = try changed(first, spec: secureRuntimeSpec())
+        first.flush()
+        clock.elapse()
+        XCTAssertNil(secure.records["vault"])
+        secure.writeFailure = false
+        clock.elapse()
+        XCTAssertEqual(secure.records["vault"]?["state:token"]?.value, "tok-test-1")
+        XCTAssertEqual(clock.delays, [400, 1000, 2000])
+        XCTAssertTrue(clock.timers.allSatisfy(\.cancelled))
     }
 
     private final class PlainStore: PrototypeStorageStore {

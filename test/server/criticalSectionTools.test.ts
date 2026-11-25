@@ -690,6 +690,44 @@ describe("criticalSection tool", () => {
     );
   });
 
+  test("accepts flat-form sub-steps and normalizes them under params (#19171)", () => {
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
+    expect(tool).toBeDefined();
+
+    const parsed = tool!.schema.parse({
+      lock: "test-lock",
+      deviceCount: 1,
+      steps: [
+        { tool: "tapOn", device: "A", selector: { text: "Discover" }, label: "tap" },
+        { tool: "observe", device: "ignored", params: { device: "A" } },
+      ],
+    });
+
+    expect(parsed.steps).toEqual([
+      { tool: "tapOn", params: { device: "A" }, selector: { text: "Discover" }, label: "tap" },
+      { tool: "observe", device: "ignored", params: { device: "A" } },
+    ]);
+  });
+
+  test("keeps non-device sub-step keys at step level for migration (#19171)", () => {
+    const tool = ToolRegistry.getToolForPlan("criticalSection");
+    expect(tool).toBeDefined();
+
+    const parsed = tool!.schema.parse({
+      lock: "test-lock",
+      deviceCount: 1,
+      steps: [
+        { tool: "tapOn", params: { device: "A", text: "X" }, description: "tap X" },
+        { tool: "tapOn", device: "A", text: "Y", description: "tap Y" },
+      ],
+    });
+
+    expect(parsed.steps).toEqual([
+      { tool: "tapOn", params: { device: "A", text: "X" }, description: "tap X" },
+      { tool: "tapOn", params: { device: "A" }, text: "Y", description: "tap Y" },
+    ]);
+  });
+
   test("rejects schema when a sub-step's device is an empty string", () => {
     const tool = ToolRegistry.getToolForPlan("criticalSection");
     expect(tool).toBeDefined();

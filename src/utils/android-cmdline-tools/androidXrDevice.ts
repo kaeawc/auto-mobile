@@ -2,6 +2,7 @@ import type { BackStackInfo, BootedDevice } from "../../models";
 import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { probeFeature } from "./touchscreenFeature";
+import { deviceIncarnationToken } from "../deviceIncarnation";
 
 /**
  * The system feature an Android XR build declares. CtrlProxy gates its XR behaviour (no
@@ -11,8 +12,10 @@ import { probeFeature } from "./touchscreenFeature";
 export const XR_SPATIAL_FEATURE = "android.software.xr.api.spatial";
 
 /**
- * System features do not change while a device is up; the expiry only guards a serial that a pool
- * reuses for a different AVD (a phone replaced by a headset on emulator-5554).
+ * System features do not change while a device is up. A cached answer holds only for the device
+ * pool incarnation it was read in, so a new boot on a reused serial is probed again; the expiry
+ * guards the case with no incarnation (direct mode) where a serial is reused for a different
+ * AVD (a phone replaced by a headset on emulator-5554).
  */
 export const XR_DEVICE_CACHE_TTL_MS = 5 * 60_000;
 
@@ -68,11 +71,18 @@ function observedAndroidXr({ device, backStack }: AndroidXrEvidence): boolean {
 
 /** Probes {@link XR_SPATIAL_FEATURE} once per device and caches a definite answer. */
 export class CachedAndroidXrDetector implements AndroidXrDetector {
-  private readonly cache = new Map<string, { readAt: number; value: boolean }>();
+  /** Keyed by serial; an entry answers only for the pool incarnation it was read in (#19187). */
+  private readonly cache = new Map<
+    string,
+    { readAt: number; incarnation: string | undefined; value: boolean }
+  >();
 
   constructor(
     private readonly timer: Timer = defaultTimer,
     private readonly ttlMs: number = XR_DEVICE_CACHE_TTL_MS,
+    private readonly incarnationOf: (
+      deviceId: string,
+    ) => string | undefined = deviceIncarnationToken,
   ) {}
 
   async isAndroidXr(evidence: AndroidXrEvidence): Promise<boolean> {
@@ -80,8 +90,13 @@ export class CachedAndroidXrDetector implements AndroidXrDetector {
     if (device.platform !== "android") {
       return false;
     }
+    const incarnation = this.incarnationOf(device.deviceId);
     const cached = this.cache.get(device.deviceId);
-    if (cached && this.timer.now() - cached.readAt < this.ttlMs) {
+    if (
+      cached &&
+      cached.incarnation === incarnation &&
+      this.timer.now() - cached.readAt < this.ttlMs
+    ) {
       return cached.value;
     }
     if (!adb) {
@@ -95,7 +110,7 @@ export class CachedAndroidXrDetector implements AndroidXrDetector {
       this.cache.delete(device.deviceId);
       return observedAndroidXr(evidence);
     }
-    this.cache.set(device.deviceId, { readAt: this.timer.now(), value: declared });
+    this.cache.set(device.deviceId, { readAt: this.timer.now(), incarnation, value: declared });
     return declared;
   }
 }

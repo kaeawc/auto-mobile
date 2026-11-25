@@ -2195,13 +2195,13 @@ async function firstPlayable(
 }
 
 export async function lookupLatestVideoRecording(
-  scope: { ownerSessionUuid?: string } = {},
+  scope: { ownerSessionUuid?: string; deviceId?: string } = {},
 ): Promise<LatestVideoRecordingLookup> {
   const deps = await getVideoRecordingDependencies();
   const query = {
     status: FINISHED_VIDEO_RECORDING_STATUSES,
     orderByStartedAt: "desc" as const,
-    ownerSessionUuid: scope.ownerSessionUuid,
+    ...scope,
   };
   let recordings = await deps.recordingRepository.listRecordings({
     ...query,

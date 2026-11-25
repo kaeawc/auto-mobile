@@ -153,6 +153,39 @@ class PrototypeDataActionsRuntimeTest {
   }
 
   @Test
+  fun `validation refuses an appendData secure value binding`() {
+    assertSecureKeyedWriteRejected(
+      """{"type":"appendData","path":"/data/items","value":{"state":"token"}}""",
+      "root.onTap[0].value",
+    )
+  }
+
+  @Test
+  fun `validation refuses a prependData secure value binding`() {
+    assertSecureKeyedWriteRejected(
+      """{"type":"prependData","path":"/data/items","value":{"state":"token"}}""",
+      "root.onTap[0].value",
+    )
+  }
+
+  @Test
+  fun `validation refuses an upsertData secure value binding`() {
+    assertSecureKeyedWriteRejected(
+      """{"type":"upsertData","path":"/data/items","key":"/id","value":{"state":"token"}}""",
+      "root.onTap[0].value",
+    )
+  }
+
+  @Test
+  fun `validation refuses a secure object value member at the member path`() {
+    assertSecureKeyedWriteRejected(
+      """{"type":"appendData","path":"/data/items",
+        "value":{"object":{"id":{"value":"new-row"},"title":{"state":"token"}}}}""",
+      "root.onTap[0].value.object.title",
+    )
+  }
+
+  @Test
   fun `validated public keyed bindings write data without changing secure state`() = runTest {
     val secret = "private-keyed-write-token"
     val spec =

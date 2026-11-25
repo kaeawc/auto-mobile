@@ -52,10 +52,17 @@ internal object PrototypeStorageValidation {
   ): PrototypeSpecError? {
     for ((action, path) in context.actions) {
       val type = (action["type"] as? JsonPrimitive)?.content
-      if (type !in setOf("setData", "removeData", "request")) continue
+      if (type != "request" && type !in PrototypeDataRules.dataActionTypes) continue
       val candidates = buildList {
         (action["where"] as? JsonObject)?.get("equals")?.let { add(it to "$path.where.equals") }
-        if (type != "request") action["value"]?.let { add(it to "$path.value") }
+        if (type != "request") {
+          action["value"]?.let { add(it to "$path.value") }
+          // `{object}` members (#18826) read state, directly or through `{derived}`, like a value.
+          val members = (action["value"] as? JsonObject)?.get("object") as? JsonObject
+          for ((name, member) in members.orEmpty().toSortedMap()) {
+            add(member to PrototypeValidationPaths.keyPath("$path.value.object", name))
+          }
+        }
       }
       for ((binding, at) in candidates) {
         // Reuse the existing template-aware secure guard, including the request opt-in.

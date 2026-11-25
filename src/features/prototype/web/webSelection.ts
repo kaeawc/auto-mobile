@@ -121,7 +121,11 @@ const radioGroupRenderer =
           },
           style: { display: FLEX, [ALIGN_ITEMS]: CENTER, gap: "12px", [MIN_HEIGHT]: "48px" },
         },
-        [radioMark(option.value === chosen, scope), option.label],
+        // Android's label is a plain Text in the theme's bodyLarge (#16611).
+        [
+          radioMark(option.value === chosen, scope),
+          el("span", { style: textCss({ textStyle: "bodyLarge" }, scope.style) }, [option.label]),
+        ],
       ),
     );
     return el("div", { attrs: { ...attrs, role: "radiogroup", ...disabled.attrs }, style }, rows);

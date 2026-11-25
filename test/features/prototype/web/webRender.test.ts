@@ -2250,10 +2250,15 @@ describe("prototype web still parity (#16382)", () => {
   });
 
   test("a switch's label precedes its track and a checkbox's box precedes its label", () => {
-    expect(toggleOf("switch", true).children[0]).toBe("Alarm");
+    // The label is a bodyLarge span, as Android's plain Text takes the theme's bodyLarge (#16611).
+    const elementOf = (child: WebChild | undefined): WebElement | undefined =>
+      typeof child === "object" ? child : undefined;
+    const toggle = toggleOf("switch", true);
+    expect(elementOf(toggle.children[0])?.children[0]).toBe("Alarm");
+    expect(elementOf(toggle.children[0])?.style["font-size"]).toBe("16px");
     const checkbox = toggleOf("checkbox", true);
-    expect(typeof checkbox.children[0]).not.toBe("string");
-    expect(checkbox.children[1]).toBe("Alarm");
+    expect(elementOf(checkbox.children[0])?.style.margin).toBe("3px");
+    expect(elementOf(checkbox.children[1])?.children[0]).toBe("Alarm");
   });
 
   test("an icon placeholder shows its name's initial", () => {

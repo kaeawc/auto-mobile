@@ -33954,6 +33954,10 @@
           "type": "boolean",
           "const": true
         },
+        "includeLocation": {
+          "description": "inspect only: report /platform/location/current with its coordinates. Default false reports only that a fix is present and its accuracy ({accuracyM, approximate, redacted: true})",
+          "type": "boolean"
+        },
         "eventName": {
           "description": "awaitEvent only: filter event name; input and state changes use eventName change",
           "type": "string",
@@ -34801,11 +34805,25 @@
                   "$ref": "#/$defs/__schema91"
                 }
               },
+              "platform": {
+                "description": "iOS inspect only: the shown prototype's /platform state by module. location.current is {accuracyM, approximate, redacted: true} unless includeLocation: true; other sensitive keys (auth.userId) are omitted. Never in status",
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {}
+                }
+              },
               "context": {
-                "$ref": "#/$defs/__schema92"
+                "$ref": "#/$defs/__schema93"
               },
               "contextTruncated": {
-                "$ref": "#/$defs/__schema96"
+                "$ref": "#/$defs/__schema97"
               },
               "lastKnown": {
                 "description": "Pages, stacks and state are the last reported device snapshot, not a live device query",
@@ -35088,17 +35106,17 @@
           "type": "object",
           "properties": {
             "battery": {
-              "$ref": "#/$defs/__schema108"
+              "$ref": "#/$defs/__schema109"
             },
             "power": {
-              "$ref": "#/$defs/__schema108"
+              "$ref": "#/$defs/__schema109"
             },
             "audio": {
-              "$ref": "#/$defs/__schema108"
+              "$ref": "#/$defs/__schema109"
             },
             "location": {
               "description": "The last location.updated as {accuracyM, approximate} only: a fix is present and how accurate it is, never its coordinates",
-              "$ref": "#/$defs/__schema108"
+              "$ref": "#/$defs/__schema109"
             }
           },
           "additionalProperties": false
@@ -35298,13 +35316,13 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema119"
+              "$ref": "#/$defs/__schema120"
             },
             "context": {
-              "$ref": "#/$defs/__schema92"
+              "$ref": "#/$defs/__schema93"
             },
             "contextTruncated": {
-              "$ref": "#/$defs/__schema96"
+              "$ref": "#/$defs/__schema97"
             },
             "state": {
               "type": "object",
@@ -36204,7 +36222,7 @@
             }
           ]
         },
-        "__schema92": {
+        "__schema93": {
           "allOf": [
             {
               "type": "object",
@@ -36212,13 +36230,13 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema94"
+                "$ref": "#/$defs/__schema95"
               }
             },
             {}
           ]
         },
-        "__schema94": {
+        "__schema95": {
           "anyOf": [
             {
               "type": "string"
@@ -36235,7 +36253,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema94"
+                "$ref": "#/$defs/__schema95"
               }
             },
             {
@@ -36244,16 +36262,16 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema94"
+                "$ref": "#/$defs/__schema95"
               }
             }
           ]
         },
-        "__schema96": {
+        "__schema97": {
           "type": "boolean",
           "const": true
         },
-        "__schema108": {
+        "__schema109": {
           "type": "object",
           "properties": {
             "values": {
@@ -36290,7 +36308,7 @@
           "required": ["values", "timestamp", "receivedAt"],
           "additionalProperties": false
         },
-        "__schema119": {
+        "__schema120": {
           "anyOf": [
             {
               "type": "string"
@@ -36307,7 +36325,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema119"
+                "$ref": "#/$defs/__schema120"
               }
             },
             {
@@ -36316,7 +36334,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema119"
+                "$ref": "#/$defs/__schema120"
               }
             }
           ]

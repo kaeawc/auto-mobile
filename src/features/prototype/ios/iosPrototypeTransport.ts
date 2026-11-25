@@ -536,10 +536,11 @@ export class IosPrototypeTransport implements PrototypeTransport {
     return this.agent.handshake.appInstanceId;
   }
 
-  async status(): Promise<PrototypeDeviceStatus> {
+  async status(options: { includeLocation?: boolean } = {}): Promise<PrototypeDeviceStatus> {
     let result: PrototypeAgentResult;
     try {
-      result = await this.agent.request("get_prototype_status", undefined, {
+      const body = options.includeLocation === true ? { includeLocation: true } : undefined;
+      result = await this.agent.request("get_prototype_status", body, {
         timeoutMs: IOS_PROTOTYPE_STATUS_TIMEOUT_MS,
       });
     } catch (error) {

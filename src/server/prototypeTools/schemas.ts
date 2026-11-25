@@ -560,6 +560,12 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .literal(true)
         .optional()
         .describe("uninstallApp only: remove every disposable app on the device whose ttl ended"),
+      includeLocation: z
+        .boolean()
+        .optional()
+        .describe(
+          "inspect only: report /platform/location/current with its coordinates. Default false reports only that a fix is present and its accuracy ({accuracyM, approximate, redacted: true})",
+        ),
       eventName: z
         .string()
         .min(1)
@@ -662,6 +668,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "app",
     "appId",
     "expired",
+    "includeLocation",
   ] as const;
   const allowed: Record<typeof value.action, readonly string[]> = {
     show: [
@@ -695,7 +702,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     backendLog: ["backendId", "since"],
     publish: ["backendId", "room", "frame"],
     status: ["id"],
-    inspect: ["id"],
+    inspect: ["id", "includeLocation"],
     screenMap: ["spec", "specPath"],
     awaitEvent: ["id", "eventName", "kind", "afterSequence"],
     serve: ["id", "port", "remote", "idleTimeoutMs"],

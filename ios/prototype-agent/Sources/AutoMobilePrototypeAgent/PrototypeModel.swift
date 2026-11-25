@@ -904,7 +904,8 @@
             ).wireObject
         }
 
-        func status() -> [String: Any] {
+        /// `includeLocation` reports `/platform/location/current` unredacted (#16463).
+        func status(includeLocation: Bool = false) -> [String: Any] {
             var status: [String: Any] = [
                 "shown": session.isShown,
                 "id": spec?.id as Any? ?? NSNull(),
@@ -920,8 +921,10 @@
             if let feedback = session.feedbackLog.wireArray { status["feedbackLog"] = feedback.foundationObject }
             if !fontFaces.isEmpty { status["fonts"] = fontFaces.keys.sorted() }
             if !assetProblems.isEmpty { status["assetProblems"] = assetProblems.map(\.wireObject) }
-            if let platform = session.spec?
-                .platformState { status["platform"] = JSONValue.object(platform).foundationObject }
+            if let platform = session.spec?.platformState {
+                let reported = PrototypeInspectPlatformRedaction.redact(platform, includeLocation: includeLocation)
+                status["platform"] = JSONValue.object(reported).foundationObject
+            }
             if let platformRuntime { status["platformRuntime"] = platformRuntime.foundationObject }
             if let data = session.data { status["data"] = JSONValue.object(data).foundationObject }
             let degraded = degradedEffects()

@@ -7,6 +7,7 @@ import { performPrototypeSimulate, type PrototypeSimulateTarget } from "../proto
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
 import { parsePrototypePlatformReport } from "../../features/prototype/prototypePlatformReport";
 import { parsePrototypeFeedbackLog } from "../../features/prototype/prototypeFeedbackLog";
+import { redactPrototypeInspectPlatform } from "../../features/prototype/prototypeLocationPrivacy";
 import { parsePrototypeTimerReports } from "../../features/prototype/prototypeTimerSchema";
 import { z } from "zod/v4";
 import {
@@ -210,13 +211,23 @@ async function inspectDevice(
     timeoutMs,
     signal,
     reconciliationId,
-  }: { timeoutMs?: number; signal?: AbortSignal; reconciliationId?: string } = {},
+    includeLocation = false,
+  }: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+    reconciliationId?: string;
+    includeLocation?: boolean;
+  } = {},
 ): Promise<PrototypeOutput> {
   const { store, events } = dependencies;
   const client = target.android;
   if (!client) {
     if (target.ios) {
-      return inspectIosAgent({ store, events }, target, target.ios, { scope, reconciliationId });
+      return inspectIosAgent({ store, events }, target, target.ios, {
+        scope,
+        reconciliationId,
+        includeLocation,
+      });
     }
     throw new ActionableError("inspect needs an Android device or an iOS simulator agent.");
   }
@@ -299,6 +310,7 @@ export async function deviceRequestAction(
     timeoutMs: args.timeoutMs,
     signal,
     reconciliationId: target.disposableApp ? args.id : undefined,
+    includeLocation: args.includeLocation === true,
   });
 }
 
@@ -318,6 +330,9 @@ const iosAgentStatusSchema = z.object({
   feedbackLog: z.unknown().optional().transform(parsePrototypeFeedbackLog),
   platformRuntime: z.unknown().optional().transform(parsePrototypePlatformReport),
   degradedEffects: z.unknown().optional().transform(parsePrototypeDegradedEffects),
+  // The agent redacts /platform before replying (#16463); redacting again keeps an older or
+  // faulty agent from handing coordinates to the host.
+  platform: z.json().optional(),
 });
 
 /**
@@ -331,7 +346,11 @@ async function inspectIosAgent(
   dependencies: Pick<PrototypeHandlerDependencies, "store" | "events">,
   target: PrototypeTarget,
   ios: NonNullable<PrototypeTarget["ios"]>,
-  { scope, reconciliationId }: { scope: PrototypeScope; reconciliationId?: string },
+  {
+    scope,
+    reconciliationId,
+    includeLocation,
+  }: { scope: PrototypeScope; reconciliationId?: string; includeLocation: boolean },
 ): Promise<PrototypeOutput> {
   const { store, events } = dependencies;
   if (!ios.supportsCapability(IOS_PROTOTYPE_INSPECT_CAPABILITY)) {
@@ -344,7 +363,7 @@ async function inspectIosAgent(
   }
   let reply: Awaited<ReturnType<typeof ios.status>>;
   try {
-    reply = await ios.status();
+    reply = await ios.status({ includeLocation });
   } catch (error) {
     logger.warn("[prototype] iOS inspect request failed", error);
     return { success: false, error: toActionableError(error, "Prototype inspect failed").message };
@@ -374,6 +393,7 @@ async function inspectIosAgent(
     feedbackLog,
     platformRuntime,
     degradedEffects,
+    platform,
   } = status.data;
   const reported =
     shown && id !== null
@@ -404,7 +424,22 @@ async function inspectIosAgent(
       timersSupported: ios.supportsCapability(PROTOTYPE_TIMERS_CAPABILITY),
     },
   });
-  return { success: true, ...statusOutput(store, events, scope, { deviceDark: "fresh" }) };
+  const output = statusOutput(store, events, scope, { deviceDark: "fresh" });
+  // Only this answer carries /platform: the store never keeps it, so a later status cannot
+  // replay a fix an includeLocation inspect revealed.
+  const reportedPlatform =
+    platform === undefined
+      ? undefined
+      : redactPrototypeInspectPlatform(platform, { includeLocation });
+  return {
+    success: true,
+    ...output,
+    prototypes: output.prototypes?.map((entry) =>
+      reportedPlatform !== undefined && entry.id === id
+        ? { ...entry, platform: reportedPlatform }
+        : entry,
+    ),
+  };
 }
 
 /**

@@ -1,0 +1,97 @@
+{
+  "description": "The /platform state an inspect reports. location.current keeps only its accuracy summary with redacted: true unless includeLocation; every other sensitive state key is omitted; keys and modules outside the contract state tables are dropped. The iOS runtime replays these cases before replying and the host applies the same rule to the reply.",
+  "cases": [
+    {
+      "name": "a fix without includeLocation reports presence and accuracy only",
+      "includeLocation": false,
+      "platform": {
+        "location": {
+          "current": {
+            "latitude": 37.7749,
+            "longitude": -122.4194,
+            "accuracyM": 12.5,
+            "altitudeM": 16,
+            "speedMps": 3.2,
+            "bearingDeg": 270,
+            "timestampMs": 1700000000000,
+            "approximate": false
+          },
+          "servicesEnabled": true
+        },
+        "battery": { "level": 0.5, "state": "charging" }
+      },
+      "expected": {
+        "location": {
+          "current": { "accuracyM": 12.5, "approximate": false, "redacted": true },
+          "servicesEnabled": true
+        },
+        "battery": { "level": 0.5, "state": "charging" }
+      }
+    },
+    {
+      "name": "includeLocation reports the full fix",
+      "includeLocation": true,
+      "platform": {
+        "location": {
+          "current": {
+            "latitude": 51.5,
+            "longitude": -0.12,
+            "accuracyM": 3000,
+            "timestampMs": 1700000001000,
+            "approximate": true
+          },
+          "servicesEnabled": true
+        }
+      },
+      "expected": {
+        "location": {
+          "current": {
+            "latitude": 51.5,
+            "longitude": -0.12,
+            "accuracyM": 3000,
+            "timestampMs": 1700000001000,
+            "approximate": true
+          },
+          "servicesEnabled": true
+        }
+      }
+    },
+    {
+      "name": "no fix yet stays null",
+      "includeLocation": false,
+      "platform": { "location": { "current": null, "servicesEnabled": false } },
+      "expected": { "location": { "current": null, "servicesEnabled": false } }
+    },
+    {
+      "name": "a fix without a usable accuracy keeps only the marker",
+      "includeLocation": false,
+      "platform": {
+        "location": { "current": { "latitude": 1, "longitude": 2, "accuracyM": "12" } }
+      },
+      "expected": { "location": { "current": { "redacted": true } } }
+    },
+    {
+      "name": "other sensitive keys are omitted even with includeLocation",
+      "includeLocation": true,
+      "platform": { "auth": { "signedIn": true, "userId": "user-42" } },
+      "expected": { "auth": { "signedIn": true } }
+    },
+    {
+      "name": "keys and modules outside the contract are dropped",
+      "includeLocation": false,
+      "platform": {
+        "battery": { "level": 0.9, "serial": "ABC123" },
+        "haptics": { "lastPattern": "tap" },
+        "unknownModule": { "anything": 1 },
+        "audio": "not an object"
+      },
+      "expected": { "battery": { "level": 0.9 }, "haptics": {} }
+    },
+    {
+      "name": "the placeholder test module keeps every key",
+      "includeLocation": false,
+      "platform": { "test": { "anything": { "nested": true } } },
+      "expected": { "test": { "anything": { "nested": true } } }
+    }
+  ]
+}

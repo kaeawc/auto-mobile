@@ -62,7 +62,8 @@ export interface PrototypeTransport {
     options?: PrototypeAssetRequestOptions,
   ): Promise<PrototypeAssetResult>;
   removeAsset(id: string, options?: PrototypeAssetRequestOptions): Promise<PrototypeAssetResult>;
-  status(timeoutMs?: number): Promise<PrototypeDeviceStatus>;
+  /** `includeLocation` asks for `/platform/location/current` unredacted (#16463). */
+  status(options?: { includeLocation?: boolean }): Promise<PrototypeDeviceStatus>;
   /**
    * Subscribes to decoded `prototype_event` pushes; returns an unsubscribe function. A listener
    * returns false when it rejected the event, so it is not acknowledged to the device.

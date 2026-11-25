@@ -28,24 +28,27 @@ import {
   getToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
 
-// Plan-step fields PlanNormalizer keeps on the step instead of moving into params.
-const SUBSTEP_LEVEL_KEYS = new Set(["label", "optional", "expectations", "expect", "geometry"]);
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 /**
- * Normalize a sub-step to the nested `{tool, params}` form before validation, so a
- * flat sub-step (`device:` beside `tool:`) is accepted like a top-level plan step,
- * using PlanNormalizer's params-wins merge (#19171). A value naming no tool is left
- * as-is for the schema to reject.
+ * Accept a flat sub-step (`device:` beside `tool:`) like a top-level plan step
+ * (#19171) by lifting only its inline `device` into `params`. Every other key
+ * stays where it was, so the handler's migratePlanStep + PlanNormalizer pass
+ * still sees the authored shape (e.g. a legacy step-level `description`). An
+ * explicit `params.device` wins, matching PlanNormalizer's merge.
  */
-function normalizeCriticalSectionSubstep(value: unknown): unknown {
-  const parts = PlanNormalizer.toolAndParams(value);
-  if (!parts || typeof value !== "object" || value === null) {
+function liftInlineSubstepDevice(value: unknown): unknown {
+  if (!isPlainRecord(value) || !Object.hasOwn(value, "device")) {
     return value;
   }
-  const stepLevel = Object.fromEntries(
-    Object.entries(value).filter(([key]) => SUBSTEP_LEVEL_KEYS.has(key)),
-  );
-  return { ...stepLevel, tool: parts.tool, params: parts.params };
+  const params = isPlainRecord(value.params) ? value.params : {};
+  if (Object.hasOwn(params, "device")) {
+    return value;
+  }
+  const { device, ...rest } = value;
+  return { ...rest, params: { ...params, device } };
 }
 
 // Schema for steps inside critical section.
@@ -71,7 +74,7 @@ const criticalSectionStepObjectSchema = z
   });
 
 const criticalSectionStepSchema = z.preprocess(
-  normalizeCriticalSectionSubstep,
+  liftInlineSubstepDevice,
   criticalSectionStepObjectSchema,
 );
 
@@ -83,7 +86,7 @@ const criticalSectionSchema = addDeviceTargetingToSchema(
       steps: z
         .array(criticalSectionStepSchema)
         .min(1)
-        .describe("Serial steps; each needs a device"),
+        .describe("Serial steps; each needs params.device"),
       deviceCount: z.number().int().positive().describe("Devices required at barrier"),
       timeout: z
         .number()

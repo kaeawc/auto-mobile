@@ -3,8 +3,11 @@ import XCTest
 
 final class FakeSecureValueStore: PrototypeSecureValueStore {
     var records: [String: [String: PrototypeSecureEntry]] = [:]
-    var invalidated: Set<String> = []
+    /// Invalidated keys by prototype id, like `records`.
+    var invalidated: [String: Set<String>] = [:]
+    var readFailure = false
     var writeFailure = false
+    var deleteFailure = false
     var deleteAllFailure = false
     var reads: [String] = []
     var writes: [String] = []
@@ -13,7 +16,8 @@ final class FakeSecureValueStore: PrototypeSecureValueStore {
 
     func readAll(id: String) throws -> (entries: [String: PrototypeSecureEntry], invalidated: Set<String>) {
         reads.append(id)
-        return (records[id] ?? [:], invalidated)
+        if readFailure { throw Failure() }
+        return (records[id] ?? [:], invalidated[id] ?? [])
     }
 
     func write(id: String, key: String, entry: PrototypeSecureEntry) throws {
@@ -24,15 +28,16 @@ final class FakeSecureValueStore: PrototypeSecureValueStore {
 
     func delete(id: String, key: String) throws {
         deletes.append(key)
+        if deleteFailure { throw Failure() }
         records[id]?[key] = nil
-        invalidated.remove(key)
+        invalidated[id]?.remove(key)
     }
 
     func deleteAll(id: String) throws -> Int {
         if deleteAllFailure { throw Failure() }
-        let count = Set(records[id]?.keys ?? [String: PrototypeSecureEntry]().keys).union(invalidated).count
+        let count = Set(records[id]?.keys ?? [String: PrototypeSecureEntry]().keys).union(invalidated[id] ?? []).count
         records[id] = nil
-        invalidated = []
+        invalidated[id] = nil
         return count
     }
 }
@@ -46,9 +51,11 @@ final class SecureStorageClock: PrototypeClock {
     }
 
     var timers: [Timer] = []
-    func schedule(afterMilliseconds _: Int, _ fire: @escaping () -> Void) -> PrototypeTimerHandle {
+    var delays: [Int] = []
+    func schedule(afterMilliseconds delay: Int, _ fire: @escaping () -> Void) -> PrototypeTimerHandle {
         let timer = Timer(fire)
         timers.append(timer)
+        delays.append(delay)
         return timer
     }
 

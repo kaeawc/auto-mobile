@@ -374,8 +374,12 @@ final class PrototypeAgent: NSObject {
     }
 
     /// Stored prototype values are debounced; the app going to the background or ending flushes them.
+    /// Unlock and foreground flush again: a Keychain write fails while the device is locked (#18669).
     private func observeStorageFlush() {
-        for name in [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification] {
+        for name in [
+            UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification,
+            UIApplication.protectedDataDidBecomeAvailableNotification, UIApplication.willEnterForegroundNotification,
+        ] {
             NotificationCenter.default.addObserver(
                 self,
                 selector: #selector(flushStorageNotification(_:)),

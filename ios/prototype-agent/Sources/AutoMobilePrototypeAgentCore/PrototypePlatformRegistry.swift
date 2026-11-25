@@ -168,6 +168,12 @@ public final class PrototypePlatformRegistry {
             scoped[module.name] = module
             owned.append(module)
         }
+        // Each presentation reports its own restored `locked` flag; the Keychain store is shared.
+        if let secureStorage = modules["secureStorage"] as? PrototypeSecureStorageModule {
+            let module = PrototypeSecureStorageModule(store: secureStorage.store)
+            scoped[module.name] = module
+            owned.append(module)
+        }
         return PrototypePlatformRegistry(modules: scoped, parent: self, presentationModules: owned)
     }
 

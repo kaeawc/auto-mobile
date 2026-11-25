@@ -130,7 +130,12 @@
                 Task { @MainActor [weak self] in self?.onLoadError(loadError) }
                 return
             }
-            for name in [UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification] {
+            // Unlock and foreground flush again: a Keychain write fails while the device is locked.
+            for name in [
+                UIApplication.didEnterBackgroundNotification, UIApplication.willTerminateNotification,
+                UIApplication.protectedDataDidBecomeAvailableNotification,
+                UIApplication.willEnterForegroundNotification,
+            ] {
                 NotificationCenter.default.addObserver(
                     self,
                     selector: #selector(flushStorage(_:)),

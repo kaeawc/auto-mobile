@@ -10,6 +10,7 @@ import {
   type AndroidTvDetector,
 } from "../../../src/utils/android-cmdline-tools/androidTvDevice";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAndroidAutomotiveDetector } from "../../fakes/FakeAndroidAutomotiveDetector";
 import { FakeAndroidTvDetector } from "../../fakes/FakeAndroidTvDetector";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -45,6 +46,7 @@ function setup(
       glassesDetector: new FakeXrGlassesDetector(),
       wearOsDetector,
       tvDetector,
+      automotiveDetector: new FakeAndroidAutomotiveDetector(false),
     },
     collaborators: { awaitIdle, observeScreen, window: new FakeWindow() },
   });

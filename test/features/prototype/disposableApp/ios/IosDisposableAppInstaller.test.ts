@@ -6,9 +6,14 @@ import {
   disposableAppId,
   DISPOSABLE_APP_ID_PREFIX,
 } from "../../../../../src/features/prototype/disposableApp/disposableAppId";
+import type { PrototypePermissionName } from "../../../../../src/features/prototype/prototypePermissionMap";
 import { ActionableError } from "../../../../../src/models/ActionableError";
 import { createExecResult } from "../../../../../src/utils/execResult";
 import type { IosInstalledAppRecord } from "../../../../../src/utils/ios-cmdline-tools/iosInstalledApp";
+import type {
+  TccPermissionReader,
+  TccPermissionRow,
+} from "../../../../../src/utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import {
   FakePrototypeDataWriter,
   FakePrototypeSimctl,
@@ -21,7 +26,32 @@ const appId = disposableAppId("ios", "feedly");
 const bundle = path.join(path.resolve(path.sep), "fixture", "PrototypeViewer.app");
 const container = path.join(path.resolve(path.sep), "fixture", "container");
 const spec = { id: "feedly", root: { type: "column" } };
-const noGrants = { granted: [], denied: [] };
+const noGrants = { declared: [], granted: [], denied: [] };
+
+/** The simulator's TCC rows for `appId`, keyed by simctl service; a missing row is notDetermined. */
+class FakeTccReader implements TccPermissionReader {
+  readonly rows = new Map<string, TccPermissionRow>();
+  readonly reads: string[][] = [];
+
+  constructor(private readonly operations: InstallerOperationRecorder) {}
+
+  set(service: string, authValue: number): void {
+    this.rows.set(service, { service, client: appId, auth_value: authValue });
+  }
+
+  async readPermissions(
+    _deviceId: string,
+    _appId: string,
+    permissions: string[] = [],
+  ): Promise<TccPermissionRow[]> {
+    this.operations.record("tcc");
+    this.reads.push(permissions);
+    return permissions.flatMap((service) => {
+      const row = this.rows.get(service);
+      return row ? [row] : [];
+    });
+  }
+}
 
 function harness() {
   const operations = new InstallerOperationRecorder();
@@ -51,9 +81,11 @@ function harness() {
     operations.record("clear");
     return { success: true, deviceId, packageName };
   });
+  const tcc = new FakeTccReader(operations);
   return {
-    installer: new IosDisposableAppInstaller({ simctl, files, commands, data, clearStorage }),
+    installer: new IosDisposableAppInstaller({ simctl, files, commands, data, clearStorage, tcc }),
     operations,
+    tcc,
     simctl,
     commands,
     files,
@@ -174,28 +206,19 @@ describe("IosDisposableAppInstaller", () => {
     expect(operations.events).toEqual([]);
   });
 
-  test("maps canonical grants and revokes and skips names without a simctl service", async () => {
-    const { installer, commands } = harness();
-    await installer.applyPermissions(simulator, appId, {
-      granted: [
-        "camera",
-        "microphone",
-        "location",
-        "locationBackground",
-        "photos",
-        "photosAdd",
-        "contacts",
-        "calendar",
-        "motion",
-        "bluetooth",
-        "speech",
-        "nearbyWifi",
-        "notifications",
-      ],
-      denied: ["camera", "bluetooth", "constructor"],
-    });
-    const expected = [
-      "camera",
+  test("maps canonical grants and revokes, then reads each declared name back from TCC", async () => {
+    const { installer, commands, tcc } = harness();
+    const granted: PrototypePermissionName[] = [
+      "microphone",
+      "location",
+      "locationBackground",
+      "photos",
+      "photosAdd",
+      "contacts",
+      "calendar",
+      "motion",
+    ];
+    const services = [
       "microphone",
       "location",
       "location-always",
@@ -205,10 +228,86 @@ describe("IosDisposableAppInstaller", () => {
       "calendar",
       "motion",
     ];
+    services.forEach((service) => tcc.set(service, 2));
+    tcc.set("camera", 0);
+    const results = await installer.applyPermissions(simulator, appId, {
+      declared: ["camera", ...granted],
+      granted,
+      denied: ["camera"],
+    });
     expect(commands.executeCommandArgs.mock.calls.map(([args]) => args)).toEqual([
-      ...expected.map((service) => ["privacy", simulator, "grant", service, appId]),
       ["privacy", simulator, "revoke", "camera", appId],
+      ...services.map((service) => ["privacy", simulator, "grant", service, appId]),
     ]);
+    expect(tcc.reads).toEqual([["camera"], ...services.map((service) => [service])]);
+    expect(results).toEqual([
+      { name: "camera", state: "denied", verified: true },
+      ...granted.map((name) => ({ name, state: "granted" as const, verified: true })),
+    ]);
+  });
+
+  test("reports a name without a simctl service as notGrantableOnSimulator, never writing it", async () => {
+    const { installer, commands } = harness();
+    const results = await installer.applyPermissions(simulator, appId, {
+      declared: ["bluetooth", "nearbyWifi", "notifications", "speech"],
+      granted: ["bluetooth", "nearbyWifi", "notifications"],
+      denied: ["speech"],
+    });
+    const unsupported: PrototypePermissionName[] = [
+      "bluetooth",
+      "nearbyWifi",
+      "notifications",
+      "speech",
+    ];
+    expect(results).toEqual(
+      unsupported.map((name) => ({
+        name,
+        state: "notDetermined" as const,
+        verified: false,
+        reason: "notGrantableOnSimulator" as const,
+      })),
+    );
+    expect(commands.executeCommandArgs).not.toHaveBeenCalled();
+  });
+
+  test("prompt mode writes nothing and reads each declared name notDetermined", async () => {
+    const { installer, commands, tcc } = harness();
+    const results = await installer.applyPermissions(simulator, appId, {
+      declared: ["camera", "notifications"],
+      granted: [],
+      denied: [],
+    });
+    expect(results).toEqual([
+      { name: "camera", state: "notDetermined", verified: true },
+      { name: "notifications", state: "notDetermined", verified: true },
+    ]);
+    expect(commands.executeCommandArgs).not.toHaveBeenCalled();
+    expect(tcc.reads).toEqual([["camera"]]);
+  });
+
+  test("a simctl privacy failure stops before any read", async () => {
+    const { installer, commands, tcc } = harness();
+    commands.executeCommandArgs.mockRejectedValueOnce(new Error("simctl privacy exited 1"));
+    await expect(
+      installer.applyPermissions(simulator, appId, {
+        declared: ["camera"],
+        granted: ["camera"],
+        denied: [],
+      }),
+    ).rejects.toThrow("simctl privacy exited 1");
+    expect(tcc.reads).toEqual([]);
+  });
+
+  test("refuses a declared name outside the prototype permission names before any write", async () => {
+    const { installer, commands } = harness();
+    await expect(
+      installer.applyPermissions(simulator, appId, {
+        declared: ["camera", "constructor"],
+        granted: ["camera"],
+        denied: [],
+      }),
+    ).rejects.toThrow(/constructor is not a prototype permission name/);
+    expect(commands.executeCommandArgs).not.toHaveBeenCalled();
   });
 
   test("lists only disposable IDs, reports the ad-hoc digest and uninstalls by bundle ID", async () => {

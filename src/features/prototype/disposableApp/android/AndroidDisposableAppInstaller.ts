@@ -6,14 +6,22 @@ import {
 } from "../../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { PackageSigningInspection } from "../../../../models/PackageSigningInspection";
 import type { AdbExecutor } from "../../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import {
+  type ApiLevelProbeExecutor,
+  readAndroidDeviceApiLevel,
+} from "../../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { outputLooksLikeShellFailure } from "../../../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { normalizeSignerSet } from "../../../../utils/signingIdentity";
 import { ANDROID_PACKAGE_TRANSFER_TIMEOUT_MS } from "../../../action/installAppTimeout";
+import { AndroidPrototypePermissionBackend } from "../../prototypeAndroidPermissionBackend";
+import type { PrototypePermissionResult } from "../../prototypePermissionGrants";
 import type { DisposableAppInstallation, DisposableAppInstaller } from "../DisposableAppManager";
 import { assertDisposableAppId } from "../disposableAppId";
 import {
+  applyDisposableAppPermissions,
   DISPOSABLE_APP_ANDROID_PERMISSIONS,
   type DisposableAppPermissionGrants,
+  type DisposableAppPermissionPlan,
 } from "../disposableAppPermissions";
 
 /** The read-only signing inspection (`InspectPackageSigning`) narrowed to one call. */
@@ -23,7 +31,7 @@ export interface DisposableAppSigningReader {
 
 /** The device commands one Android device needs; resolved per call from the device id. */
 export interface AndroidDisposableAppDevice {
-  adb: Pick<AdbExecutor, "execute">;
+  adb: Pick<AdbExecutor, "execute"> & ApiLevelProbeExecutor;
   signing: DisposableAppSigningReader;
 }
 
@@ -59,17 +67,6 @@ function requireSuccess(result: { stdout: string; stderr: string }, what: string
   }
 }
 
-/** `pm grant`, `pm revoke` and `pm set-permission-flags` print nothing on success. */
-function requireQuietShell(result: { stdout: string; stderr: string }, what: string): void {
-  if (outputLooksLikeShellFailure(result.stdout, result.stderr)) {
-    throw new ActionableError(`${what} failed: ${output(result)}`);
-  }
-}
-
-function manifestPermissions(names: readonly string[]): string[] {
-  return [...new Set(names.flatMap((name) => DISPOSABLE_APP_ANDROID_PERMISSIONS[name] ?? []))];
-}
-
 /**
  * Granting one name and denying another that shares a manifest permission (`microphone` and
  * `speech` both use RECORD_AUDIO) cannot both hold, so it is refused before any device write.
@@ -95,8 +92,9 @@ function rejectSharedManifestConflicts(grants: DisposableAppPermissionGrants): v
 /**
  * Installs, grants, inspects and removes disposable prototype apps over adb (#14184). Every app id
  * is checked against the reserved prefix before a command runs, so a caller bug cannot reach a
- * package outside it. Denial revokes with the `user-fixed` flag, so the app reads the permission
- * as blocked and the system shows no dialog.
+ * package outside it. Permissions go through `AndroidPrototypePermissionBackend` (#14297): denial
+ * revokes with the `user-fixed` flag, so the app reads the permission as blocked and the system
+ * shows no dialog, and every declared name is read back from `dumpsys package`.
  */
 export class AndroidDisposableAppInstaller implements DisposableAppInstaller {
   constructor(private readonly deviceFor: (deviceId: string) => AndroidDisposableAppDevice) {}
@@ -121,28 +119,28 @@ export class AndroidDisposableAppInstaller implements DisposableAppInstaller {
   async applyPermissions(
     deviceId: string,
     appId: string,
-    grants: DisposableAppPermissionGrants,
-  ): Promise<void> {
+    plan: DisposableAppPermissionPlan,
+  ): Promise<PrototypePermissionResult[]> {
     assertDisposableAppId(appId);
-    rejectSharedManifestConflicts(grants);
+    rejectSharedManifestConflicts(plan);
+    if (plan.declared.length === 0) {
+      return [];
+    }
     const { adb } = this.deviceFor(deviceId);
-    for (const permission of manifestPermissions(grants.granted)) {
-      const result = await adb.execute(["shell", "pm", "grant", appId, permission], {
-        noRetry: true,
-      });
-      requireQuietShell(result, `Granting ${permission} to ${appId}`);
-    }
-    for (const permission of manifestPermissions(grants.denied)) {
-      const revoked = await adb.execute(["shell", "pm", "revoke", appId, permission], {
-        noRetry: true,
-      });
-      requireQuietShell(revoked, `Revoking ${permission} from ${appId}`);
-      const fixed = await adb.execute(
-        ["shell", "pm", "set-permission-flags", appId, permission, "user-set", "user-fixed"],
-        { noRetry: true },
+    // Below API 33 notifications are an appop, not the POST_NOTIFICATIONS runtime permission.
+    const apiLevel = await readAndroidDeviceApiLevel(adb);
+    if (apiLevel === null) {
+      throw new ActionableError(
+        `Cannot read the API level of ${deviceId}, so the permissions of ${appId} were not set. Check that the device is online and retry.`,
       );
-      requireQuietShell(fixed, `Marking ${permission} denied for ${appId}`);
     }
+    // adb install installs for every user and pm grant defaults to the system user.
+    const backend = new AndroidPrototypePermissionBackend(adb, {
+      packageName: appId,
+      userId: 0,
+      apiLevel,
+    });
+    return applyDisposableAppPermissions(plan, backend);
   }
 
   async uninstall(deviceId: string, appId: string): Promise<void> {

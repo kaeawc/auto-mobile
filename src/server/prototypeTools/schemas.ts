@@ -547,7 +547,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       app: disposableAppInput
         .optional()
         .describe(
-          "installApp only (Android): the disposable app to stamp the spec into. Its id is always dev.jasonpearson.automobile.app.<slug>_<8 hex>, never agent-chosen; permissions come only from the spec's requires.permissions (INTERNET is always declared). Re-installing a slug updates it in place and keeps its storage unless reset",
+          "installApp only (Android device or iOS simulator): the disposable app to stamp the spec into. Its id is always dev.jasonpearson.automobile.app.<slug>_<8 hex>, never agent-chosen; permissions come only from the spec's requires.permissions (Android always declares INTERNET). Re-installing a slug updates it in place and keeps its storage unless reset",
         ),
       appId: z
         .string()

@@ -121,12 +121,37 @@ describe("prototype disposable app actions (#14184)", () => {
       label: "Feedly",
       template: "media",
       expiresAt: new Date(72 * HOUR).toISOString(),
-      permissions: { declared: ["camera", "notifications"], granted: ["camera", "notifications"] },
+      permissions: {
+        declared: ["camera", "notifications"],
+        granted: ["camera", "notifications"],
+        denied: [],
+        results: [
+          { name: "camera", state: "granted", verified: true },
+          { name: "notifications", state: "granted", verified: true },
+        ],
+      },
       updated: false,
       launched: false,
     });
     expect(stamper.stamped[0]?.icon).toEqual({ backgroundColor: "#2E59BF" });
     expect(installer.installs).toHaveLength(1);
+  });
+
+  test("installApp reports each declared permission's read-back state", async () => {
+    const output = await call({
+      action: "installApp",
+      spec,
+      app: { ...app, permissions: { deny: ["camera"] } },
+    });
+    expect(output.disposableApp?.permissions).toEqual({
+      declared: ["camera", "notifications"],
+      granted: [],
+      denied: ["camera"],
+      results: [
+        { name: "camera", state: "blocked", verified: true },
+        { name: "notifications", state: "notDetermined", verified: true },
+      ],
+    });
   });
 
   test("installApp passes the supplied icon bytes through to the stamper", async () => {

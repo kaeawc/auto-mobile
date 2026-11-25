@@ -5,6 +5,7 @@ import type { Timer } from "../../../utils/SystemTimer";
 import { throwIfRequestAborted } from "../../../utils/AbortContext";
 import { logger } from "../../../utils/logger";
 import type { PrototypeJson } from "../prototypeJson";
+import type { PrototypePermissionResult } from "../prototypePermissionGrants";
 import {
   assertDisposableAppId,
   DISPOSABLE_APP_ID_PREFIX,
@@ -15,8 +16,8 @@ import {
 import {
   type DisposableAppDeclarations,
   disposableAppDeclarations,
-  type DisposableAppPermissionGrants,
   type DisposableAppPermissionMode,
+  type DisposableAppPermissionPlan,
   resolveDisposableAppGrants,
 } from "./disposableAppPermissions";
 import type { DisposableAppRecord, DisposableAppRegistry } from "./DisposableAppRegistry";
@@ -89,11 +90,12 @@ export interface DisposableAppInstaller {
   seedStorage?(deviceId: string, appId: string, artifactPath: string): Promise<void>;
   /** Clears the installed app's storage. */
   resetStorage(deviceId: string, appId: string): Promise<void>;
+  /** Grants and denies the plan, then reads back every declared name, in declaration order. */
   applyPermissions(
     deviceId: string,
     appId: string,
-    grants: DisposableAppPermissionGrants,
-  ): Promise<void>;
+    plan: DisposableAppPermissionPlan,
+  ): Promise<PrototypePermissionResult[]>;
   uninstall(deviceId: string, appId: string): Promise<void>;
   /** Installed application ids that start with `prefix`. */
   installedIds(deviceId: string, prefix: string): Promise<string[]>;
@@ -139,7 +141,13 @@ export interface DisposableAppInstallResult {
   version: string;
   expiresAt: string | null;
   template: string;
-  permissions: { declared: string[]; granted: string[]; denied: string[] };
+  permissions: {
+    declared: string[];
+    granted: string[];
+    denied: string[];
+    /** Each declared name's state read back after the grants ran. */
+    results: PrototypePermissionResult[];
+  };
   /** True when the slug was already installed and was updated in place. */
   updated: boolean;
   launched: false;
@@ -328,8 +336,12 @@ export class DisposableAppManager {
         );
       }
     }
+    let results: PrototypePermissionResult[];
     try {
-      await installer.applyPermissions(input.deviceId, appId, grants);
+      results = await installer.applyPermissions(input.deviceId, appId, {
+        declared: declarations.permissions,
+        ...grants,
+      });
     } catch (error) {
       throw new ActionableError(
         `${appId} is installed on ${input.deviceId} (expires ${isoOrNull(expiresAt) ?? "never"}), but its permissions were not applied: ${errorMessage(error)}. Reinstall it with installApp to retry, or uninstall it with uninstallApp.`,
@@ -343,7 +355,7 @@ export class DisposableAppManager {
       version: stamped.version,
       expiresAt: isoOrNull(expiresAt),
       template: template.name,
-      permissions: { declared: declarations.permissions, ...grants },
+      permissions: { declared: declarations.permissions, ...grants, results },
       updated: existing !== undefined,
       launched: false,
     };

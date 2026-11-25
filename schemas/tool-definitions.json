@@ -33697,7 +33697,7 @@
           "const": true
         },
         "app": {
-          "description": "installApp only (Android): the disposable app to stamp the spec into. Its id is always dev.jasonpearson.automobile.app.<slug>_<8 hex>, never agent-chosen; permissions come only from the spec's requires.permissions (INTERNET is always declared). Re-installing a slug updates it in place and keeps its storage unless reset",
+          "description": "installApp only (Android device or iOS simulator): the disposable app to stamp the spec into. Its id is always dev.jasonpearson.automobile.app.<slug>_<8 hex>, never agent-chosen; permissions come only from the spec's requires.permissions (Android always declares INTERNET). Re-installing a slug updates it in place and keeps its storage unless reset",
           "type": "object",
           "properties": {
             "slug": {
@@ -35472,9 +35472,44 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "results": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "granted",
+                          "denied",
+                          "blocked",
+                          "notDetermined",
+                          "limited",
+                          "restricted",
+                          "unavailable"
+                        ]
+                      },
+                      "verified": {
+                        "type": "boolean",
+                        "description": "true when state is what the permissions mode set"
+                      },
+                      "reason": {
+                        "description": "Why the mode could not be applied to this name on this device",
+                        "type": "string",
+                        "enum": ["notGrantableOnSimulator", "notRevocable"]
+                      }
+                    },
+                    "required": ["name", "state", "verified"],
+                    "additionalProperties": false
+                  },
+                  "description": "Each declared permission's state read back from the device after the grants"
                 }
               },
-              "required": ["declared", "granted", "denied"],
+              "required": ["declared", "granted", "denied", "results"],
               "additionalProperties": false
             },
             "updated": {

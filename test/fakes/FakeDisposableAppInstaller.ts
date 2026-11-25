@@ -2,7 +2,33 @@ import type {
   DisposableAppInstallation,
   DisposableAppInstaller,
 } from "../../src/features/prototype/disposableApp/DisposableAppManager";
-import type { DisposableAppPermissionGrants } from "../../src/features/prototype/disposableApp/disposableAppPermissions";
+import type { DisposableAppPermissionPlan } from "../../src/features/prototype/disposableApp/disposableAppPermissions";
+import type { PrototypePermissionResult } from "../../src/features/prototype/prototypePermissionGrants";
+import {
+  PROTOTYPE_PERMISSION_NAMES,
+  type PrototypePermissionName,
+} from "../../src/features/prototype/prototypePermissionMap";
+
+function canonical(name: string): PrototypePermissionName {
+  const found = PROTOTYPE_PERMISSION_NAMES.find((candidate) => candidate === name);
+  if (found === undefined) {
+    throw new Error(`FakeDisposableAppInstaller: ${name} is not a prototype permission name`);
+  }
+  return found;
+}
+
+/** What a device reads back after the plan ran: denied names are user-fixed on Android. */
+function readBack(plan: DisposableAppPermissionPlan): PrototypePermissionResult[] {
+  return plan.declared.map((name) => ({
+    name: canonical(name),
+    state: plan.granted.includes(name)
+      ? "granted"
+      : plan.denied.includes(name)
+        ? "blocked"
+        : "notDetermined",
+    verified: true,
+  }));
+}
 
 /** A device's installed packages keyed by `deviceId/appId`, with each one's signer. */
 export class FakeDisposableAppInstaller implements DisposableAppInstaller {
@@ -10,7 +36,7 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
   readonly installs: { deviceId: string; artifactPath: string }[] = [];
   readonly seeds: { appId: string; artifactPath: string }[] = [];
   readonly resets: string[] = [];
-  readonly grants: { appId: string; grants: DisposableAppPermissionGrants }[] = [];
+  readonly grants: { appId: string; plan: DisposableAppPermissionPlan }[] = [];
   readonly uninstalls: string[] = [];
 
   /** When set, `seedStorage` rejects with it after recording the seed. */
@@ -55,11 +81,12 @@ export class FakeDisposableAppInstaller implements DisposableAppInstaller {
     }
   }
 
-  async applyPermissions(_deviceId: string, appId: string, grants: DisposableAppPermissionGrants) {
-    this.grants.push({ appId, grants });
+  async applyPermissions(_deviceId: string, appId: string, plan: DisposableAppPermissionPlan) {
+    this.grants.push({ appId, plan });
     if (this.permissionFailure) {
       throw this.permissionFailure;
     }
+    return readBack(plan);
   }
 
   async uninstall(deviceId: string, appId: string): Promise<void> {

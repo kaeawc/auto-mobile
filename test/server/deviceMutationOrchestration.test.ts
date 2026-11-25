@@ -5,6 +5,7 @@ import { FamilyMutationPriorReader } from "../../src/server/deviceMutationFamily
 import { SessionDeviceMutationRecording } from "../../src/server/deviceMutationRecording";
 import { SessionMutationRecorder } from "../../src/daemon/sessionBroker/mutations/recorder";
 import { opaqueIntentKey } from "../../src/daemon/sessionBroker/mutations/types";
+import { disposableAppId } from "../../src/features/prototype/disposableApp/disposableAppId";
 import { FakeDeviceMutationJournal } from "../fakes/FakeDeviceMutationJournal";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -85,6 +86,33 @@ describe("Orchestration journal intents (#14359)", () => {
       ).toEqual([]);
     });
 
+    test.each(["android", "ios"] as const)(
+      "a %s disposable-app install records the stamped app id like installApp (#14184)",
+      (platform) => {
+        const appId = disposableAppId(platform, "news-reader");
+        expect(
+          deviceToolMutations(
+            "prototype",
+            { action: "installApp", spec: { id: "p" }, app: { slug: "news-reader" } },
+            platform,
+          ),
+        ).toEqual([{ kind: "installed-app", key: appId }, fallback("installApp", appId)]);
+      },
+    );
+
+    test("a disposable-app install the handler refuses, list or uninstall records nothing", () => {
+      for (const app of [undefined, {}, { slug: "Bad Slug" }, { slug: "a".repeat(49) }]) {
+        expect(deviceToolMutations("prototype", { action: "installApp", app }, "ios")).toEqual([]);
+      }
+      expect(
+        deviceToolMutations("prototype", { action: "installApp", app: { slug: "a" } }, "tvos"),
+      ).toEqual([]);
+      expect(deviceToolMutations("prototype", { action: "listApps" }, "android")).toEqual([]);
+      expect(
+        deviceToolMutations("prototype", { action: "uninstallApp", expired: true }, "ios"),
+      ).toEqual([]);
+    });
+
     test("a show by path is unresolved until the recording layer reads the spec", () => {
       expect(
         deviceToolMutations("prototype", { action: "show", specPath: "/tmp/p.json" }, "android"),
@@ -126,6 +154,33 @@ describe("recording a prototype show by path", () => {
   test("an unreadable spec stays conservative", async () => {
     expect(await recorded({}, "/missing.json")).toEqual([
       opaqueIntentKey("prototype", "show", "unresolved-spec"),
+    ]);
+  });
+});
+
+describe("recording a disposable-app install (#14184)", () => {
+  const device: BootedDevice = { deviceId: "SIM-UDID", platform: "ios", name: "iPhone" };
+  const scope = { deviceId: device.deviceId, incarnation: "resource", sessionUuid: "session" };
+
+  test("journals the installed app so release removes it", async () => {
+    const journal = new FakeDeviceMutationJournal(new FakeTimer());
+    const recording = new SessionDeviceMutationRecording(
+      () => new SessionMutationRecorder(journal, scope),
+      {
+        reader: new FamilyMutationPriorReader([]),
+        artifactReader: { appId: async () => undefined },
+        specReader: async () => ({ id: "p" }),
+      },
+    );
+    await recording.beforeToolCall(
+      "prototype",
+      { action: "installApp", specPath: "/p.json", app: { slug: "feedly" } },
+      device,
+      { sessionUuid: "session" },
+    );
+    expect((await journal.list(scope)).map(({ kind, key }) => ({ kind, key }))).toEqual([
+      { kind: "installed-app", key: disposableAppId("ios", "feedly") },
+      { kind: "opaque", key: opaqueIntentKey("installApp", disposableAppId("ios", "feedly")) },
     ]);
   });
 });

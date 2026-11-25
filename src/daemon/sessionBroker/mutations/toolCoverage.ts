@@ -155,7 +155,7 @@ export const DEVICE_MUTATION_TOOL_COVERAGE: Readonly<Record<string, MutationTool
   ),
   ...tools(
     ["executePlan", "setDeviceResources", "reconcileDeviceResources", "prototype"],
-    "executePlan cleanup that clears app data, applied device resources, an Android prototype that is device-persistent, above apps, stored or saved record a fallback intent; their device steps otherwise go through the recorded dispatcher.",
+    "executePlan cleanup that clears app data, applied device resources, an Android prototype that is device-persistent, above apps, stored or saved record a fallback intent, and a prototype disposable-app install records what installApp does; their device steps otherwise go through the recorded dispatcher.",
     "journaled",
     { fallback: true },
   ),

@@ -2,6 +2,12 @@ import type { Platform } from "../models";
 import { opaqueIntentKey } from "../daemon/sessionBroker/mutations/types";
 import { isRecord } from "./pipeline/isRecord";
 import type { ToolMutation } from "./deviceMutationAdapters";
+import { appFallback } from "./deviceMutationLifecycleAdapters";
+import {
+  DISPOSABLE_APP_SLUG_PATTERN,
+  MAX_DISPOSABLE_APP_SLUG_LENGTH,
+  disposableAppId,
+} from "../features/prototype/disposableApp/disposableAppId";
 
 function fallback(...parts: readonly unknown[]): ToolMutation {
   return { kind: "opaque", key: opaqueIntentKey(...parts) };
@@ -21,7 +27,33 @@ function showLeavesDeviceState(spec: unknown): boolean {
   return window.persistence === "device" || window.layer === "app" || spec.storage !== undefined;
 }
 
+/**
+ * A disposable-app install (#14184) records what `installApp` records for the app id its slug
+ * stamps: the `installed-app` row the baseline clean (Android) and app-inventory reset (iOS)
+ * remove, and the fallback for an install over an app the baseline held. An invalid slug is
+ * refused before anything is installed, so it records nothing.
+ */
+function disposableInstallMutations(
+  args: Record<string, unknown>,
+  platform?: Platform,
+): ToolMutation[] {
+  const slug = isRecord(args.app) ? args.app.slug : undefined;
+  if (
+    (platform !== "android" && platform !== "ios") ||
+    typeof slug !== "string" ||
+    slug.length > MAX_DISPOSABLE_APP_SLUG_LENGTH ||
+    !DISPOSABLE_APP_SLUG_PATTERN.test(slug)
+  ) {
+    return [];
+  }
+  const appId = disposableAppId(platform, slug);
+  return [{ kind: "installed-app", key: appId }, appFallback("installApp", appId)];
+}
+
 function prototypeMutations(args: Record<string, unknown>, platform?: Platform): ToolMutation[] {
+  if (args.action === "installApp") {
+    return disposableInstallMutations(args, platform);
+  }
   if (platform !== "android") {
     // The iOS simulator keeps a prototype in the injected agent's process; a saved prototype is an
     // installed app, which the iOS app-inventory clean removes.
@@ -53,7 +85,8 @@ function prototypeMutations(args: Record<string, unknown>, platform?: Platform):
  *   simulator services whose prior state has no captured reader, so a call that applies resources
  *   records a `fallback:` intent. `restore` and report-only calls change nothing new.
  * - `prototype` records according to {@link prototypeMutations}; shows, patches, dismissals and
- *   reads of a session prototype are dismissed when the CtrlProxy client disconnects.
+ *   reads of a session prototype are dismissed when the CtrlProxy client disconnects. A
+ *   disposable-app `uninstallApp` removes only reserved-prefix apps and records nothing.
  */
 const ORCHESTRATION_MUTATIONS: Readonly<
   Record<string, (args: Record<string, unknown>, platform?: Platform) => ToolMutation[]>

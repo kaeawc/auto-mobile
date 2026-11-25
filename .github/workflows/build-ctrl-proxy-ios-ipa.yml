@@ -47,6 +47,14 @@ jobs:
         with:
           xcode-version: "27.2"
 
+      # patch-ctrl-proxy-ui-test-runner-icon.sh runs embedSimulatedEntitlements.ts with bun (#19236).
+      # It imports only node:fs, so no install is needed; no-cache keeps release builds off Actions caches.
+      - name: "Set up Bun"
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
       # Both installs are network I/O and independent of the simulator-runtime
       # ensure below, so background them and let it overlap. The single barrier
       # before the build is load-bearing rather than cosmetic:

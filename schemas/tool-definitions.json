@@ -2970,7 +2970,7 @@
             "required": ["tool", "params"],
             "additionalProperties": {}
           },
-          "description": "Serial steps; each needs params.device"
+          "description": "Serial steps; each needs a device"
         },
         "deviceCount": {
           "type": "integer",

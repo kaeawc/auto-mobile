@@ -28,10 +28,31 @@ import {
   getToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
 
+// Plan-step fields PlanNormalizer keeps on the step instead of moving into params.
+const SUBSTEP_LEVEL_KEYS = new Set(["label", "optional", "expectations", "expect", "geometry"]);
+
+/**
+ * Normalize a sub-step to the nested `{tool, params}` form before validation, so a
+ * flat sub-step (`device:` beside `tool:`) is accepted like a top-level plan step,
+ * using PlanNormalizer's params-wins merge (#19171). A value naming no tool is left
+ * as-is for the schema to reject.
+ */
+function normalizeCriticalSectionSubstep(value: unknown): unknown {
+  const parts = PlanNormalizer.toolAndParams(value);
+  if (!parts || typeof value !== "object" || value === null) {
+    return value;
+  }
+  const stepLevel = Object.fromEntries(
+    Object.entries(value).filter(([key]) => SUBSTEP_LEVEL_KEYS.has(key)),
+  );
+  return { ...stepLevel, tool: parts.tool, params: parts.params };
+}
+
 // Schema for steps inside critical section.
-// Every sub-step MUST declare a `device` matching the section owner label.
-// Sub-steps execute on that owner device; they never route to another label.
-const criticalSectionStepSchema = z
+// Every sub-step MUST declare a `device` matching the section owner label, either
+// beside `tool` or under `params`. Sub-steps execute on that owner device; they
+// never route to another label.
+const criticalSectionStepObjectSchema = z
   .object({
     tool: z.string().describe("Tool name"),
     params: z.record(z.string(), z.any()).describe("Tool params; must include device"),
@@ -49,6 +70,11 @@ const criticalSectionStepSchema = z
     }
   });
 
+const criticalSectionStepSchema = z.preprocess(
+  normalizeCriticalSectionSubstep,
+  criticalSectionStepObjectSchema,
+);
+
 // Critical section tool schema
 const criticalSectionSchema = addDeviceTargetingToSchema(
   z
@@ -57,7 +83,7 @@ const criticalSectionSchema = addDeviceTargetingToSchema(
       steps: z
         .array(criticalSectionStepSchema)
         .min(1)
-        .describe("Serial steps; each needs params.device"),
+        .describe("Serial steps; each needs a device"),
       deviceCount: z.number().int().positive().describe("Devices required at barrier"),
       timeout: z
         .number()

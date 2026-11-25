@@ -122,6 +122,21 @@ describe("DefaultEmulatorPortReservations.reserveEmulatorGrpcPort", () => {
     expect(registry.view().claim(8554)?.port).toBe(8554);
   });
 
+  test("a port whose listener check fails is released and skipped, not leased", async () => {
+    // An unclassified connect error (EACCES, EPERM) leaves the listener state unknown.
+    const registry = new FakeEmulatorGrpcPortRegistry();
+    const listeners = new FakeEmulatorGrpcPortListenerProbe();
+    listeners.failing.add(8554);
+    const lease = await reservationsWithHostPorts(
+      new FakePortAvailabilityChecker(),
+      registry,
+      listeners,
+    ).reserveEmulatorGrpcPort();
+    expect(lease.port).toBe(8555);
+    expect(listeners.probed).toEqual([8554, 8555]);
+    expect(registry.view().claim(8554)?.port).toBe(8554);
+  });
+
   test("two daemons with separate registries never share a port once the first emulator binds", async () => {
     const host = new Set<number>();
     const daemonA = reservationsWithHostPorts(

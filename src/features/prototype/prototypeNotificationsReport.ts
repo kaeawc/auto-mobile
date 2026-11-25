@@ -7,8 +7,8 @@ import { PROTOTYPE_NOTIFICATION_TAG_PREFIX } from "../systemTray/notificationDum
  *
  * {@link prototypeNotificationsReport} is the reference the Android and iOS runtimes copy to build the
  * report from a platform snapshot: Android's `NotificationManager.getActiveNotifications()` (the
- * `proto:` posting tag) and iOS's `deliveredNotifications()` / `pendingNotificationRequests()` (the
- * `proto:` request identifier). Kotlin and Swift `PrototypeNotificationsReport` replay the shared
+ * `proto:` posting tag) and iOS's `deliveredNotifications()` / `pendingNotificationRequests()` (tagged
+ * `proto:<notificationId>` from the request's stored notification id). Kotlin and Swift `PrototypeNotificationsReport` replay the shared
  * cases in `test/fixtures/prototype-notifications/report.json`.
  *
  * - Only records whose tag is `proto:<id>` are reported, as `id`; other notifications of the app are
@@ -149,7 +149,7 @@ function defined<T>(value: T | undefined): value is T {
 /**
  * The `notifications` report for one platform snapshot `{permission, badge, channels, posted,
  * pending}`, where `posted` and `pending` entries carry the platform `tag` (Android posting tag, iOS
- * request identifier). Malformed input yields empty lists, `permission: "unavailable"` and badge 0.
+ * `proto:` plus the stored notification id). Malformed input yields empty lists, `permission: "unavailable"` and badge 0.
  */
 export function prototypeNotificationsReport(snapshot: unknown): PrototypeNotificationsReport {
   const input = fields(snapshot) ?? {};

@@ -34743,7 +34743,7 @@
           "additionalProperties": false
         },
         "platformRuntime": {
-          "description": "inspect: the runtime and its registered modules; status: the host mirror from the last show or inspect, updated by platform call events. Unknown details are omitted",
+          "description": "inspect: the runtime and its registered modules, with the notifications inventory as modules.notifications.report (iOS only); status: the host mirror from the last show or inspect, updated by platform call events. Unknown details are omitted",
           "type": "object",
           "properties": {
             "runtime": {
@@ -34790,6 +34790,123 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "report": {
+                    "description": "notifications only (iOS): the shown prototype's posted and scheduled proto:-tagged notifications",
+                    "type": "object",
+                    "properties": {
+                      "permission": {
+                        "type": "string"
+                      },
+                      "badge": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "channels": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string"
+                            },
+                            "importance": {
+                              "type": "string"
+                            },
+                            "blocked": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["id", "importance", "blocked"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "active": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "channel": {
+                              "type": "string"
+                            },
+                            "title": {
+                              "type": "string"
+                            },
+                            "body": {
+                              "type": "string"
+                            },
+                            "group": {
+                              "type": "string"
+                            },
+                            "ongoing": {
+                              "type": "boolean"
+                            },
+                            "progress": {
+                              "anyOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "value": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    }
+                                  },
+                                  "required": ["value"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "indeterminate": {
+                                      "type": "boolean",
+                                      "const": true
+                                    }
+                                  },
+                                  "required": ["indeterminate"],
+                                  "additionalProperties": false
+                                }
+                              ]
+                            },
+                            "actions": {
+                              "type": "array",
+                              "items": {
+                                "type": "string"
+                              }
+                            },
+                            "postedAt": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["id", "channel", "title", "ongoing", "actions", "postedAt"],
+                          "additionalProperties": false
+                        }
+                      },
+                      "pending": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "fireAt": {
+                              "type": "number"
+                            }
+                          },
+                          "required": ["id", "fireAt"],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": ["permission", "badge", "channels", "active", "pending"],
+                    "additionalProperties": false
                   }
                 },
                 "required": ["availability"],
@@ -34814,17 +34931,17 @@
           "type": "object",
           "properties": {
             "battery": {
-              "$ref": "#/$defs/__schema100"
+              "$ref": "#/$defs/__schema108"
             },
             "power": {
-              "$ref": "#/$defs/__schema100"
+              "$ref": "#/$defs/__schema108"
             },
             "audio": {
-              "$ref": "#/$defs/__schema100"
+              "$ref": "#/$defs/__schema108"
             },
             "location": {
               "description": "The last location.updated as {accuracyM, approximate} only: a fix is present and how accurate it is, never its coordinates",
-              "$ref": "#/$defs/__schema100"
+              "$ref": "#/$defs/__schema108"
             }
           },
           "additionalProperties": false
@@ -35024,7 +35141,7 @@
               ]
             },
             "payload": {
-              "$ref": "#/$defs/__schema111"
+              "$ref": "#/$defs/__schema119"
             },
             "context": {
               "$ref": "#/$defs/__schema92"
@@ -35944,7 +36061,7 @@
           "type": "boolean",
           "const": true
         },
-        "__schema100": {
+        "__schema108": {
           "type": "object",
           "properties": {
             "values": {
@@ -35981,7 +36098,7 @@
           "required": ["values", "timestamp", "receivedAt"],
           "additionalProperties": false
         },
-        "__schema111": {
+        "__schema119": {
           "anyOf": [
             {
               "type": "string"
@@ -35998,7 +36115,7 @@
             {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/__schema111"
+                "$ref": "#/$defs/__schema119"
               }
             },
             {
@@ -36007,7 +36124,7 @@
                 "type": "string"
               },
               "additionalProperties": {
-                "$ref": "#/$defs/__schema111"
+                "$ref": "#/$defs/__schema119"
               }
             }
           ]

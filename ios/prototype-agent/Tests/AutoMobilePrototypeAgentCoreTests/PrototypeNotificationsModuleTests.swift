@@ -9,14 +9,13 @@ final class FakeNotificationCenterClient: NotificationCenterClient {
     var current = PrototypeNotificationSnapshot(authorization: .granted)
     var requests: [PrototypeNotificationRequest] = []
     var categories: [String: [PrototypeNotificationAction]] = [:]
+    var nowEpochMs: Double = 1_700_000_000_000
 
     func snapshot() async -> PrototypeNotificationSnapshot { current }
 
     func add(_ request: PrototypeNotificationRequest) async throws {
         requests.append(request)
-        let entry = PrototypeNotificationEntry(
-            identifier: request.identifier, group: request.group, prototypeId: request.prototypeId
-        )
+        let entry = PrototypeNotificationEntry(request, nowEpochMs: nowEpochMs)
         current.pending.removeAll { $0.identifier == request.identifier }
         if request.delaySeconds == nil {
             current.delivered.removeAll { $0.identifier == request.identifier }
@@ -255,11 +254,104 @@ final class PrototypeNotificationsModuleTests: XCTestCase {
         XCTAssertEqual(event?.data.objectFields?["reply"], .string(prefix))
     }
 
+    func testReportListsOnlyTheShownPrototypesTaggedRequests() async {
+        let (module, client) = makeModule()
+        client.current.blockedChannels = ["low"]
+        client.current.delivered = [
+            PrototypeNotificationEntry(
+                identifier: "proto:viewer:notice", group: "chat", prototypeId: "viewer", notificationId: "notice",
+                channel: "high", title: "Notice", body: "Hello", actions: ["reply", "archive"], postedAt: 2000
+            ),
+            PrototypeNotificationEntry(
+                identifier: "proto:viewer:legacy", group: "", prototypeId: "viewer", notificationId: "legacy",
+                title: "Legacy", body: "", postedAt: 1000
+            ),
+            PrototypeNotificationEntry(
+                identifier: "proto:other:notice", group: "", prototypeId: "other", notificationId: "notice",
+                channel: "high", title: "Other", postedAt: 500
+            ),
+            PrototypeNotificationEntry(identifier: "foreign", group: "", prototypeId: "viewer", title: "Foreign"),
+        ]
+        client.current.pending = [
+            PrototypeNotificationEntry(
+                identifier: "proto:viewer:later", group: "", prototypeId: "viewer", notificationId: "later",
+                channel: "default", title: "Later", fireAt: 9000
+            ),
+            PrototypeNotificationEntry(
+                identifier: "proto:other:later", group: "", prototypeId: "other", notificationId: "later",
+                fireAt: 8000
+            ),
+        ]
+        let refreshed = await call(module, "setBadge", ["count": .number(3)])
+        XCTAssertEqual(refreshed, success)
+
+        XCTAssertEqual(module.platformReport, .object([
+            "permission": .string("granted"),
+            "badge": .number(3),
+            "channels": .array(["default", "high", "low", "min"].map {
+                .object(["id": .string($0), "importance": .string($0), "blocked": .bool($0 == "low")])
+            }),
+            "active": .array([
+                .object([
+                    "id": .string("legacy"), "channel": .string("default"), "title": .string("Legacy"),
+                    "ongoing": .bool(false), "actions": .array([]), "postedAt": .number(1000),
+                ]),
+                .object([
+                    "id": .string("notice"), "channel": .string("high"), "title": .string("Notice"),
+                    "body": .string("Hello"), "group": .string("chat"), "ongoing": .bool(false),
+                    "actions": .array([.string("reply"), .string("archive")]), "postedAt": .number(2000),
+                ]),
+            ]),
+            "pending": .array([.object(["id": .string("later"), "fireAt": .number(9000)])]),
+        ]))
+    }
+
+    func testPostedRequestsAreReportedBeforeTheNextRefresh() async {
+        let (module, client) = makeModule()
+        // The client's own times differ, so the reported times are the module's optimistic entries.
+        client.nowEpochMs = 0
+        let posted = await post(module, ["channel": .string("high"), "actions": makeActions(label: "Reply")])
+        XCTAssertEqual(posted, success)
+        XCTAssertEqual(module.platformReport?.objectFields?["active"], .array([.object([
+            "id": .string("notice"), "channel": .string("high"), "title": .string("Notice"),
+            "ongoing": .bool(false), "actions": .array([.string("reply")]), "postedAt": .number(Self.epochMs),
+        ])]))
+        let scheduled = await post(module, id: "later", ["delaySeconds": .number(60)])
+        XCTAssertEqual(scheduled, success)
+        XCTAssertEqual(module.platformReport?.objectFields?["pending"], .array([.object([
+            "id": .string("later"), "fireAt": .number(Self.epochMs + 60000),
+        ])]))
+        XCTAssertEqual(client.requests.map(\.channel), ["high", "default"])
+    }
+
+    func testRegistryReportCarriesTheNotificationsReportOnly() async throws {
+        let (module, _) = makeModule()
+        let posted = await post(module)
+        XCTAssertEqual(posted, success)
+        let registry = PrototypePlatformRegistry(modules: [module, PrototypeTestPlatformModule()])
+
+        let report = registry.report(runtime: .iosViewer, inFlight: [:])
+        let notifications = try XCTUnwrap(report.modules["notifications"])
+        let expected = try XCTUnwrap(module.platformReport)
+        XCTAssertEqual(notifications.report, expected)
+        XCTAssertNil(report.modules["test"]?.report)
+        let modules = report.wireObject.objectFields?["modules"]?.objectFields
+        XCTAssertEqual(modules?["notifications"], .object([
+            "availability": .string("ready"), "inFlight": .number(0), "report": expected,
+        ]))
+        XCTAssertNil(modules?["test"]?.objectFields?["report"])
+    }
+
+    private static let epochMs: Double = 1_700_000_000_000
+
     private func makeModule(clock: NotificationClock = NotificationClock())
         -> (PrototypeNotificationsModule, FakeNotificationCenterClient)
     {
         let client = FakeNotificationCenterClient()
-        let module = PrototypeNotificationsModule(client: client, clock: clock)
+        let module = PrototypeNotificationsModule(
+            client: client, clock: clock,
+            epochClock: FakePrototypeEpochClock(milliseconds: Int64(Self.epochMs))
+        )
         configure(module)
         return (module, client)
     }

@@ -12,6 +12,7 @@ struct PrototypeNotificationRequest: Sendable {
     let identifier: String
     let prototypeId: String
     let notificationId: String
+    let channel: String
     let title: String
     let body: String
     let group: String
@@ -32,10 +33,32 @@ struct PrototypeNotificationRequest: Sendable {
     }
 }
 
+/// One delivered or pending request. The optional fields feed the module report (#14277); `postedAt`
+/// (delivered) and `fireAt` (pending) are milliseconds since the epoch.
 struct PrototypeNotificationEntry: Sendable {
     let identifier: String
     let group: String
     let prototypeId: String
+    var notificationId: String?
+    var channel: String?
+    var title: String?
+    var body: String?
+    var actions: [String] = []
+    var postedAt: Double?
+    var fireAt: Double?
+}
+
+extension PrototypeNotificationEntry {
+    /// The entry an added request yields: delivered at `nowEpochMs`, or pending until its delay elapses.
+    init(_ request: PrototypeNotificationRequest, nowEpochMs: Double) {
+        let delayMs = request.delaySeconds.map { Double($0) * 1000 }
+        self.init(
+            identifier: request.identifier, group: request.group, prototypeId: request.prototypeId,
+            notificationId: request.notificationId, channel: request.channel, title: request.title,
+            body: request.body, actions: request.actions.map(\.id),
+            postedAt: delayMs == nil ? nowEpochMs : nil, fireAt: delayMs.map { nowEpochMs + $0 }
+        )
+    }
 }
 
 struct PrototypeNotificationSnapshot: Sendable {
@@ -76,6 +99,7 @@ final class PrototypeNotificationsModule: PrototypePlatformModule {
     var capabilities: [String] { [capability, Self.scheduledCapability] }
     private let client: any NotificationCenterClient
     private let clock: any PrototypeMonotonicClock
+    private let epochClock: any PrototypeEpochClock
     private var prototypeId: String?
     private var channels: [String: String] = [:]
     private var snapshot = PrototypeNotificationSnapshot()
@@ -86,9 +110,14 @@ final class PrototypeNotificationsModule: PrototypePlatformModule {
     private var subscribers: [UUID: AsyncStream<PlatformEvent>.Continuation] = [:]
     private var updates: [String: [Int]] = [:]
 
-    init(client: any NotificationCenterClient, clock: any PrototypeMonotonicClock = SystemPrototypeClock()) {
+    init(
+        client: any NotificationCenterClient,
+        clock: any PrototypeMonotonicClock = SystemPrototypeClock(),
+        epochClock: any PrototypeEpochClock = SystemPrototypeEpochClock()
+    ) {
         self.client = client
         self.clock = clock
+        self.epochClock = epochClock
         client.onResponse = { [weak self] response in self?.receive(response) }
         client.onChange = { [weak self] in self?.refresh() }
     }
@@ -122,6 +151,49 @@ final class PrototypeNotificationsModule: PrototypePlatformModule {
                 ($0, .object(["blocked": .bool(blocked($0))]))
             })),
         ]
+    }
+
+    /// A request posted without a recorded channel, such as one recorded before channels were stored, is
+    /// reported on the contract's default importance name.
+    static let defaultChannel = "default"
+
+    /// `platformRuntime.modules.notifications.report` (#14277): the shown prototype's cached delivered and
+    /// pending requests, tagged `proto:<notificationId>` for `PrototypeNotificationsReport`.
+    var platformReport: JSONValue? {
+        let declared: [JSONValue] = channels.map { id, importance in
+            .object(["id": .string(id), "importance": .string(importance), "blocked": .bool(blocked(id))])
+        }
+        return PrototypeNotificationsReport.of(.object([
+            "permission": .string(snapshot.authorization.rawValue),
+            "badge": .number(Double(snapshot.badge)),
+            "channels": .array(declared),
+            "posted": .array(snapshot.delivered.filter(owns).compactMap(Self.posted)),
+            "pending": .array(snapshot.pending.filter(owns).compactMap(Self.scheduled)),
+        ]))
+    }
+
+    private static func tag(_ entry: PrototypeNotificationEntry) -> JSONValue? {
+        entry.notificationId.map { JSONValue.string(PrototypeNotificationsReport.tagPrefix + $0) }
+    }
+
+    private static func posted(_ entry: PrototypeNotificationEntry) -> JSONValue? {
+        guard let tag = tag(entry) else { return nil }
+        var fields: [String: JSONValue] = [
+            "tag": tag,
+            "channel": .string(entry.channel ?? defaultChannel),
+            "actions": .array(entry.actions.map(JSONValue.string)),
+        ]
+        if let title = entry.title { fields["title"] = .string(title) }
+        // A post without a body or group stores the empty string; report those as absent.
+        if let body = entry.body, !body.isEmpty { fields["body"] = .string(body) }
+        if !entry.group.isEmpty { fields["group"] = .string(entry.group) }
+        if let postedAt = entry.postedAt { fields["postedAt"] = .number(postedAt) }
+        return .object(fields)
+    }
+
+    private static func scheduled(_ entry: PrototypeNotificationEntry) -> JSONValue? {
+        guard let tag = tag(entry), let fireAt = entry.fireAt else { return nil }
+        return .object(["tag": tag, "fireAt": .number(fireAt)])
     }
 
     var events: AsyncStream<PlatformEvent> {
@@ -272,7 +344,7 @@ final class PrototypeNotificationsModule: PrototypePlatformModule {
         }
         guard !blocked(channel) else { return .failure(.unavailable, "Notification channel is blocked") }
         let request = PrototypeNotificationRequest(
-            identifier: Self.prefix(prototypeId) + id, prototypeId: prototypeId, notificationId: id,
+            identifier: Self.prefix(prototypeId) + id, prototypeId: prototypeId, notificationId: id, channel: channel,
             title: title, body: args["body"]?.stringValue ?? "", group: args["group"]?.stringValue ?? "",
             badge: args["badge"]?.intValue, passive: importance == "min" || importance == "low",
             silent: args["silent"]?.boolValue == true, delaySeconds: args["delaySeconds"]?.intValue,
@@ -306,9 +378,7 @@ final class PrototypeNotificationsModule: PrototypePlatformModule {
         }
         try await client.add(request)
         updates[request.identifier, default: []].append(now)
-        let entry = PrototypeNotificationEntry(
-            identifier: request.identifier, group: request.group, prototypeId: request.prototypeId
-        )
+        let entry = PrototypeNotificationEntry(request, nowEpochMs: Double(epochClock.nowEpochMs()))
         snapshot.pending.removeAll { $0.identifier == request.identifier }
         if scheduled {
             snapshot.pending.append(entry)

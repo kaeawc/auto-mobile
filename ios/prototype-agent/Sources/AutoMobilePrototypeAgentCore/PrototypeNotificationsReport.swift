@@ -5,8 +5,8 @@ import Foundation
 /// and `pending` entries carry the platform `tag`. Only `proto:<id>` tags are reported, as `id`. Both
 /// replay `test/fixtures/prototype-notifications/report.json`.
 ///
-/// On iOS the runtime fills the snapshot from `deliveredNotifications()` and
-/// `pendingNotificationRequests()`, with the request identifier as `tag`.
+/// On iOS `PrototypeNotificationsModule.platformReport` fills the snapshot from the shown prototype's
+/// `deliveredNotifications()` and `pendingNotificationRequests()`, tagged `proto:<notificationId>`.
 enum PrototypeNotificationsReport {
     static let tagPrefix = "proto:"
 

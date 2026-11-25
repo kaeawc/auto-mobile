@@ -57,7 +57,8 @@
             return PrototypeNotificationSnapshot(
                 authorization: authorization, deliveryDisabled: deliveryDisabled,
                 badge: UserDefaults.standard.integer(forKey: Self.badgeKey),
-                delivered: delivered.compactMap(Self.entry), pending: pending.compactMap(Self.entry)
+                delivered: notifications.compactMap { Self.entry($0.request, postedAt: $0.date) },
+                pending: pending.compactMap { Self.entry($0, fireAt: Self.fireDate(of: $0)) }
             )
         }
 
@@ -73,10 +74,15 @@
             content.categoryIdentifier = request.categoryIdentifier ?? ""
             // Keep resolved event data in the Viewer container. The OS request carries identifiers only.
             let record = Record(identifier: UUID().uuidString, data: request.data)
-            content.userInfo = [
+            var userInfo: [AnyHashable: Any] = [
                 "prototypeId": request.prototypeId, "notificationId": request.notificationId,
-                "recordId": record.identifier,
+                "recordId": record.identifier, "channel": request.channel, "actions": request.actions.map(\.id),
             ]
+            // A time-interval trigger's nextTriggerDate() counts from the read, so keep the scheduled time.
+            if let delay = request.delaySeconds {
+                userInfo["fireAt"] = Date().addingTimeInterval(TimeInterval(delay)).timeIntervalSince1970
+            }
+            content.userInfo = userInfo
             records.append(record)
             persistRecords()
             let trigger = request.delaySeconds.map {
@@ -181,11 +187,33 @@
             defaults.set(timestamp, forKey: badgeDateKey)
         }
 
-        private static func entry(_ request: UNNotificationRequest) -> PrototypeNotificationEntry? {
-            guard let prototypeId = request.content.userInfo["prototypeId"] as? String else { return nil }
+        /// `postedAt` is set for a delivered notification and `fireAt` for a pending request.
+        private static func entry(
+            _ request: UNNotificationRequest, postedAt: Date? = nil, fireAt: Date? = nil
+        )
+            -> PrototypeNotificationEntry?
+        {
+            let content = request.content
+            guard let prototypeId = content.userInfo["prototypeId"] as? String else { return nil }
             return PrototypeNotificationEntry(
-                identifier: request.identifier, group: request.content.threadIdentifier, prototypeId: prototypeId
+                identifier: request.identifier, group: content.threadIdentifier, prototypeId: prototypeId,
+                notificationId: content.userInfo["notificationId"] as? String,
+                channel: content.userInfo["channel"] as? String, title: content.title, body: content.body,
+                actions: content.userInfo["actions"] as? [String] ?? [],
+                postedAt: postedAt.map(epochMilliseconds), fireAt: fireAt.map(epochMilliseconds)
             )
+        }
+
+        private static func fireDate(of request: UNNotificationRequest) -> Date? {
+            if let seconds = request.content.userInfo["fireAt"] as? Double {
+                return Date(timeIntervalSince1970: seconds)
+            }
+            return (request.trigger as? UNTimeIntervalNotificationTrigger)?.nextTriggerDate()
+                ?? (request.trigger as? UNCalendarNotificationTrigger)?.nextTriggerDate()
+        }
+
+        private static func epochMilliseconds(_ date: Date) -> Double {
+            (date.timeIntervalSince1970 * 1000).rounded()
         }
 
         private func persistRecords() {

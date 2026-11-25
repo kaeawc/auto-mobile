@@ -11,7 +11,11 @@ import { runSessionSensorMutation, type SessionSensorHost } from "./sessionSenso
 import { safeFilenameSegment } from "./toolOutputArtifactLedger";
 import { defaultDaemonContext } from "../daemon/daemonContext";
 import type { SessionManager } from "../daemon/sessionManager";
-import type { AudioSource, EmulatorAudioService } from "../features/audio/EmulatorAudioService";
+import type {
+  AudioSource,
+  CapturedAudio,
+  EmulatorAudioService,
+} from "../features/audio/EmulatorAudioService";
 import { defaultEmulatorAudioService } from "../features/audio/defaultEmulatorAudioService";
 import { ActionableError } from "../models/ActionableError";
 import { encodeWav, DEFAULT_SILENCE_THRESHOLD_DBFS } from "../utils/audio/pcm";
@@ -203,12 +207,39 @@ export const createStopAudioInputHandler =
     });
   };
 
+type CaptureLevels = Omit<CapturedAudio, "pcm">;
+
+/**
+ * A capture that stopped short of its length measured silence only over what arrived, so it gives
+ * no silence verdict; sound it did hear is still proof the device played something (#19182).
+ */
+function captureVerdict(levels: CaptureLevels): { complete: boolean; silent: boolean | null } {
+  const complete = !levels.timedOut;
+  return { complete, silent: complete || !levels.silent ? levels.silent : null };
+}
+
+function captureMessage(deviceId: string, levels: CaptureLevels, requestedMs: number): string {
+  if (levels.timedOut && levels.silent) {
+    return (
+      `The audio stream from ${deviceId} delivered ${levels.durationMs} of ${requestedMs} ms with ` +
+      "no sound, so silence was not measured. A guest playing nothing can also send no frames. " +
+      "Play audio and retry; if it stays short, check the device's audio route (for an emulator, " +
+      "its gRPC port)."
+    );
+  }
+  const heard = levels.silent
+    ? `No audio above the threshold in ${levels.durationMs} ms from ${deviceId}.`
+    : `Captured ${levels.durationMs} ms of audio from ${deviceId} (peak ${levels.peakDbfs} dBFS).`;
+  return levels.timedOut ? `${heard} The stream stopped short of ${requestedMs} ms.` : heard;
+}
+
 export const createCaptureAudioHandler =
   (deps: AudioToolDependencies = {}): DeviceToolHandler<typeof captureAudioInput> =>
   async (device, args) => {
     const service = deps.service ?? defaultEmulatorAudioService;
+    const requestedMs = Math.round(args.seconds * 1000);
     const { pcm, ...levels } = await service.capture(device.deviceId, {
-      durationMs: Math.round(args.seconds * 1000),
+      durationMs: requestedMs,
       silenceThresholdDbfs: args.silenceThresholdDbfs,
     });
     let artifact: { path: string; sizeBytes: number } | undefined;
@@ -221,11 +252,11 @@ export const createCaptureAudioHandler =
     }
     return createStructuredToolResponse({
       success: true,
-      message: levels.silent
-        ? `No audio above the threshold in ${levels.durationMs} ms from ${device.deviceId}.`
-        : `Captured ${levels.durationMs} ms of audio from ${device.deviceId} (peak ${levels.peakDbfs} dBFS).`,
+      message: captureMessage(device.deviceId, levels, requestedMs),
       deviceId: device.deviceId,
       ...levels,
+      ...captureVerdict(levels),
+      requestedMs,
       ...artifact,
     });
   };
@@ -276,7 +307,8 @@ const captureAudioTool = defineDeviceTool({
   description:
     `Record up to ${MAX_CAPTURE_SECONDS} s of an Android emulator's or iOS Simulator's audio output and report its level: ` +
     "rmsDbfs, peakDbfs, the share of 20 ms windows with sound (activeRatio), and silent. A guest " +
-    "that plays nothing returns silent: true rather than an error. saveArtifact writes a WAV and " +
+    "that plays nothing returns silent: true rather than an error. A capture that stopped short of " +
+    "its length returns complete: false, and silent: null unless it heard sound. saveArtifact writes a WAV and " +
     "returns its host path. Assert loosely (silent or not, duration within a margin); loaded hosts " +
     "can glitch real-time audio. A simulator is recorded with a Core Audio process tap of its own " +
     "processes (route process-tap), so other simulators and host apps are not heard; no loopback " +

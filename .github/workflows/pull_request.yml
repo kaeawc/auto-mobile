@@ -1638,15 +1638,16 @@ jobs:
         run: rm -rf -- "$RUNNER_TEMP/installer-home-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
 
   # Per-run Mac pool routing (#17580). Reads self-hosted runner status and sends
-  # each pool's jobs to hosted macos-26 / macos-latest when that pool has no
-  # online runner. GITHUB_TOKEN cannot list runners, so this reads the
-  # MAC_RUNNER_READ_TOKEN secret. It fails open: a missing secret or an API
-  # error outputs "self-hosted", a failed step outputs nothing, and every
-  # consumer leaves the Mac only on an explicit "hosted". It has no job `if` and
-  # every step tolerates failure; each consumer also runs under always() and an
-  # empty output keeps it self-hosted, so a cancelled or failed routing job never
-  # skips a required Mac check. vars.AUTOMOBILE_MAC_POOLS_ENABLED stays the
-  # manual override. It holds MAC_RUNNER_READ_TOKEN, so it only reads contents.
+  # each pool's jobs to hosted xcode-27 (macos-26 for the root SPM Xcode 26.6
+  # leg) / macos-latest when that pool has no online runner. GITHUB_TOKEN
+  # cannot list runners, so this reads the MAC_RUNNER_READ_TOKEN secret. It
+  # fails open: a missing secret or an API error outputs "self-hosted", a failed
+  # step outputs nothing, and every consumer leaves the Mac only on an explicit
+  # "hosted". It has no job `if` and every step tolerates failure; each consumer
+  # also runs under always() and an empty output keeps it self-hosted, so a
+  # cancelled or failed routing job never skips a required Mac check.
+  # vars.AUTOMOBILE_MAC_POOLS_ENABLED stays the manual override. It holds
+  # MAC_RUNNER_READ_TOKEN, so it only reads contents.
   mac-pool-routing:
     name: "Mac Pool Routing"
     permissions:
@@ -3086,7 +3087,7 @@ jobs:
     name: "Build Xcode Projects (${{ matrix.config.name }})"
     # Heavy self-hosted lane (one runner process, so xcodebuild/simulator jobs
     # never overlap on the Mac) for owner-authored same-repository PRs once the
-    # pools are registered (#11011); forks and pre-rollout use hosted macos-26.
+    # pools are registered (#11011); forks and pre-rollout use hosted xcode-27.
     # The XcodeGen drift check below is the PR-time drift gate (#10939).
     # One job builds both projects (#11580): as two matrix legs they queued one
     # after the other on the single heavy runner and each repeated the checkout,

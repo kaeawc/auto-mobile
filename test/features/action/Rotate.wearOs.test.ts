@@ -14,6 +14,7 @@ import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeXrGlassesDetector } from "../../fakes/FakeXrGlassesDetector";
 import { FakeWearOsDetector } from "../../fakes/FakeWearOsDetector";
 import { FakeWindow } from "../../fakes/FakeWindow";
 
@@ -38,7 +39,7 @@ function setup(
   const rotate = new Rotate(device, {
     adb,
     timer,
-    options: { xrDetector, wearOsDetector },
+    options: { xrDetector, glassesDetector: new FakeXrGlassesDetector(), wearOsDetector },
     collaborators: { awaitIdle, observeScreen, window: new FakeWindow() },
   });
   return { adb, timer, awaitIdle, observeScreen, rotate };

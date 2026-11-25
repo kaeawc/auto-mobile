@@ -23,6 +23,10 @@ import { logger } from "../../utils/logger";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
 import { IOS_RECENT_APPS_TIMEOUT_MS } from "./gestureTransportTimeout";
 import { SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
+import {
+  refuseRecentAppsWithoutOverview,
+  type RecentAppsFormFactorOptions,
+} from "./RecentAppsUnsupportedError";
 
 // Two reads preserve the existing recent-app verification bound.
 export const RECENT_APPS_VERIFY_ATTEMPTS = 2;
@@ -41,14 +45,20 @@ export const POST_NAVIGATION_VERIFY_WINDOW_MS = 3000;
  */
 export class RecentApps extends BaseVisualChange {
   private pressButton: PressButton;
+  private readonly formFactors: RecentAppsFormFactorOptions;
 
   constructor(
     device: BootedDevice,
     adb: AdbExecutor | null = null,
     timer: Timer = defaultTimer,
-    collaborators: DisplayFenceDependencies = {},
+    {
+      wearOsDetector,
+      tvDetector,
+      ...collaborators
+    }: DisplayFenceDependencies & RecentAppsFormFactorOptions = {},
   ) {
     super(device, { adb, timer, displayFence: collaborators });
+    this.formFactors = { wearOsDetector, tvDetector };
     this.pressButton = new PressButton(device, adb);
   }
 
@@ -97,6 +107,7 @@ export class RecentApps extends BaseVisualChange {
       return result;
     }
 
+    await refuseRecentAppsWithoutOverview(this.device, this.adb, this.formFactors, signal);
     const options = {
       usesObservationForResolution: false,
       changeExpected: true,

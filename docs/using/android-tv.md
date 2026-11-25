@@ -257,6 +257,10 @@ Prototype overlay buttons support D-pad navigation and show a visible outline wh
 Use `focusNavigate` to reach a button and `sendKeys` with `enter` to activate it.
 Use `prototype` with `dismiss` to close the overlay.
 
+### Tools a TV refuses
+
+`rotate` and `recentApps` fail at once on a TV and change nothing.
+
 ## Out of scope
 
 - Physical TVs and Chromecast hardware.

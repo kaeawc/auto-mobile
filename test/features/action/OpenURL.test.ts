@@ -4,6 +4,7 @@ import { AdbDeviceTransportUnavailableError } from "../../../src/utils/android-c
 import { createExecResult } from "../../../src/utils/execResult";
 import { afterEach, describe, expect, test, spyOn } from "bun:test";
 import { OpenURL } from "../../../src/features/action/OpenURL";
+import { OpenUrlUnsupportedError } from "../../../src/features/action/OpenUrlUnsupportedError";
 import { BaseVisualChange } from "../../../src/features/action/BaseVisualChange";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { IOSCtrlProxyManager } from "../../../src/ctrlProxy/IOSCtrlProxyManager";
@@ -562,5 +563,86 @@ describe("OpenURL trims the dispatched URL (issue #4166)", () => {
 
     expect(launchSpy.mock.calls[0][0]).toBe("com.example.MyApp");
     expect(result).toEqual({ success: true, url: "package:com.example.MyApp" });
+  });
+});
+
+describe("OpenURL on a Wear OS watch (#19180)", () => {
+  // Captured `am start` stderr from the Wear OS android-37.0 emulator, Intent details elided.
+  const securityException =
+    "Starting: Intent { act=android.intent.action.VIEW dat=https://example.com/... }\n" +
+    "Exception occurred while executing 'start':\n" +
+    "java.lang.SecurityException: Permission Denial: starting Intent { act=android.intent.action.VIEW dat=https://example.com/... cmp=com.google.android.wearable.app/com.google.android.clockwork.wcs.remoteintent.UriRedirectActivity } from null (pid=1234, uid=2000) requires com.google.android.wearable.permission.URI_REDIRECT_TO_REMOTE\n" +
+    "\tat com.android.server.wm.ActivityTaskSupervisor.checkStartAnyActivityPermission(ActivityTaskSupervisor.java:1234)\n" +
+    "\tat android.os.Binder.execTransact(Binder.java:1500)";
+
+  function watchOpenUrl(adb: FakeAdbExecutor): OpenURL {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const openURL = new OpenURL(
+      { name: "watch", platform: "android", deviceId: "emulator-5556", formFactor: "watch" },
+      { adb, simctl: null, devicectl: null, timer },
+    );
+    const observeScreen = new FakeObserveScreen();
+    observeScreen.setObserveResult(observeResultStub);
+    Object.assign(openURL, {
+      observeScreen,
+      window: new FakeWindow(),
+      awaitIdle: new FakeAwaitIdle(),
+    });
+    return openURL;
+  }
+
+  test("a rejected am start names the redirect and keeps the exception line", async () => {
+    const adb = new FakeAdbExecutor();
+    const failure = Object.assign(
+      new Error("Command failed: adb shell am start ... exit code: 255"),
+      {
+        cause: Object.assign(new Error("exit code 255"), {
+          code: 255,
+          stdout: "",
+          stderr: securityException,
+        }),
+      },
+    );
+    adb.setCommandError("am start -a android.intent.action.VIEW", failure);
+
+    const error = await watchOpenUrl(adb)
+      .execute("https://example.com")
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(OpenUrlUnsupportedError);
+    const message = (error as Error).message;
+    expect(message).toContain("Wear OS has no browser");
+    expect(message).toContain("Use an app deep link");
+    expect(message).toContain(
+      "Device reported: java.lang.SecurityException: Permission Denial: starting Intent",
+    );
+    expect(message).toContain("URI_REDIRECT_TO_REMOTE");
+    expect(message).not.toContain("Binder.execTransact");
+  });
+
+  test("an am start that reports the redirect on a clean exit is refused the same way", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse(
+      "am start -a android.intent.action.VIEW",
+      createExecResult("", securityException),
+    );
+
+    await expect(watchOpenUrl(adb).execute("https://example.com")).rejects.toBeInstanceOf(
+      OpenUrlUnsupportedError,
+    );
+  });
+
+  test("any other rejected am start keeps its original error", async () => {
+    const adb = new FakeAdbExecutor();
+    const failure = new Error("adb: device offline");
+    adb.setCommandError("am start -a android.intent.action.VIEW", failure);
+
+    const error = await watchOpenUrl(adb)
+      .execute("myapp://order/123")
+      .catch((caught: unknown) => caught);
+
+    expect(error).not.toBeInstanceOf(OpenUrlUnsupportedError);
+    expect(error).toBe(failure);
   });
 });

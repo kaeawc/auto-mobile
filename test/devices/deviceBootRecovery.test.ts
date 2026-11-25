@@ -1,7 +1,14 @@
 import { describe, expect, it } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { CiIosBootRecovery } from "../../src/devices/deviceBootRecovery";
-import type { DeviceInfo } from "../../src/models";
+import { ActionableError, type DeviceInfo } from "../../src/models";
 import { BootCapacityExhaustedError } from "../../src/models/BootCapacityExhaustedError";
+
+// Verbatim simctl stderr captured for #14116 (see test/fixtures/ios-simctl/README.md).
+function captured(name: string): string {
+  return readFileSync(join(import.meta.dir, "../fixtures/ios-simctl/failures", name), "utf8");
+}
 
 describe("CiIosBootRecovery", () => {
   const target: DeviceInfo = {
@@ -65,6 +72,93 @@ describe("CiIosBootRecovery", () => {
 
     expect(recovered).toEqual([]);
     expect(bootAttempts).toBe(1);
+  });
+
+  function recordingRecovery(recovered: string[]): CiIosBootRecovery {
+    return new CiIosBootRecovery({
+      ownedSimulatorName: target.name,
+      shutdown: async () => {
+        recovered.push("shutdown");
+      },
+      erase: async () => {
+        recovered.push("erase");
+      },
+    });
+  }
+
+  /** A boot failure the way the boot path surfaces it: a wrapper whose cause is the exec failure. */
+  function wrappedBootFailure(exitCode: number, stderr: string): ActionableError {
+    const execFailure = Object.assign(new Error(`Command failed with exit code ${exitCode}`), {
+      code: exitCode,
+      stderr,
+    });
+    return new ActionableError("Simulator CI-UDID failed to become ready", { cause: execFailure });
+  }
+
+  // #14116: erasing cannot fix a device simctl does not know or a host out of resources, so
+  // recovery stops at the first failure instead of shutting down, erasing and booting again.
+  it.each([
+    ["an unknown device", wrappedBootFailure(148, captured("boot-invalid-device.stderr.txt"))],
+    [
+      "host resource exhaustion",
+      wrappedBootFailure(
+        1,
+        "The current system settings are not sufficient to allow booting additional simulators: maxFiles",
+      ),
+    ],
+  ])("does not shut down or erase the owned simulator for %s", async (_name, failure) => {
+    const recovered: string[] = [];
+    let bootAttempts = 0;
+
+    await expect(
+      recordingRecovery(recovered).run(target, async () => {
+        bootAttempts++;
+        throw failure;
+      }),
+    ).rejects.toBe(failure);
+
+    expect(recovered).toEqual([]);
+    expect(bootAttempts).toBe(1);
+  });
+
+  // #14116: a launchd_sim bind failure is a runtime boot timeout, not broken device data, so
+  // the owned simulator is shut down and booted again without erasing it.
+  it("retries a launchd_sim bind failure after shutdown without erasing", async () => {
+    const recovered: string[] = [];
+    let bootAttempts = 0;
+    const failure = wrappedBootFailure(1, "launchd_sim could not bind to session");
+
+    await expect(
+      recordingRecovery(recovered).run(target, async () => {
+        bootAttempts++;
+        if (bootAttempts === 1) {
+          throw failure;
+        }
+        return "booted";
+      }),
+    ).resolves.toBe("booted");
+
+    expect(recovered).toEqual(["shutdown"]);
+    expect(bootAttempts).toBe(2);
+  });
+
+  it("still erases the owned simulator when its data is missing on disk", async () => {
+    const recovered: string[] = [];
+    let bootAttempts = 0;
+    const failure = wrappedBootFailure(2, captured("boot-data-missing-on-disk.stderr.txt"));
+
+    await expect(
+      recordingRecovery(recovered).run(target, async () => {
+        bootAttempts++;
+        if (bootAttempts === 1) {
+          throw failure;
+        }
+        return "booted";
+      }),
+    ).resolves.toBe("booted");
+
+    expect(recovered).toEqual(["shutdown", "erase"]);
+    expect(bootAttempts).toBe(2);
   });
 
   it("stops recovery when cancellation arrives during shutdown", async () => {

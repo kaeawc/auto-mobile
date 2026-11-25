@@ -25,6 +25,7 @@ import { getAbortSignal } from "../AbortContext";
 
 import { SimulatorStillShuttingDownError } from "./SimulatorStillShuttingDownError";
 import { isIosSimulatorAlreadyStoppedError } from "./simulatorStateErrors";
+import { eraseStateConflictError } from "./simctlFailureClassifier";
 import { launchdSimPattern, parsePgrepPid } from "./launchdSimPid";
 
 /** Trailing options for one `simctl` argv invocation. */
@@ -386,12 +387,16 @@ export class SimCtlShutdown {
       "erase",
     );
     try {
-      await this.context.executeCommandArgv(
-        ["erase", udid],
-        SIMCTL_COMMAND_TIMEOUT_MS,
-        `erase ${udid}`,
-        { signal, waitForTimedOutCommandSettlement: true },
-      );
+      try {
+        await this.context.executeCommandArgv(
+          ["erase", udid],
+          SIMCTL_COMMAND_TIMEOUT_MS,
+          `erase ${udid}`,
+          { signal, waitForTimedOutCommandSettlement: true },
+        );
+      } catch (error) {
+        throw eraseStateConflictError(udid, error) ?? error;
+      }
       lease.state.lastBootSucceeded = false;
       lease.state.ownerToken = undefined;
     } finally {

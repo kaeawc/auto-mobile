@@ -3,7 +3,7 @@ import {
   AppleDevice,
   normalizeIosVersion,
   isDeviceAvailable,
-  parseAlreadyBootedCoreSimulator405State,
+  parseCoreSimulatorCurrentState,
   SimCtlBootOptions,
   SimulatorBootState,
   SimulatorBootLease,
@@ -524,7 +524,7 @@ export class SimCtlBoot {
       }
 
       lastFailure = bootstatusReportedAlreadyBooted
-        ? `bootstatus reported CoreSimulator error 405 but device state is ${state ?? "unknown"}, not Booted`
+        ? `bootstatus reported the simulator already Booted but device state is ${state ?? "unknown"}, not Booted`
         : `bootstatus exited 0 but device state is ${state ?? "unknown"}, not Booted`;
       logger.warn(
         `[iOS] Boot verification failed for ${udid} on attempt ${attempt}/${maxAttempts}: ${lastFailure}`,
@@ -558,18 +558,19 @@ export class SimCtlBoot {
 
   /**
    * Classify a `bootstatus` rejection for {@link bootAndVerify}. CoreSimulator
-   * can transiently reject `bootstatus` with a structured "current state" 405.
-   * Parse the state it reported and branch: `Booted` contradicts the failure
+   * can transiently reject `bootstatus` with a structured "current state" error
+   * (code 405 on Xcode 26.6, 163 or 165 on other versions; classified by its text,
+   * #14116). Parse the state it reported and branch: `Booted` contradicts the failure
    * (the caller should verify state itself); `Booting`/`Shutting Down` means a
    * prior retry's transition (e.g. our own `shutdown`) has not settled yet, so
    * this waits for it before returning; any other reported state — or an error
-   * that isn't this structured 405 at all — is not one this loop knows how to
+   * that isn't this structured rejection at all — is not one this loop knows how to
    * recover from and is rethrown (issue #6411).
    *
    * @returns `true` when the caller should re-issue `bootstatus` within the
    *          same attempt (a mid-transition rejection was waited out); `false`
    *          when the caller should proceed to verify state (a contradictory
-   *          "already Booted" 405).
+   *          "already Booted" rejection).
    */
   async handleBootstatusRejection(
     error: unknown,
@@ -577,7 +578,7 @@ export class SimCtlBoot {
     deadlineMs: number,
     retryBackoffMs: number,
   ): Promise<boolean> {
-    const reportedState = parseAlreadyBootedCoreSimulator405State(error, udid);
+    const reportedState = parseCoreSimulatorCurrentState(error, udid);
     if (reportedState === undefined) {
       throw bootFailureGuidanceError(udid, error) ?? error;
     }
@@ -594,7 +595,7 @@ export class SimCtlBoot {
       throw error;
     }
     logger.debug(
-      `[iOS] bootstatus returned expected CoreSimulator error 405 for ${udid}; verifying simulator state: ${error}`,
+      `[iOS] bootstatus reported ${udid} already Booted; verifying simulator state: ${error}`,
     );
     return false;
   }

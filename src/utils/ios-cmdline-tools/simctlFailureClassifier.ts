@@ -36,7 +36,8 @@ const TARGET_STATE: Partial<Record<SimctlLifecycleVerb, string>> = {
   shutdown: "Shutdown",
 };
 
-const CURRENT_STATE_PATTERN = /Unable to .+? in current state: (\w+)/;
+// A state is one or more words ("Booted", "Shutting Down"); a trailing "(domain=..." clause is not.
+const CURRENT_STATE_PATTERN = /Unable to .+? in current state: ([A-Za-z]+(?: [A-Za-z]+)*)/;
 const DATA_MISSING_PATTERN = /cannot be located on disk/;
 const UNKNOWN_DEVICE_PATTERN = /^Invalid device or device pair: /m;
 const RESOURCE_EXHAUSTION_PATTERN = /not sufficient to allow booting additional simulators/;
@@ -131,13 +132,41 @@ export type SimctlRecoveryOutcome =
   | { status: "already-in-target-state"; state: string }
   | { status: "recovered-by-erase" };
 
+/** The captured stderr of an exec failure (string or Buffer), or "" when it has none. */
+export function simctlStderrText(error: unknown): string {
+  const stderr = (error as { stderr?: unknown } | null)?.stderr;
+  return typeof stderr === "string" ? stderr : Buffer.isBuffer(stderr) ? stderr.toString() : "";
+}
+
 /** The stderr of an exec failure when present, followed by its message. */
 export function simctlFailureText(error: unknown): string {
-  const stderr = (error as { stderr?: unknown } | null)?.stderr;
-  const stderrText =
-    typeof stderr === "string" ? stderr : Buffer.isBuffer(stderr) ? stderr.toString() : "";
+  const stderrText = simctlStderrText(error);
   const message = errorMessage(error);
   return stderrText ? `${stderrText}\n${message}` : message;
+}
+
+const MAX_CAUSE_DEPTH = 8;
+
+/**
+ * Classify a thrown simctl failure by the text of the error and of every error in its
+ * `cause` chain: boot paths wrap the exec failure (with its stderr) in an actionable error
+ * whose own message no longer carries the simctl text.
+ */
+export function classifySimctlError(verb: SimctlLifecycleVerb, error: unknown): SimctlFailure {
+  const texts: string[] = [];
+  const seen = new Set<unknown>();
+  let current: unknown = error;
+  while (
+    current !== undefined &&
+    current !== null &&
+    !seen.has(current) &&
+    seen.size < MAX_CAUSE_DEPTH
+  ) {
+    seen.add(current);
+    texts.push(simctlFailureText(current));
+    current = (current as { cause?: unknown }).cause;
+  }
+  return classifySimctlFailure(verb, texts.join("\n"));
 }
 
 const BOOT_FAILURE_GUIDANCE: Partial<Record<SimctlFailure["kind"], (udid: string) => string>> = {
@@ -172,6 +201,23 @@ export function bootFailureGuidanceError(
   const guidance =
     BOOT_FAILURE_GUIDANCE[classifySimctlFailure("boot", simctlFailureText(error)).kind];
   return guidance ? new ActionableError(guidance(udid), { cause: error }) : undefined;
+}
+
+/**
+ * An actionable error for an erase simctl refused because of the simulator's state (erase on
+ * a Booted device), telling the caller to shut it down first; undefined for any other failure.
+ */
+export function eraseStateConflictError(udid: string, error: unknown): ActionableError | undefined {
+  const failure = classifySimctlFailure("erase", simctlFailureText(error));
+  if (failure.kind !== "state-conflict") {
+    return undefined;
+  }
+  return new ActionableError(
+    `Simulator ${udid} cannot be erased while it is ${failure.state}; erase needs it Shutdown. ` +
+      `Shut it down first ('xcrun simctl shutdown ${udid}') or wait for its shutdown to finish, ` +
+      "then erase it again.",
+    { cause: error },
+  );
 }
 
 /**

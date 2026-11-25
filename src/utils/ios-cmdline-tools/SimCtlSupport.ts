@@ -13,6 +13,7 @@ import {
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 
 import { isIosSimulatorUdid } from "./iosDeviceType";
+import { classifySimctlFailure, simctlStderrText } from "./simctlFailureClassifier";
 import { iosVersionStringFromRuntimeId } from "./iosVersion";
 
 import { Mutex } from "async-mutex";
@@ -601,35 +602,27 @@ export function isDeviceAvailable(device: { isAvailable?: boolean }): boolean {
   return device.isAvailable !== false;
 }
 
-export const CORE_SIMULATOR_405_CURRENT_STATE_PATTERN =
-  /Unable to boot device in current state: (.+?)(?:\s*\(domain=|\s*$)/m;
-
-export function parseAlreadyBootedCoreSimulator405State(
-  error: unknown,
-  udid: string,
-): string | undefined {
+/**
+ * The state a structured simctl "current state" rejection reports for `udid` (`Booted`,
+ * `Booting`, `Shutting Down`, ...), or undefined for any other failure. The text decides
+ * through {@link classifySimctlFailure}, not the numeric code: the same rejection has been
+ * code 405, 163 and 165 across Xcode versions (#14116). Only an exec failure with a non-zero
+ * numeric exit code and captured stderr counts; a message that merely quotes the text does not.
+ */
+export function parseCoreSimulatorCurrentState(error: unknown, udid: string): string | undefined {
   if (!isIosSimulatorUdid(udid) || !(error instanceof Error)) {
     return undefined;
   }
 
-  const execError = error as NodeJS.ErrnoException & { stderr?: unknown };
-  const stderr =
-    typeof execError.stderr === "string"
-      ? execError.stderr
-      : Buffer.isBuffer(execError.stderr)
-        ? execError.stderr.toString()
-        : "";
-
-  if (
-    typeof execError.code !== "number" ||
-    execError.code === 0 ||
-    !stderr.includes("domain=com.apple.CoreSimulator.SimError, code=405")
-  ) {
+  const execError = error as NodeJS.ErrnoException;
+  if (typeof execError.code !== "number" || execError.code === 0) {
     return undefined;
   }
 
-  const match = CORE_SIMULATOR_405_CURRENT_STATE_PATTERN.exec(stderr);
-  return match?.[1]?.trim();
+  const failure = classifySimctlFailure("boot", simctlStderrText(error));
+  return failure.kind === "already-in-target-state" || failure.kind === "state-conflict"
+    ? failure.state
+    : undefined;
 }
 
 export interface SimulatorList {

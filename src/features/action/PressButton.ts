@@ -42,7 +42,11 @@ import {
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { HomeScreen } from "./HomeScreen";
-import { recordIosAppBeforePowerPress } from "./IosForegroundRestore";
+import {
+  iosPreLockForeground,
+  recordIosAppBeforePowerPress,
+  type IosPreLockForegroundRegistry,
+} from "./IosForegroundRestore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
@@ -98,6 +102,8 @@ export type PressButtonCollaborators = DisplayFenceDependencies &
     displayResolver?: PressButtonDisplayResolver;
     /** The iOS Simulator HID route for power and home (#19118); `null` disables it. */
     iosRawInput?: IosSimulatorRawInput | null;
+    /** Where a simulator `power` press records the app in front for `wakeAndUnlock` (#19231). */
+    iosPreLockForeground?: IosPreLockForegroundRegistry;
   };
 
 /** Per-press dispatch inputs threaded through the platform helpers (#11835). */
@@ -126,6 +132,7 @@ export class PressButton extends BaseVisualChange {
   private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
   private readonly holdRequest?: DispatchedRequestHold;
   private readonly displayResolver?: PressButtonDisplayResolver;
+  private readonly iosPreLockForeground: IosPreLockForegroundRegistry;
 
   constructor(
     device: BootedDevice,
@@ -145,6 +152,7 @@ export class PressButton extends BaseVisualChange {
     this.deviceTraits = collaborators.deviceTraits;
     this.templateBackTapClient = collaborators.templateBackTapClient;
     this.iosRawInput = resolveIosRawInput(device, collaborators.iosRawInput);
+    this.iosPreLockForeground = collaborators.iosPreLockForeground ?? iosPreLockForeground;
   }
 
   private iosLockStateInvalidator?: IosLockStateInvalidator;
@@ -310,13 +318,10 @@ export class PressButton extends BaseVisualChange {
       return pressed;
     }, options);
     acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
-    recordIosAppBeforePowerPress({
-      device: this.device,
-      button,
-      pressSucceeded,
-      durationMs,
-      prePress,
-    });
+    recordIosAppBeforePowerPress(
+      { device: this.device, button, pressSucceeded, durationMs, prePress },
+      this.iosPreLockForeground,
+    );
     acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
     await acceptHomeAlreadyOnLauncher(
       { button, displayId, pressSucceeded, launcherVerified, result, observation: prePress },

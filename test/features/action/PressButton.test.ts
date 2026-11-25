@@ -10,6 +10,7 @@ import { FakeArtifactWriter } from "../../fakes/FakeArtifactWriter";
 import { describe, expect, spyOn, test } from "bun:test";
 import { createExecResult } from "../../../src/utils/execResult";
 import { PressButton } from "../../../src/features/action/PressButton";
+import { IosPreLockForegroundRegistry } from "../../../src/features/action/IosForegroundRestore";
 import {
   acceptIosHomeAlreadyOnSpringboard,
   isIosHomePressOnSpringboard,
@@ -1106,4 +1107,60 @@ describe("iOS recent press with the App Switcher already open", () => {
       }
     },
   );
+});
+
+describe("iOS Simulator power press records the app in front for wakeAndUnlock (#19245)", () => {
+  const simulator: BootedDevice = {
+    deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+    platform: "ios",
+    name: "iPhone Simulator",
+  };
+  const PLAYGROUND = "dev.jasonpearson.automobile.Playground";
+
+  function screenWith(timer: FakeTimer, appId: string, locked: boolean): FakeObserveScreen {
+    const screen = new FakeObserveScreen();
+    screen.setObserveResult(() =>
+      buildObserveResult({
+        updatedAt: timer.now(),
+        activeWindow: { appId, activityName: "", layoutSeqSum: 0 },
+        deviceLock: { locked, keyguardShowing: locked },
+      }),
+    );
+    return screen;
+  }
+
+  test.each([
+    {
+      name: "power on an unlocked device records the app",
+      button: "power",
+      locked: false,
+      expected: PLAYGROUND,
+    },
+    {
+      name: "power over the lock screen records nothing",
+      button: "power",
+      locked: true,
+      expected: undefined,
+    },
+    { name: "volume_up records nothing", button: "volume_up", locked: false, expected: undefined },
+  ] as const)("$name", async ({ button, locked, expected }) => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const getInstanceSpy = spyOnIosClientInstance(new FakeIOSCtrlProxy(timer));
+    try {
+      const registry = new IosPreLockForegroundRegistry();
+      const press = new PressButton(simulator, null, timer, {
+        observeScreen: screenWith(timer, PLAYGROUND, locked),
+        awaitIdle: new FakeAwaitIdle(),
+        window: new FakeWindow(),
+        iosRawInput: null,
+        iosLockStateInvalidator: { invalidate: () => {} },
+        iosPreLockForeground: registry,
+      });
+      await press.execute(button);
+      expect(registry.get(simulator.deviceId)).toBe(expected);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
 });

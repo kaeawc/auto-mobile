@@ -1720,6 +1720,12 @@ class FakeForegroundRestorer implements IosForegroundRestorer {
 }
 
 const PLAYGROUND = "dev.jasonpearson.automobile.Playground";
+const LAUNCHCTL_LIST = ["spawn", iosDevice.deviceId, "launchctl", "list"];
+
+/** A `launchctl list` listing with `appId` running. */
+function running(appId: string): string {
+  return `PID\tStatus\tLabel\n4242\t0\tUIKitApplication:${appId}[a1b2][rb-legacy]\n`;
+}
 
 /** The pre-press observation of a power press with `appId` in front and the device unlocked. */
 function unlockedObservation(appId: string): ObserveResult {
@@ -1735,7 +1741,11 @@ function unlockedObservation(appId: string): ObserveResult {
 }
 
 describe("iOS unlock restores the app that was in front before the lock (#19231)", () => {
-  function setup(appBeforeLock: string | undefined, lockStates: DeviceLockState[]) {
+  function setup(
+    appBeforeLock: string | undefined,
+    lockStates: Array<DeviceLockState | undefined>,
+    recovery?: IosRunnerRecovery,
+  ) {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const registry = new IosPreLockForegroundRegistry();
@@ -1760,8 +1770,9 @@ describe("iOS unlock restores the app that was in front before the lock (#19231)
       iosLockStateProbe: lock,
       iosPreLockForeground: registry,
       iosForegroundRestorer: restorer,
+      ...(recovery ? { iosRunnerRecovery: recovery } : {}),
     });
-    return { action, registry, restorer, unlocker, timer };
+    return { action, registry, restorer, unlocker, lock, timer };
   }
 
   test("a verified unlock brings the recorded app back to the front", async () => {
@@ -1771,7 +1782,7 @@ describe("iOS unlock restores the app that was in front before the lock (#19231)
     expect(result.warning).toBeUndefined();
     expect(restorer.calls).toEqual([{ appId: PLAYGROUND, timeoutMs: 5_000 }]);
     // One lock restores once.
-    expect(registry.take(iosDevice.deviceId)).toBeUndefined();
+    expect(registry.get(iosDevice.deviceId)).toBeUndefined();
   });
 
   test("an already-unlocked device is left alone and the stale record is dropped", async () => {
@@ -1780,7 +1791,7 @@ describe("iOS unlock restores the app that was in front before the lock (#19231)
     expect(result).toMatchObject({ success: true, wasLocked: false });
     expect(unlocker.calls).toBe(0);
     expect(restorer.calls).toEqual([]);
-    expect(registry.take(iosDevice.deviceId)).toBeUndefined();
+    expect(registry.get(iosDevice.deviceId)).toBeUndefined();
   });
 
   test("SpringBoard in front before the lock restores nothing", async () => {
@@ -1819,6 +1830,69 @@ describe("iOS unlock restores the app that was in front before the lock (#19231)
     expect(restorer.calls).toEqual([]);
   });
 
+  test("a failed unlock keeps the record, so a retry that unlocks still restores the app (#19245)", async () => {
+    const { action, restorer, registry, unlocker, lock } = setup(PLAYGROUND, [LOCKED_SWIPE]);
+    unlocker.result = {
+      success: false,
+      stillLocked: true,
+      rewoke: true,
+      error: "the swipe did not dismiss the lock screen",
+    };
+    await expect(action.execute()).rejects.toThrow("iOS lock screen is still showing");
+    expect(registry.get(iosDevice.deviceId)).toBe(PLAYGROUND);
+
+    unlocker.result = { success: true };
+    lock.states = [LOCKED_SWIPE, UNLOCKED];
+    lock.state = UNLOCKED;
+    const retry = await action.execute();
+    expect(retry).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+    expect(restorer.calls).toEqual([{ appId: PLAYGROUND, timeoutMs: 5_000 }]);
+    expect(registry.get(iosDevice.deviceId)).toBeUndefined();
+  });
+
+  test("an unreadable lock state keeps the record for the next unlock (#19245)", async () => {
+    const { action, restorer, registry } = setup(PLAYGROUND, [undefined]);
+    await expect(action.execute()).rejects.toThrow("could not read the iOS lock state");
+    expect(restorer.calls).toEqual([]);
+    expect(registry.get(iosDevice.deviceId)).toBe(PLAYGROUND);
+  });
+
+  test("a runner relaunch that unlocks the simulator also restores the app (#19245)", async () => {
+    const recovery = new FakeIosRecovery();
+    recovery.connected = false;
+    recovery.outcomes = ["failed"];
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const { action, restorer, registry, unlocker } = setup(
+        PLAYGROUND,
+        [LOCKED_SWIPE, UNLOCKED],
+        recovery,
+      );
+      const result = await action.execute();
+      expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+      expect(result.warning).toContain("runner recovery failed");
+      expect(unlocker.calls).toBe(0);
+      expect(restorer.calls).toEqual([{ appId: PLAYGROUND, timeoutMs: 5_000 }]);
+      expect(registry.get(iosDevice.deviceId)).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  test("a physical-device power press records nothing (#19245)", () => {
+    const registry = new IosPreLockForegroundRegistry();
+    recordIosAppBeforePowerPress(
+      {
+        device: physicalIosDevice,
+        button: "power",
+        pressSucceeded: true,
+        prePress: unlockedObservation(PLAYGROUND),
+      },
+      registry,
+    );
+    expect(registry.get(physicalIosDevice.deviceId)).toBeUndefined();
+  });
+
   test("a power press over the lock screen keeps the app recorded when it locked", () => {
     const registry = new IosPreLockForegroundRegistry();
     const press = { device: iosDevice, button: "power", pressSucceeded: true };
@@ -1841,7 +1915,7 @@ describe("iOS unlock restores the app that was in front before the lock (#19231)
       { ...press, pressSucceeded: false, prePress: unlockedObservation("x") },
       registry,
     );
-    expect(registry.take(iosDevice.deviceId)).toBe(PLAYGROUND);
+    expect(registry.get(iosDevice.deviceId)).toBe(PLAYGROUND);
   });
 
   test("simctl restore activates the app by bundle id and turns a failure into a warning", async () => {
@@ -1850,6 +1924,9 @@ describe("iOS unlock restores the app that was in front before the lock (#19231)
     const restorer = new SimctlIosForegroundRestorer(iosDevice.deviceId, {
       executeCommandArgs: async (args) => {
         commands.push(args);
+        if (args[0] === "spawn") {
+          return createExecResult(running(PLAYGROUND), "");
+        }
         if (fail) {
           throw new Error("app not installed");
         }
@@ -1861,8 +1938,45 @@ describe("iOS unlock restores the app that was in front before the lock (#19231)
     expect(await restorer.restore(PLAYGROUND, { timeoutMs: 1_000 })).toContain("app not installed");
     expect(await restorer.restore(PLAYGROUND, { timeoutMs: 0 })).toContain("no time remained");
     expect(commands).toEqual([
+      LAUNCHCTL_LIST,
       ["launch", iosDevice.deviceId, PLAYGROUND],
+      LAUNCHCTL_LIST,
       ["launch", iosDevice.deviceId, PLAYGROUND],
     ]);
+  });
+
+  test.each([
+    ["terminated or lost to a reboot", "-\t0\tcom.apple.Preferences\n"],
+    ["listed without a process", `-\t0\tUIKitApplication:${PLAYGROUND}[a1b2][rb-legacy]\n`],
+  ])("simctl restore never cold-launches an app that is %s (#19245)", async (_label, listing) => {
+    const commands: string[][] = [];
+    const restorer = new SimctlIosForegroundRestorer(iosDevice.deviceId, {
+      executeCommandArgs: async (args) => {
+        commands.push(args);
+        return createExecResult(args[0] === "spawn" ? listing : "", "");
+      },
+    });
+    const warning = await restorer.restore(PLAYGROUND, { timeoutMs: 1_000 });
+    expect(warning).toContain("no longer running");
+    expect(warning).toContain("call launchApp");
+    expect(commands).toEqual([LAUNCHCTL_LIST]);
+  });
+
+  test("simctl restore does not launch when the process list cannot be read (#19245)", async () => {
+    const commands: string[][] = [];
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const restorer = new SimctlIosForegroundRestorer(iosDevice.deviceId, {
+        executeCommandArgs: async (args) => {
+          commands.push(args);
+          throw new Error("launchctl exited 1");
+        },
+      });
+      const warning = await restorer.restore(PLAYGROUND, { timeoutMs: 1_000 });
+      expect(warning).toContain("launchctl exited 1");
+      expect(commands).toEqual([LAUNCHCTL_LIST]);
+    } finally {
+      warn.mockRestore();
+    }
   });
 });

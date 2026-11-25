@@ -1227,6 +1227,125 @@ describe("diffObserveResult", () => {
     ).toHaveLength(2);
   });
 
+  // #19148: a SwitchPreference row's summary often follows the toggle ("On" to
+  // "Off"). Only the row's title identifies the row, so a changed summary under a
+  // relayout must still read as the same switch flipping.
+  test("reports a label-less switch's checked flip when its row summary changes under a relayout (#19148)", () => {
+    const screen = (checked: boolean) =>
+      obs({
+        "resource-id": "root",
+        bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+        node: [
+          {
+            "resource-id": "recycler_view",
+            bounds: { left: 0, top: 0, right: 100, bottom: checked ? 300 : 100 },
+            node: [
+              {
+                bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+                clickable: true,
+                actions: ["click"],
+                node: [
+                  {
+                    bounds: { left: 0, top: 0, right: 60, bottom: 40 },
+                    node: [
+                      {
+                        "resource-id": "android:id/title",
+                        text: "Wi-Fi",
+                        bounds: { left: 0, top: 0, right: 60, bottom: 20 },
+                      },
+                      {
+                        "resource-id": "android:id/summary",
+                        text: checked ? "On" : "Off",
+                        bounds: { left: 0, top: 20, right: 60, bottom: 40 },
+                      },
+                    ],
+                  },
+                  {
+                    "resource-id": "android:id/widget_frame",
+                    bounds: { left: 70, top: 0, right: 100, bottom: 40 },
+                    node: [
+                      {
+                        "resource-id": "switchWidget",
+                        checked,
+                        checkable: true,
+                        bounds: { left: 70, top: 0, right: 100, bottom: 40 },
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+    for (const projectAddedRemoved of [false, true]) {
+      const diff = diffObserveResult(screen(true), screen(false), { projectAddedRemoved });
+      const flips = diff.changed.filter((entry) => "checked" in entry.changes);
+      expect(flips).toHaveLength(1);
+      expect(flips[0].changes.checked).toEqual({ from: true, to: false });
+      expect(flips[0].selector?.elementId).toBe("switchWidget");
+    }
+  });
+
+  // #19148: the `:id/title` label names the row even when another label comes
+  // first in document order, so a changed leading label is not a different row
+  // and a changed title is.
+  test("compares a label-less switch's row by its :id/title label, not the first label (#19148)", () => {
+    const screen = (badge: string, title: string, listBottom: number, checked: boolean) =>
+      obs({
+        "resource-id": "root",
+        bounds: { left: 0, top: 0, right: 100, bottom: 400 },
+        node: [
+          {
+            "resource-id": "recycler_view",
+            bounds: { left: 0, top: 0, right: 100, bottom: listBottom },
+            node: [
+              {
+                bounds: { left: 0, top: 0, right: 100, bottom: 40 },
+                node: [
+                  {
+                    "resource-id": "com.example:id/badge",
+                    text: badge,
+                    bounds: { left: 0, top: 0, right: 20, bottom: 40 },
+                  },
+                  {
+                    "resource-id": "com.example:id/title",
+                    text: title,
+                    bounds: { left: 20, top: 0, right: 60, bottom: 40 },
+                  },
+                  {
+                    "resource-id": "switchWidget",
+                    checked,
+                    checkable: true,
+                    bounds: { left: 70, top: 0, right: 100, bottom: 40 },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+    for (const projectAddedRemoved of [false, true]) {
+      const sameTitle = diffObserveResult(
+        screen("New", "Wi-Fi", 100, false),
+        screen("Beta", "Wi-Fi", 300, true),
+        { projectAddedRemoved },
+      );
+      const flips = sameTitle.changed.filter((entry) => "checked" in entry.changes);
+      expect(flips).toHaveLength(1);
+      expect(flips[0].changes.checked).toEqual({ from: false, to: true });
+
+      const differentTitle = diffObserveResult(
+        screen("New", "Airplane mode", 100, false),
+        screen("New", "Wi-Fi", 300, true),
+        { projectAddedRemoved },
+      );
+      expect(differentTitle.changed.filter((entry) => "checked" in entry.changes)).toEqual([]);
+    }
+  });
+
   // #19122: window roots carry no id or text and fill the screen, so a closing
   // sheet's root must not pair with the app window root underneath it.
   test("a closed sheet window is removed, not paired with the app window as a windowId change (#19122)", () => {

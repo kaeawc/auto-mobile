@@ -35,6 +35,11 @@ data class WebSocketServerOptions(
    * Called once a client is registered, so state held back while no host was attached can go out.
    */
   val onClientConnected: () -> Unit = {},
+  /**
+   * The realtime capabilities of the channel transports the service wires (#14269). The realtime
+   * module is built per runtime, so it is not in the platform registry's capabilities.
+   */
+  val realtimeCapabilities: Set<String> = emptySet(),
   /** Per-request-type caps checked on the raw frame before it is decoded (#9935). */
   val inboundFrameLimits: InboundFrameLimits = InboundFrameLimits.DEFAULT,
   /**

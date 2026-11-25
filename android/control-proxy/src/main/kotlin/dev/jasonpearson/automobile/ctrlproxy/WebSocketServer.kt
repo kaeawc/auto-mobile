@@ -406,6 +406,7 @@ class WebSocketServer(
     add("prototype_platform_device_v1")
     add("prototype_platform_v1")
     addAll(platform.registry.capabilities)
+    addAll(options.realtimeCapabilities)
     addPrototypeTextAndMotionFlags()
   }
 

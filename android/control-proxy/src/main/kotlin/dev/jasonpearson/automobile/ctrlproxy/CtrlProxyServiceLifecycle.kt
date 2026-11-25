@@ -81,6 +81,7 @@ internal fun CtrlProxy.startWebSocketServer() {
             onPrototypeChannelFrame = hostPrototypeChannels::onFrame,
             onClientConnected = sessions::onClientConnected,
             onPermanentStartFailure = { disableSelf() },
+            realtimeCapabilities = PROTOTYPE_REALTIME_CAPABILITIES,
           ),
       )
     webSocketLifecycle.replace(webSocketServer)

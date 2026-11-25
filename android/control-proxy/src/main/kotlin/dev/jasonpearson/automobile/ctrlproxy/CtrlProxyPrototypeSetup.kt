@@ -105,6 +105,13 @@ private fun CtrlProxy.prototypeHttpClients() =
     remoteImages = PrototypeDeviceNetwork.images(this),
   )
 
+/**
+ * What [prototypeRealtime] wires: a host relay and a device transport for every overlay runtime, so
+ * CtrlProxy owns channels of both kinds.
+ */
+internal val PROTOTYPE_REALTIME_CAPABILITIES =
+  setOf(PrototypeRealtimeConfig.CAPABILITY, PrototypeRealtimeConfig.DEVICE_CAPABILITY)
+
 /** `via: "host"` relays over the host socket; `via: "device"` opens OkHttp's WebSocket or SSE. */
 private fun CtrlProxy.prototypeRealtime() =
   PrototypeRealtimeConfig(

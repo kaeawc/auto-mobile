@@ -3,6 +3,7 @@ import * as path from "path";
 import { resolveAssetVersion, resolvePinnedVersion } from "../constants/release";
 import { ensureSecureDir } from "../utils/filesystem/securePermissions";
 import type { CtrlProxyIosBundleDownloader } from "../utils/IOSCtrlProxyBundleDownloader";
+import { assertNoLocalXcodeBuild } from "./IosLocalBuildDerivedData";
 import type {
   IosRunnerArtifactVerifier,
   IOSCtrlProxyBundleMetadata,
@@ -34,6 +35,8 @@ export async function extractIosCtrlProxyBundle(
     normalizeExtractedBundle,
   }: BundleExtractionDependencies,
 ): Promise<void> {
+  // Extraction empties the destination, so never run it over a local Xcode build (#19183).
+  await assertNoLocalXcodeBuild(derivedDataPath);
   // A re-extract replaces the runner binary, so drop any local-build-mode pin
   // (#5561) BEFORE re-extraction — the post-extract verify a few lines down
   // re-derives it. Clearing here (not after extract) is essential: the pin is
@@ -65,6 +68,7 @@ export async function extractIosCtrlProxyBundle(
         : `local-override:${path.basename(localOverridePath)}`
       : resolveAssetVersion(resolvePinnedVersion()),
     extractedAt: new Date().toISOString(),
+    derivedDataPath,
     appHashes,
   };
   await fs.writeFile(

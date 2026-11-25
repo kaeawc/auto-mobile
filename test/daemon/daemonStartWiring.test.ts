@@ -565,7 +565,7 @@ describe("Daemon.start() tool-call-end wiring", () => {
     }
   });
 
-  test("before bind, a forgotten failed open fails claims closed unless the schema only awaits migration (#11811, E1)", async () => {
+  test("before bind, a claim's own registry open fails it closed unless the schema only awaits migration (#11811, E1)", async () => {
     const registered = spyOn(DeviceClaimMirrorHub.prototype, "register");
     const exists = spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(true);
     const warn = spyOn(logger, "warn").mockImplementation(() => {});
@@ -575,29 +575,83 @@ describe("Daemon.start() tool-call-end wiring", () => {
     const owner = { pid: 100, ownerToken: "android" };
     const live = async () => true;
     try {
-      open.mockRejectedValueOnce(new BindingRegistryUpgradePendingError("upgrade pending"));
-      await expect(daemon.testHooks.openBindingRegistry()).rejects.toThrow("upgrade pending");
-      expect(daemon.testHooks.runtime.bindingRegistry).toBeUndefined();
+      open.mockRejectedValue(new BindingRegistryUpgradePendingError("upgrade pending"));
       // The registry still needs this release's migrations: no table-only claim can exist yet.
       expect(await android.acquire!("emulator-5610", owner, live)).toEqual({
         outcome: "unavailable",
       });
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(daemon.testHooks.runtime.bindingRegistry).toBeUndefined();
 
-      open.mockRejectedValueOnce(new Error("disk I/O error"));
-      await expect(daemon.testHooks.openBindingRegistry()).rejects.toThrow("disk I/O error");
-      expect(await android.acquire!("emulator-5610", owner, live)).toEqual({
-        outcome: "unusable",
-      });
-
-      exists.mockReturnValue(false);
+      // The failed open was forgotten; within its backoff the latest failure decides, unopened.
+      open.mockRejectedValue(new Error("disk I/O error"));
       expect(await android.acquire!("emulator-5610", owner, live)).toEqual({
         outcome: "unavailable",
       });
+      expect(open).toHaveBeenCalledTimes(1);
+
+      timer.advanceTime(1_000);
+      expect(await android.acquire!("emulator-5610", owner, live)).toEqual({
+        outcome: "unusable",
+      });
+      expect(open).toHaveBeenCalledTimes(2);
+      expect(open).toHaveBeenLastCalledWith(expect.objectContaining({ migrate: false }));
+
+      exists.mockReturnValue(false);
+      timer.advanceTime(60_000);
+      expect(await android.acquire!("emulator-5610", owner, live)).toEqual({
+        outcome: "unavailable",
+      });
+      expect(open).toHaveBeenCalledTimes(2);
     } finally {
       open.mockRestore();
       registered.mockRestore();
       exists.mockRestore();
       warn.mockRestore();
+      daemon.testHooks.stopSessionTimers();
+      timer.reset();
+    }
+  });
+
+  test("a registry file that appears after startup is opened migrate-free by the first pre-bind claim, once (#11811, E1)", async () => {
+    const registered = spyOn(DeviceClaimMirrorHub.prototype, "register");
+    const exists = spyOn(bindingRegistryModule, "bindingRegistryFileExists").mockReturnValue(false);
+    const { daemon, timer } = await makeDaemon({ port: 3161 });
+    const registry = await bindingRegistryModule.openSqliteBindingRegistry({
+      dbPath: ":memory:",
+      writerVersion: "test-writer",
+      timer,
+    });
+    const open = spyOn(bindingRegistryModule, "openSqliteBindingRegistry").mockResolvedValue(
+      registry,
+    );
+    const android = registered.mock.calls[0]![0];
+    const ios = registered.mock.calls[1]![0];
+    const live = async () => true;
+    try {
+      // Startup found no registry file, so nothing is cached and nothing opens without one.
+      expect(
+        await android.acquire!("emulator-5610", { pid: 100, ownerToken: "android" }, live),
+      ).toEqual({ outcome: "unavailable" });
+      expect(open).not.toHaveBeenCalled();
+      expect(daemon.testHooks.runtime.bindingRegistry).toBeUndefined();
+
+      exists.mockReturnValue(true);
+      const claims = await Promise.all([
+        android.acquire!("emulator-5610", { pid: 100, ownerToken: "android" }, live),
+        ios.acquire!("UDID-1", { pid: 100, ownerToken: "ios" }, live),
+      ]);
+      expect(claims).toEqual([{ outcome: "claimed" }, { outcome: "claimed" }]);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(open).toHaveBeenCalledWith(expect.objectContaining({ migrate: false }));
+      expect((await registry.deviceClaims().get("android", "emulator-5610"))?.pid).toBe(100);
+      expect((await registry.deviceClaims().get("ios", "UDID-1"))?.pid).toBe(100);
+    } finally {
+      await daemon.testHooks.closeManagedExecutionRelease();
+      await registry.close();
+      open.mockRestore();
+      registered.mockRestore();
+      exists.mockRestore();
       daemon.testHooks.stopSessionTimers();
       timer.reset();
     }

@@ -4,14 +4,17 @@ Part of [the agent-authored prototype specification](prototype-ux.md).
 
 ## Placeholder lint (#15444)
 
-A successful `show` or `patch` returns `placeholderFindings` when a repeat or state placeholder sits
+A successful `show` or `patch` returns `placeholderFindings` when a repeat, component prop or state placeholder sits
 in a field that does not bind it, so it would be drawn literally. It is advisory, host-only and
 never refuses a show. Each finding names the field `path` (for example `root.children[0].label`),
 the `placeholder` as authored and a `detail`. The output keeps 50 findings, and
 `placeholderFindingsTotal` reports the full count when it is capped.
 
-- A repeat placeholder (`{index}`, or `{alias.field}` for an enclosing `repeat.as`) in a text field
-  that is not in the bindable set, such as `chip.label` or `badge.text`. Fields that bind
+- A repeat placeholder (`{index}`, or `{alias.field}` for an enclosing `repeat.as`), or a
+  `{props.<field>}` inside a component root, in a text field that is not in the bindable set. A prop
+  is reported at its authored path, such as
+  `root.children[0] (use tag) → components.tag.root.children[2].label`. Unbound fields include
+  `chip.label` and `badge.text`. Fields that bind
   (`button.label`, `topAppBar.title`, `searchBar.placeholder`, and `text` nodes) are not reported.
 - A `{key}` state placeholder naming a declared `state` key in `chip.label`, `badge.text`,
   `textField.placeholder` or `searchBar.placeholder`. Only a `text` node reads `{key}` from state.

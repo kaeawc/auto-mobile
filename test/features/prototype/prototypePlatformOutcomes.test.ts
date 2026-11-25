@@ -54,6 +54,40 @@ describe("prototype platform outcomes", () => {
     }
   });
 
+  test("system picker and camera outcomes accept errors and refuse file results until injection exists", () => {
+    for (const media of ["mediaLibrary.pick", "camera.capture"]) {
+      expect(
+        validatePrototypePlatformOutcome(media, { error: { code: "cancelled" } }).issue,
+      ).toBeUndefined();
+      expect(
+        validatePrototypePlatformOutcome(media, { result: { files: ["/photos/cat.jpg"] } }).issue,
+      ).toEqual([
+        "outcome",
+        `A simulated ${media} result needs device media injection, which no connected runtime supports yet, so it cannot be queued. Simulate a cancel or failure with {error: {code: "cancelled"}} instead.`,
+      ]);
+    }
+    const shapeIssue = (media: string, result: unknown) =>
+      validatePrototypePlatformOutcome(media, { result }).issue?.[1];
+    for (const result of [
+      { files: [] },
+      { files: ["photos/cat.jpg"] },
+      { files: ["/photos/cat.gif"] },
+      { files: ["/a.jpg"], extra: true },
+      { asset: "media:1", kind: "image" },
+      { files: Array.from({ length: 65 }, (_, index) => `/p/${index}.png`) },
+    ]) {
+      expect(shapeIssue("mediaLibrary.pick", result)).toStartWith(
+        "A mediaLibrary.pick result is {files: [...]} with 1 to 64 absolute path(s)",
+      );
+    }
+    expect(shapeIssue("camera.capture", { files: ["/a.jpg", "/b.jpg"] })).toStartWith(
+      "A camera.capture result is {files: [...]} with exactly one absolute path(s)",
+    );
+    expect(shapeIssue("mediaLibrary.pick", { files: ["/clips/A.MP4", "/b.webp"] })).toStartWith(
+      "A simulated mediaLibrary.pick result needs device media injection",
+    );
+  });
+
   test("bounds the whole UTF-8 wire envelope", () => {
     const multibyte = "😀".repeat(1020);
     const overhead = Buffer.byteLength(JSON.stringify({ result: multibyte }));

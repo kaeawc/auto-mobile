@@ -32,15 +32,14 @@ egress policy, respect ProtoViewer's network switch, and send no cookies or refe
 
 The loader contract caps each download at 8 MiB, Android memory at one-eighth of the heap,
 and iOS memory at 64 MiB. The per-app disk cache holds 128 MiB keyed by URL; concurrent loads are capped at six.
-The accessibility state-description contract is `loading|loaded|error`; inspect's per-prototype
-image counts are `{loaded, failed, pending}`. URLs must never enter accessibility text, observe or
+The accessibility state-description contract is `loading|loaded|error`; inspect reports mounted
+remote images per prototype as `images: {loaded, failed, pending}`. URLs must never enter accessibility text, observe or
 events. iOS does not report inspect image counts yet.
 
 Android loads device URLs through the request transport with strict public-address egress checks,
 DNS and socket validation, and the asset renderer's sampled layout-size decoder. Loading and errors draw the authored asset or color fallback; crossfade
 respects reduced motion.
 
-Inspect reports counts for mounted remote image instances as `images`.
 Loopback HTTP is enabled only in debug builds, excluding protected daemon ports. Embedded apps
 provide a device transport implementing `PrototypeRemoteImageProvider`; disabling device networking disables
 remote loads. A saved viewer with an injected device client uses only that client's supplied image loader; without one it shows the fallback. Host fetch-and-upload remains a separate runtime. See the [remote-image decision](../../../devlog/2026-11-05-prototype-ux-remote-image-urls.md).
@@ -48,21 +47,25 @@ remote loads. A saved viewer with an injected device client uses only that clien
 ## Asset transport (#9301)
 
 `put_prototype_asset {id, mimeType, dataBase64}` uploads one asset and
-`remove_prototype_asset {id}` deletes one; each gets one `prototype_result` carrying the
-request ID. Bytes travel as base64 in the single JSON text frame, like screenshots.
-Heap, not the 64 MiB frame limit, is the binding constraint, so the caps are conservative. The
-host shares them through `schemas/prototype-asset-contract.json`:
+`remove_prototype_asset {id}` deletes one. Every asset request gets one `prototype_result` carrying
+its request ID. Bytes travel as base64 in one JSON text frame, like screenshots. Heap, not the
+64 MiB frame limit, binds, so the caps in `schemas/prototype-asset-contract.json` are conservative:
 
 - 4 MiB per asset, 32 assets, 16 MiB total, and ids of 1 to 256 characters;
 - `image/png`, `image/jpeg` or `image/webp` (exact lowercase) whose bytes must start with the
   matching signature;
 - `font/ttf` and `font/otf` (2 MiB each, see Custom fonts).
 
-Putting an existing ID replaces it; a full store rejects the put with a clear error and never
-evicts. Removing an unknown ID succeeds. Assets sit in the CtrlProxy cache directory. The runtime
-clears them when the prototype session ends: on any dismissal, on service start, unbind or
-teardown, on `dismiss_prototype` with `all`, and when the last client disconnects (even with no
-prototype showing). A show replacement and a temporary lock-screen hide keep them.
+Putting an existing ID replaces it; a full store rejects the put with an error and never evicts.
+Removing an unknown ID succeeds. Assets sit in the CtrlProxy cache directory and clear when the
+prototype session ends: on any dismissal, service start, unbind or teardown, `dismiss_prototype`
+with `all`, and the last client disconnecting (even with no prototype showing). A show replacement
+and a temporary lock-screen hide keep them.
+
+Media uploads in chunks (#14254): `put_prototype_asset_begin {id, mimeType, size, sha256}`,
+contiguous `put_prototype_asset_chunk {id, offset, dataBase64}`, then
+`put_prototype_asset_commit {id}`, or `put_prototype_asset_abort {id}` to drop it. A refusal carries
+`mediaCode`. A chunk frame holds one encoded 1 MiB chunk plus the envelope. Media clears with images; a later session's first request drops earlier uploads.
 
 ## Custom shader assets
 
@@ -76,7 +79,7 @@ escapes, qualifiers, arrays, initializers, comma declarations, duplicate names a
 types or samplers. Reserved uniform names are `content`, `main`, GLSL/AGSL reserved words and
 names starting with `sk_` or `gl_`. The `style.shader.uniforms` object supplies at most 16
 declared float names matching `[A-Za-z_][A-Za-z0-9_]*`, with finite values in
-[-1000000, 1000000]. `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS` is off by default.
+[-1000000, 1000000].
 
 The Android runtime advertises `prototype_custom_shaders_v1` only on API 33+. It compiles on `put_prototype_asset` before writing any source; unsupported APIs return a typed refusal naming API 33, and invalid source returns the compiler message capped at 2048 UTF-8 bytes without splitting a character. Failed replacements preserve the previous asset. Validation runs in three stages:
 
@@ -94,7 +97,7 @@ The runtime permanently disables all shaders in the prototype after 8 consecutiv
 
 Synchronous compile/effect/draw exceptions disable only the affected composition instance. Duplicate repeat identities have separate guards; disposed registrations are evicted. The `get_prototype_status` result reports at most 64 node failures with unique instance ids and bounded reasons, plus a `+N more` summary, in optional `shaderFailures`. Host `inspect` adopts these into the next host-local `status`. An in-place show preserves the session budget and recorded failures; dismissal or an explicit reset starts a new lifetime. A remounted node gets a fresh instance guard, while a tripped session budget continues to disable all shaders.
 
-The wire protocol has no host opt-in channel. The existing host gate `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1` therefore remains the authorization boundary; capability advertisement alone does not enable the host to send shaders. Direct device clients are responsible for the same opt-in policy.
+The wire has no host opt-in channel, so the host gate `AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1` stays the authorization boundary; advertisement alone does not let the host send shaders. Direct device clients enforce the same opt-in.
 
 ## Device media items (#14192)
 
@@ -162,11 +165,11 @@ An entry may instead be `{id, observation}`, an
 through the same handler as that resource (current-observation check, pending-capture
 wait, retention lease). Any client can read that resource, so no access is widened.
 
-Sometimes `prototype_result.missingAssets` lists an id the same call uploaded, because the device
-cleared its store between the upload and the show. The host then re-uploads those assets
-once from the bytes it already holds and re-sends the show once. It never
-loops: if they are still missing, or the retry fails or is cancelled, the first
-successful result is returned with `missingAssets` and a `warning` on the tool output.
+If `prototype_result.missingAssets` lists an id the same call uploaded (the device cleared its
+store in between), the host re-uploads those assets once from the bytes it holds and re-sends the
+show once. It never
+loops: if they are still missing, or the retry fails or is cancelled, it returns the first
+successful result with `missingAssets` and a tool-output `warning`.
 Ids the call did not supply are only reported. See `docs/tools.md` for the result and
 deadline model.
 

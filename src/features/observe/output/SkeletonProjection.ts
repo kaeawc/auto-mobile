@@ -944,7 +944,7 @@ export function projectSkeleton(
   const kept = accumulators.filter((acc) => shouldKeep(acc, clickable));
   const occluder = ime ? getImeOccluder(elements) : undefined;
   // A parked iOS keyboard is neither a covering rectangle nor a reportable keyboard.
-  const iosIme = resolveIosImeState(ime, occluder, viewport);
+  const iosIme = resolveIosImeState(ime, occluder, viewport, iosHierarchy);
   markAppRowsCoveredByIme(kept, coveringImeOccluder(ime, occluder, iosIme), {
     measured: occluder,
     screen: viewport,

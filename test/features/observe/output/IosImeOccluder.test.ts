@@ -13,6 +13,7 @@ import {
   iosKeyboardMinimizedHierarchy,
 } from "../../../fixtures/observe/iosKeyboardStates";
 import { duoInnerKeyboardCapture } from "../../../fixtures/observe/iosKeyboardDuoInner";
+import type { ObservationInsets } from "../../../../src/models/ObservationInsets";
 
 const measured: ImeOccluder = {
   bounds: iosKeyboardCapture.ime.bounds,
@@ -70,6 +71,36 @@ describe("iOS action keyboard geometry", () => {
     ]) {
       expect(getIosImeOccluder(measured, size)).toBe(measured);
     }
+  });
+});
+
+// The captured iPhone Forms keyboard container ends 24 pt above the safe-area bottom (#18272).
+describe("inset keys dock measured from the safe-area bottom", () => {
+  const iphone = { width: 402, height: 874, units: "points" as const };
+  const insets: ObservationInsets = {
+    available: true,
+    source: "ios-sdk-safe-area",
+    units: "points",
+    safeArea: { top: 62, right: 0, bottom: 34, left: 0 },
+  };
+  // Keys span 342 of 402 pt: between the 80 and 90 percent docked ratios.
+  const inset = (chromeBottom: number): ImeOccluder => ({
+    ...measured,
+    bounds: [30, 597, 372, 813],
+    chromeTop: 590,
+    chromeBottom,
+  });
+
+  test.each([
+    ["captured 24 pt gap", 816, insets, [0, 590, 402, 874]],
+    ["28 pt margin", 812, insets, [0, 590, 402, 874]],
+    ["29 pt gap", 811, insets, [30, 597, 372, 813]],
+    ["no safe area, 24 pt gap measured from the screen bottom", 850, undefined, [0, 590, 402, 874]],
+    ["no safe area, captured container", 816, undefined, [30, 597, 372, 813]],
+  ] as const)("%s", (_name, chromeBottom, captured, expected) => {
+    expect<unknown>(getIosImeOccluder(inset(chromeBottom), iphone, captured).bounds).toEqual(
+      expected,
+    );
   });
 });
 

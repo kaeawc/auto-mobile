@@ -169,7 +169,9 @@ test("assistant-bar descendants retain the unextended key-union rectangle", () =
 const assistantVariants = (
   [
     ["90 percent width", [0, 546, 361.8, 590], 546],
-    ["below 90 percent width", [0, 546, 361, 590], 590],
+    // The container ends 24 pt above the safe-area bottom (874 - 34), so the 80 percent rule applies.
+    ["between 80 and 90 percent width", [0, 546, 361, 590], 546],
+    ["below 80 percent width", [0, 546, 321, 590], 590],
     ["one-point adjacency", [0, 545, 402, 589], 545],
     ["two-point gap", [0, 544, 402, 588], 590],
     ["zero height", [0, 590, 402, 590], 590],
@@ -195,6 +197,13 @@ for (const { name, elements, top } of assistantVariants) {
   test(`assistant chrome qualification: ${name}`, () => {
     const measured = getImeOccluder(elements)!;
     expect(measured.bounds).toEqual([4, 597, 399, 813]);
-    expect(getIosImeOccluder(measured, forms.screenSize).bounds).toEqual([0, top, 402, 874]);
+    expect(measured.chromeBottom).toBe(816);
+    expect(forms.insets?.safeArea?.bottom).toBe(34);
+    expect(getIosImeOccluder(measured, forms.screenSize, forms.insets).bounds).toEqual([
+      0,
+      top,
+      402,
+      874,
+    ]);
   });
 }

@@ -1,4 +1,6 @@
 import type { Element } from "../../../../models/Element";
+import type { ObservationInsets } from "../../../../models/ObservationInsets";
+import type { ViewHierarchyResult } from "../../../../models/ViewHierarchyResult";
 import type { Affordance, ObserveResult, SkeletonElement } from "../../../../models/ObserveResult";
 import {
   ElementProvenance,
@@ -69,14 +71,18 @@ export interface ImeWindow {
 
 const IOS_DOCKED_KEYS_WIDTH_RATIO = 0.9;
 const IOS_DOCKED_INSET_KEYS_WIDTH_RATIO = 0.8;
-const IOS_DOCKED_BOTTOM_GAP = 2;
+/**
+ * How far a docked container may end above the safe-area bottom. The captured iPhone keyboard
+ * ends 24 pt above it: its globe/dictation strip sits below the keys (#18272).
+ */
+const IOS_DOCKED_BOTTOM_MARGIN = 28;
 
 /** A detected keyboard's measured rectangle and its window position. */
 export interface ImeOccluder {
   bounds: Bounds;
   /** Docked iOS container chrome starts above the measured key union. */
   chromeTop?: number;
-  /** Bottom of the docked iOS keyboard container; flush with the display when docked. */
+  /** Bottom of the docked iOS keyboard container; near the safe-area bottom when docked. */
   chromeBottom?: number;
   /** Valid adjacent assistant subtree; its members keep the key-union cover. */
   assistantBar?: { bounds: Bounds; group: number; spanEnter: number; spanExit: number };
@@ -204,27 +210,32 @@ function measuredImeOcclusionBounds(
 /**
  * Docked keyboards span the display, but their keys can be inset on a wide display: 83-874 of
  * the Duo inner screen's 951 pt (#18248). A keyboard container resting on the bottom edge
- * with keys over 80 percent of the width is docked; floating and one-handed ones are not.
+ * (within {@link IOS_DOCKED_BOTTOM_MARGIN} of the safe-area bottom, or of the screen bottom
+ * without a safe area) with keys over 80 percent of the width is docked; floating and
+ * one-handed ones are not.
  */
 function isDockedIosKeyboard(
   occluder: ImeOccluder,
   screenSize: NonNullable<ObserveResult["screenSize"]>,
+  insets: ObservationInsets | undefined,
 ): boolean {
-  return isDockedWidth(occluder.bounds[2] - occluder.bounds[0], occluder, screenSize);
+  return isDockedWidth(occluder.bounds[2] - occluder.bounds[0], occluder, screenSize, insets);
 }
 
 function isDockedWidth(
   width: number,
   occluder: ImeOccluder,
   screenSize: NonNullable<ObserveResult["screenSize"]>,
+  insets: ObservationInsets | undefined,
 ): boolean {
   if (width >= screenSize.width * IOS_DOCKED_KEYS_WIDTH_RATIO) {
     return true;
   }
+  const bottomEdge = screenSize.height - (insets?.safeArea?.bottom ?? 0);
   return (
     width >= screenSize.width * IOS_DOCKED_INSET_KEYS_WIDTH_RATIO &&
     occluder.chromeBottom !== undefined &&
-    screenSize.height - occluder.chromeBottom <= IOS_DOCKED_BOTTOM_GAP
+    bottomEdge - occluder.chromeBottom <= IOS_DOCKED_BOTTOM_MARGIN
   );
 }
 
@@ -232,18 +243,19 @@ function isDockedWidth(
 export function getIosImeOccluder(
   occluder: ImeOccluder,
   screenSize?: ObserveResult["screenSize"],
+  insets?: ObservationInsets,
 ): ImeOccluder {
   if (
     !screenSize ||
     !clipImeBounds(occluder.bounds, screenSize) ||
-    !isDockedIosKeyboard(occluder, screenSize)
+    !isDockedIosKeyboard(occluder, screenSize, insets)
   ) {
     return occluder;
   }
   // Docked keys omit container chrome, assistant bar, side margins and the bottom strip.
   const bar = occluder.assistantBar;
   const top =
-    bar && isDockedWidth(bar.bounds[2] - bar.bounds[0], occluder, screenSize)
+    bar && isDockedWidth(bar.bounds[2] - bar.bounds[0], occluder, screenSize, insets)
       ? Math.min(occluder.chromeTop ?? occluder.bounds[1], bar.bounds[1])
       : (occluder.chromeTop ?? occluder.bounds[1]);
   return { ...occluder, bounds: [0, top, screenSize.width, screenSize.height] };
@@ -253,6 +265,7 @@ export function getIosImeOccluder(
 export function getVisibleIosImeBounds(
   occluder: ImeOccluder,
   screenSize: ObserveResult["screenSize"],
+  insets?: ObservationInsets,
 ): Bounds | undefined {
   if (!screenSize) {
     return undefined;
@@ -261,7 +274,7 @@ export function getVisibleIosImeBounds(
   if (!measured || measured[3] - measured[1] < IOS_KEYBOARD_MIN_VISIBLE_HEIGHT) {
     return undefined;
   }
-  const clipped = clipImeBounds(getIosImeOccluder(occluder, screenSize).bounds, screenSize);
+  const clipped = clipImeBounds(getIosImeOccluder(occluder, screenSize, insets).bounds, screenSize);
   return clipped && clipped[3] - clipped[1] >= IOS_KEYBOARD_MIN_VISIBLE_HEIGHT
     ? clipped
     : undefined;
@@ -630,6 +643,7 @@ export function resolveIosImeState(
   ime: ImeWindow | undefined,
   occluder: ImeOccluder | undefined,
   viewport: Pick<ObserveResult["screenSize"], "width" | "height"> | undefined,
+  hierarchy?: Pick<ViewHierarchyResult, "insets">,
 ): IosImeState | undefined {
   if (ime?.package !== IOS_KEYBOARD_PACKAGE || !occluder || !viewport) {
     return undefined;
@@ -639,7 +653,7 @@ export function resolveIosImeState(
     return undefined;
   }
   // The same clip + minimum-height rule as isIosKeyboardVisible, on the measured union.
-  const bounds = getVisibleIosImeBounds(occluder, screen);
+  const bounds = getVisibleIosImeBounds(occluder, screen, hierarchy?.insets);
   return bounds ? { parked: false, bounds } : { parked: true };
 }
 

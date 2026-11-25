@@ -128,7 +128,9 @@ export const SAFE_INSET_KEY = "webSafeInset";
  * marks a sibling after a capped aspect ratio, whose authored `minWidth` holds only while width
  * remains. `fillHeight` sizes a capped aspect ratio from its row's laid-out height instead of a
  * static `basis`, when that height is only known as an upper bound (INCOMING_SHARE_BOUND_KEY);
- * `capHeight` is then the tallest its own `maxHeight` and `maxWidth` let it be.
+ * `capHeight` is then the tallest its own `maxHeight` and `maxWidth` let it be. `dropGap` is the
+ * row's spacing a zeroed sibling after the grower takes back: Compose's Row spaces a child only by
+ * as much width as is left (#16711).
  */
 export interface RowMeasure {
   readonly take?: true;
@@ -138,6 +140,7 @@ export interface RowMeasure {
   readonly later?: true;
   readonly fillHeight?: true;
   readonly capHeight?: number;
+  readonly dropGap?: number;
 }
 
 /**
@@ -169,7 +172,8 @@ function rowShrinkStyle(css: Css, shrink: number, basis: unknown) {
  * sibling still gets its minimum while width remains but gives it all up, down to zero, before the
  * capped aspect ratio does. A CSS `min-width` would hold against flex shrinking and reserve the
  * width ahead of the cap. A content or `fill` width has no px value, so rendering wraps the node
- * around a strut instead (see laterMinStrut).
+ * around a strut instead (see laterMinStrut). The capped aspect ratio's own `minWidth` folds into
+ * its basis the same way, so it too gets no more than the width the earlier siblings left (#16711).
  */
 function laterMinWidth(css: Css, style: Raw, min: number, basis: unknown) {
   css[MIN_WIDTH] = "0";
@@ -221,16 +225,40 @@ function rowMeasureStyle(css: Css, style: Raw, context: WebStyleContext) {
   if (measure.fillHeight === true) {
     fillHeightStyle(css, measure.capHeight);
   }
-  if (measure.later === true && typeof style.minWidth === "number") {
-    laterMinWidth(css, style, style.minWidth, measure.basis);
+  if (measuredMinWidth(css, style, measure)) {
     return;
+  }
+  if (measure.zero === true) {
+    zeroStyle(css, measure.dropGap);
+  }
+}
+
+/**
+ * A measured child's authored `minWidth`: a later sibling's or the capped ratio's folds into its
+ * width (see laterMinWidth), any other is kept, and a grower or shrinker without one may reach 0.
+ * Returns whether it folded, which settles the child's width.
+ */
+function measuredMinWidth(css: Css, style: Raw, measure: Raw): boolean {
+  const cappedBasis = typeof measure.shrink === "number" && typeof measure.basis === "number";
+  if ((measure.later === true || cappedBasis) && typeof style.minWidth === "number") {
+    laterMinWidth(css, style, style.minWidth, measure.basis);
+    return true;
   }
   if (typeof style.minWidth !== "number" && (measure.take === true || "shrink" in measure)) {
     css[MIN_WIDTH] = "0";
   }
-  if (measure.zero === true) {
-    css[MIN_WIDTH] = "0";
-    css[MAX_WIDTH] = "0px";
+  return false;
+}
+
+/**
+ * A child measured against no width: `zero` beats both bounds, and a later sibling's negative
+ * start margin takes back the row's gap before it (see RowMeasure's `dropGap`).
+ */
+function zeroStyle(css: Css, dropGap: unknown) {
+  css[MIN_WIDTH] = "0";
+  css[MAX_WIDTH] = "0px";
+  if (typeof dropGap === "number" && dropGap > 0) {
+    css["margin-inline-start"] = px(-dropGap);
   }
 }
 
@@ -374,7 +402,9 @@ function boundsStyle(css: Css, style: Raw, pinnedAxis: WebStyleContext["parentAx
 
 /**
  * A row bounded to its parent's width (ROW_BOUND_KEY), intersected with its authored maxWidth as
- * Compose's sizeIn does, unless a weight pins its width to its share.
+ * Compose's sizeIn does, unless a weight pins its width to its share. Its authored `minWidth` is
+ * clamped into that bound too, as sizeIn coerces the minimum into the incoming constraints; a CSS
+ * `min-width` would otherwise win over `max-width` (#16711).
  */
 function rowBoundStyle(
   css: Css,
@@ -388,6 +418,9 @@ function rowBoundStyle(
   const authored =
     typeof style.maxWidth === "number" && pinnedAxis !== "row" ? px(style.maxWidth) : undefined;
   css[MAX_WIDTH] = authored ? `min(100%, ${authored})` : "100%";
+  if (typeof style.minWidth === "number" && pinnedAxis !== "row") {
+    css[MIN_WIDTH] = `min(100%, ${px(style.minWidth)})`;
+  }
 }
 
 function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {

@@ -729,6 +729,34 @@ for (const engine of ENGINES) {
               box("after-unsized", { aspectRatio: 1 }),
               text("after-end", "b"),
             ]),
+            // The capped ratio's own minWidth is clamped to what the earlier box leaves (#16711).
+            row(100, [
+              box("min-before", { width: { dp: 40 }, height: { dp: 10 } }),
+              box("min-capped", { aspectRatio: 1, maxWidth: 100, minWidth: 80 }),
+            ]),
+            // A bounded row's minWidth is clamped into its parent's width (#16711).
+            {
+              type: "column",
+              style: { width: { dp: 100 } },
+              children: [
+                {
+                  type: "row",
+                  testTag: "min-bounded",
+                  style: { minWidth: 300 },
+                  children: [box("bounded-capped", { aspectRatio: 1, maxWidth: 50 })],
+                },
+              ],
+            },
+            // No spacing follows the grower once it took the width (#16711).
+            {
+              type: "row",
+              style: { width: { dp: 200 }, spacing: 10 },
+              children: [
+                text("gap-start", "a"),
+                box("gap-taker", { aspectRatio: 4 }),
+                text("gap-end", "b"),
+              ],
+            },
           ],
         },
       });
@@ -764,6 +792,13 @@ for (const engine of ENGINES) {
         expect(afterText).toBeGreaterThan(0);
         expect(width("after-unsized")).toBeCloseTo(300 - 100 - afterText, 0);
         expect(width("after-end")).toBeCloseTo(0, 0);
+
+        expect(width("min-before")).toBeCloseTo(40, 0);
+        expect(width("min-capped")).toBeCloseTo(60, 0);
+        expect(width("min-bounded")).toBeCloseTo(100, 0);
+        expect(width("bounded-capped")).toBeCloseTo(50, 0);
+        expect(width("gap-taker")).toBeCloseTo(200 - width("gap-start") - 10, 0);
+        expect(width("gap-end")).toBeCloseTo(0, 0);
       } finally {
         await page.close();
       }

@@ -48,10 +48,14 @@ import {
   prototypeWebWheelFactor,
   prototypeWebZoomScale,
 } from "./webPageRuntime";
-import { renderPrototypeStill } from "./webStill";
+import {
+  renderPrototypeWebPointViews,
+  type PrototypeWebView,
+  type PrototypeWebViewPoint,
+  type PrototypeWebViewSettings,
+} from "./webPageViews";
 import { FADE_EDGES_PAGE_CSS } from "./webStylePolish";
 import type { UnsupportedWebNode } from "./webRender";
-import type { WebStackScreens } from "./webStack";
 import {
   webImageBox,
   webImageRule,
@@ -168,18 +172,8 @@ function cspFor(script: string): string {
   ].join("; ");
 }
 
-interface RenderedView {
-  readonly variant: string;
-  readonly revision: number;
-  readonly orientation: WebOrientation;
-  /** The foldable posture this view draws; absent for a frame without postures. */
-  readonly posture?: string;
-  /** The outermost stack's screen this view draws; only a multi-screen stack sets it. */
-  readonly screen?: string;
-  readonly html: string;
-  readonly unsupported: readonly UnsupportedWebNode[];
-  readonly draws: readonly WebImageDraw[];
-}
+/** A view as the page inlines it: its markup, with what the budget and image requests read. */
+type RenderedView = Omit<PrototypeWebView, "element" | "stack"> & { readonly html: string };
 
 /**
  * One screen of one revision in each of the frame's orientations and every posture: the unit the
@@ -195,17 +189,6 @@ interface RevisionViews {
 }
 
 /**
- * The screens the picker offers for a still's outermost stack: its start, then the others in
- * key order. A stack with one screen, or a start that is not one of them, offers none.
- */
-function pickerScreens(stack: WebStackScreens | undefined): string[] {
-  if (!stack || stack.screens.length < 2 || !stack.screens.includes(stack.start)) {
-    return [];
-  }
-  return [stack.start, ...stack.screens.filter((screen) => screen !== stack.start)];
-}
-
-/**
  * The page's frame: its id, the orientations it has (the first shown first) and the postures it
  * pre-renders (one undefined entry for none).
  */
@@ -215,22 +198,13 @@ interface ViewFrame {
   readonly postures: readonly (string | undefined)[];
 }
 
-/** Where a view sits among the page's dimensions besides variant and revision. */
-interface ViewAt {
-  readonly orientation: WebOrientation;
-  readonly posture: string | undefined;
-}
-
-function renderView(
+/** What every view of the page shares: the server draws icons with the Material Icons Android draws. */
+function viewSettings(
   input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
   frame: string,
-  at: { variant: string; revision: PrototypeWebRevision; screen?: string },
-  { orientation, posture }: ViewAt,
-): RenderedView & { stack?: WebStackScreens } {
-  const still = renderPrototypeStill(at.revision.spec, {
+): PrototypeWebViewSettings {
+  return {
     frame,
-    orientation,
-    ...(posture === undefined ? {} : { posture }),
     mode: input.mode,
     nowMs: input.nowMs,
     imageSlots: input.slots,
@@ -238,59 +212,27 @@ function renderView(
     ...(input.textSize === undefined ? {} : { textSize: input.textSize }),
     logger,
     glyphs: materialIconGlyphs(),
-    ...(at.screen === undefined ? {} : { screen: at.screen }),
-  });
-  const view = el(
-    "div",
-    {
-      attrs: {
-        "data-view": "",
-        "data-variant": at.variant,
-        "data-revision": String(at.revision.revision),
-        "data-orientation": orientation,
-        ...(posture === undefined ? {} : { "data-posture": posture }),
-        ...(at.screen === undefined ? {} : { "data-screen": at.screen }),
-        hidden: "",
-      },
-    },
-    [still.element],
-  );
-  return {
-    variant: at.variant,
-    revision: at.revision.revision,
-    orientation,
-    ...(posture === undefined ? {} : { posture }),
-    ...(at.screen === undefined ? {} : { screen: at.screen }),
-    html: toHtml(view),
-    unsupported: still.unsupportedNodes,
-    draws: still.imageDraws,
-    ...(still.stack ? { stack: still.stack } : {}),
   };
 }
 
 /** Every posture and orientation, the default posture's first orientation first. */
-function viewPoints(frame: ViewFrame): ViewAt[] {
+function viewPoints(frame: ViewFrame): PrototypeWebViewPoint[] {
   return frame.postures.flatMap((posture) =>
     frame.orientations.map((orientation) => ({ orientation, posture })),
   );
 }
 
-/**
- * One orientation and posture's views of a revision: its start view first, then its other screens.
- * Each still finds its own stack, since a `visibleWhen` on orientation or posture can show a
- * different stack (or none) in each.
- */
+/** One orientation and posture's views of a revision, start screen first, as markup. */
 function pointViews(
   input: PrototypeWebPageInput & { readonly slots: ReadonlyMap<string, number> },
   frame: string,
   at: { variant: string; revision: PrototypeWebRevision },
-  point: ViewAt,
+  point: PrototypeWebViewPoint,
 ): RenderedView[] {
-  const probe = renderView(input, frame, at, point);
-  const screens = pickerScreens(probe.stack);
-  return screens.length === 0
-    ? [probe]
-    : screens.map((screen) => renderView(input, frame, { ...at, screen }, point));
+  const of = { variant: at.variant, revision: at.revision.revision, spec: at.revision.spec };
+  return renderPrototypeWebPointViews(viewSettings(input, frame), of, point).map(
+    ({ element, stack: _stack, ...view }) => ({ ...view, html: toHtml(element) }),
+  );
 }
 
 /**

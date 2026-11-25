@@ -98,12 +98,10 @@ gets the non-retryable `read_session_not_bound`, which names the session.
 Knowing the UUID is not enough. The exceptions are a broker connection granted
 that session and a call that presents the session's owner token.
 
-- Read on the owning connection, or leave `sessionUuid` out and pass `deviceId`
-  for a sessionless read.
 - Once the owner has disconnected (a finished `--cli` call, for example),
   another connection may read under the session.
 - A `sessionUuid` that names no device session (such as an IDE observer session)
-  still reads sessionlessly.
+  still reads sessionlessly; one whose device was lost fails like a control call.
 
 ## When a session is released
 

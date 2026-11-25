@@ -121,7 +121,9 @@ prove that voice is healthy. Host-mic passthrough (`-allow-host-audio`) is not u
   while the guest produces audio.
 - `streamAudio` can block forever when the guest is silent. The client sets a deadline of the
   requested duration plus 2 s, cancels the call when it fires, and returns the PCM it has
-  (possibly empty) with `timedOut: true`. Silence is a result, not an error.
+  (possibly empty) with `timedOut: true`. That is a result, not an error: `captureAudio`
+  reports it as `complete: false`, and as `silent: null` unless the partial capture heard sound,
+  because a silent guest and a stream that delivers nothing look the same.
 - The client cancels the stream once it has the requested number of frames.
 - Levels come from `analyzeLevels`: overall RMS and peak in dBFS (floor −120), and the share
   of 20 ms windows at or above the silence threshold (default −50 dBFS). A clip is `silent`

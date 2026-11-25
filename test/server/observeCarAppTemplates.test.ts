@@ -1,6 +1,6 @@
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 import { observeToolScreen } from "../helpers/observeToolScreen";
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import type { CarAppForegroundTemplates, CarAppTemplates } from "../../src/models/CarAppTemplates";
 import {
@@ -16,6 +16,7 @@ import {
   ANDROID_AUTO_PROJECTION_NOTE,
   type AndroidAutoProjection,
 } from "../../src/models/AndroidAutoProjection";
+import { consumeSetupTiming } from "../../src/daemon/setupTiming";
 import { registerObserveTools } from "../../src/server/observeTools";
 import { observeResultSchema } from "../../src/server/toolOutputSchemas";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -27,6 +28,12 @@ import { capturedTwoWindowHierarchy, observationOf } from "../helpers/prototypeW
 isolateToolRegistry();
 
 const device: BootedDevice = { deviceId: "emulator-5554", name: "AAOS", platform: "android" };
+
+// Observe attaches the device's pending setup timing once; drain any another file left for this
+// id, or only the first observation in a test carries it (#19237).
+beforeEach(() => {
+  consumeSetupTiming(device.deviceId);
+});
 
 const block: CarAppForegroundTemplates = {
   packageName: "com.example.car",

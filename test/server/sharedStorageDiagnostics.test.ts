@@ -210,13 +210,18 @@ describe("size-scaled shared-storage transfer budgets (#18328)", () => {
   test("a failed existing-size probe gets the per-file backup ceiling", async () => {
     const { adb, stage } = setup(42);
     adb.setCommandError(EXISTING_SIZE_MARKER, new Error("device offline"));
-    spyOn(logger, "warn").mockImplementation(() => {});
-    const backup = holdBackup(adb);
-    const staging = stage({ rollbackOnFailure: true });
-    await drainUntil(() => backup.finish !== undefined, { description: "backup command" });
-    expect(backup.timeoutMs).toBe(budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS);
-    backup.finish?.();
-    await staging;
+    // Restored here, or a later test's warn spy inherits this call count (#19237).
+    const warn = spyOn(logger, "warn").mockImplementation(() => {});
+    try {
+      const backup = holdBackup(adb);
+      const staging = stage({ rollbackOnFailure: true });
+      await drainUntil(() => backup.finish !== undefined, { description: "backup command" });
+      expect(backup.timeoutMs).toBe(budgets.SHARED_STORAGE_TRANSFER_TIMEOUT_CEILING_MS);
+      backup.finish?.();
+      await staging;
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   test("a small stalled push still fails at the floor with stage diagnostics", async () => {

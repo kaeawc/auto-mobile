@@ -29,9 +29,13 @@ of these hold:
 `setLocusId` links the notification to the conversation's screen in the app. Without it, ranking
 and dismissal sync still work.
 
-A bubble also needs `BubbleMetadata` with an Activity that is resizeable, `allowEmbedded="true"` and
-`documentLaunchMode="always"`. Bubbles must be allowed at three levels: the device setting
-(`Settings.Secure` `notification_bubbles`), the app preference, and the channel or conversation.
+A bubble also needs `BubbleMetadata` with an Activity that is resizeable and
+`allowEmbedded="true"`. Only apps on API 29 and lower set `documentLaunchMode="always"`; Android 11
+sets it automatically. Bubbles must be allowed at three levels: the device setting
+`notification_bubbles`, the app preference, and the channel or conversation. That setting is in
+`Settings.Global` on Android 11 and in `Settings.Secure` on Android 12 and later. A foreground-service
+or user-initiated-job notification never bubbles, and neither does any notification on a low-RAM
+device.
 
 **iOS 15 and later.** A communication notification shows the sender avatar and can break through a
 Focus only when all of these hold:
@@ -52,8 +56,8 @@ Notification Service Extension and `mutable-content: 1`.
 | Conversations section on Android                       | Disposable app only  | Feasible by the docs; pending device check on API 33 and 36                                                                                            |
 | Conversations section from CtrlProxy                   | CtrlProxy overlay    | Not feasible: the shortcut must belong to the posting package, and one shortcut set per prototype would collide                                        |
 | Bubbles on Android                                     | Disposable app only  | Feasible by the docs; pending device check                                                                                                             |
-| Deterministic bubble enablement                        | adb                  | Candidates are `settings put secure notification_bubbles 1` plus `cmd notification set_bubbles <pkg> <uid> 1`; pending device check on both API levels |
-| Shortcut cleanup on uninstall                          | Disposable app       | Dynamic and cached shortcuts go with the package by the docs; pending device check                                                                     |
+| Deterministic bubble enablement                        | adb                  | Candidates are `settings put secure notification_bubbles 1` (`global` on Android 11) plus `cmd notification set_bubbles <pkg> 1`; pending device check |
+| Shortcut cleanup on uninstall                          | Disposable app       | AOSP removes the package's shortcuts and launcher pins on uninstall; pending device check                                                              |
 | Coexistence with direct-share shortcuts (#14235)       | Disposable app       | Expected to work: one shortcut can carry both the share target category and `setLongLived(true)`; pending device check, and needs #14235's id scheme   |
 | Communication entitlement with ad-hoc signing          | iOS simulator Viewer | Unknown; pending simulator check. The simulator does not check provisioning, so an embedded entitlement may be enough                                  |
 | Avatar from `updating(from:)` for a local notification | iOS simulator Viewer | Feasible if the entitlement holds; pending simulator check                                                                                             |
@@ -88,3 +92,21 @@ issue.
 4. Android runtime: shortcut push, `Person` icons from assets, `BubbleMetadata` and a bubble
    Activity in the disposable app shell.
 5. iOS runtime: intent donation and `updating(from:)` in the Viewer, gated on the result of step 2.
+
+## Sources
+
+- Android conversations:
+  <https://developer.android.com/develop/ui/views/notifications/conversations>
+- Android bubbles: <https://developer.android.com/develop/ui/views/notifications/bubbles>
+- Bubble eligibility, AOSP `BubbleExtractor.java`:
+  <https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/notification/BubbleExtractor.java>
+- `set_bubbles PACKAGE PREFERENCE (0=none 1=all 2=selected) [user_id]`, AOSP
+  `NotificationShellCmd.java`:
+  <https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/notification/NotificationShellCmd.java>
+- `notification_bubbles` location, AOSP `Settings.java` in `android11-release` (Global) and
+  `android12-release` (Secure):
+  <https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android12-release/core/java/android/provider/Settings.java>
+- Shortcut cleanup on uninstall, AOSP `ShortcutService.java`:
+  <https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/ShortcutService.java>
+- iOS communication notifications:
+  <https://developer.apple.com/documentation/usernotifications/implementing-communication-notifications>

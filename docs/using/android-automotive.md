@@ -229,8 +229,7 @@ known there even when the image is not.
 | `rotary_nudge_up`, `rotary_nudge_down`, `rotary_nudge_left`, `rotary_nudge_right` | Rotary navigation key events; moves focus on an emulator                          |
 | `rotary_select`                                                                   | Rotary navigation key event; succeeds, but its effect depends on the focused item |
 
-Other devices refuse these buttons. The Wear-only `rotaryScroll` warns on a car and falls back to a
-swipe.
+Other devices refuse these buttons. The Wear-only `rotaryScroll` refuses a car without sending input.
 
 ## Prototypes
 

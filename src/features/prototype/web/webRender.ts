@@ -25,6 +25,7 @@ import {
   WHITE_SPACE,
 } from "./webCss";
 import { roleCss, toggleMark } from "./webToggleMark";
+import { listItemRenderer } from "./webListItem";
 import { bindPrototypeDataText, resolvePrototypeDataPointer } from "../prototypeData";
 import { resolvePrototypeDerived, type PrototypeFormatEnvironment } from "../prototypeFormat";
 import {
@@ -780,7 +781,15 @@ const toggle =
       ...disabled.css,
     });
     const semantics = { ...attrs, role, [ARIA_CHECKED]: String(on), ...disabled.attrs };
-    const label = typeof node.label === "string" ? [bound(node.label, scope)] : [];
+    // Android's label is a plain Text in the theme's bodyLarge (#16611).
+    const label =
+      typeof node.label === "string"
+        ? [
+            el("span", { style: textCss({ textStyle: "bodyLarge" }, scope.style) }, [
+              bound(node.label, scope),
+            ]),
+          ]
+        : [];
     const mark = toggleMark(role, on, scope);
     // As on both devices, a switch's label leads its track and a checkbox's box leads its label.
     return el(
@@ -826,68 +835,6 @@ function namedIcon(name: unknown, scope: WebRenderScope): WebElement[] {
   return typeof name === "string" ? [icon({ type: "icon", name }, scope, "")] : [];
 }
 
-function trailing(
-  node: Raw,
-  scope: WebRenderScope,
-  disabledAttrs: Record<string, string>,
-): WebChild[] {
-  const entry = record(node.trailing);
-  if (entry?.type === "switch" || entry?.type === "checkbox") {
-    const on = isOn(entry.stateKey, scope);
-    return [
-      el(
-        "span",
-        {
-          // A disabled list item disables its trailing control too.
-          attrs: { role: entry.type, [ARIA_CHECKED]: String(on), ...disabledAttrs },
-          style: { display: FLEX },
-        },
-        [toggleMark(entry.type, on, scope)],
-      ),
-    ];
-  }
-  if (entry?.type === "icon") {
-    return [icon({ type: "icon", name: entry.name }, scope, "")];
-  }
-  return [];
-}
-
-const listItem: NodeRenderer = (node, scope) => {
-  const disabled = disabledState(node, scope);
-  const { attrs, style } = base(node, scope, {
-    display: FLEX,
-    [ALIGN_ITEMS]: CENTER,
-    gap: "16px",
-    [MIN_HEIGHT]: "56px",
-    padding: "8px 16px",
-    [ALIGN_SELF]: STRETCH,
-    ...disabled.css,
-  });
-  const supporting =
-    node.supporting === undefined
-      ? []
-      : [
-          el("span", { style: { [FONT_SIZE]: fontPx(14, scope.style), opacity: "0.7" } }, [
-            bound(node.supporting, scope),
-          ]),
-        ];
-  const texts = el(
-    "div",
-    { style: { display: FLEX, [FLEX_DIRECTION]: COLUMN, flex: "1 1 auto" } },
-    [
-      el("span", { style: { [FONT_SIZE]: fontPx(16, scope.style) } }, [
-        bound(node.headline, scope),
-      ]),
-      ...supporting,
-    ],
-  );
-  return el("div", { attrs: { ...attrs, role: "listitem", ...disabled.attrs }, style }, [
-    ...namedIcon(node.leadingIcon, scope),
-    texts,
-    ...trailing(node, scope, disabled.attrs),
-  ]);
-};
-
 const KIT: WebRenderKit = {
   base,
   child,
@@ -902,6 +849,7 @@ const KIT: WebRenderKit = {
 };
 
 const materialButton = materialButtonRenderer(KIT);
+const listItem = listItemRenderer(KIT);
 
 export const WEB_NODE_RENDERERS: Readonly<Record<string, NodeRenderer>> = {
   box,

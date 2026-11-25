@@ -82,6 +82,9 @@ export function toggleMark(
         style: {
           width: "18px",
           height: "18px",
+          // Material 3's Checkbox is 24 px: 2 px padding around a 20 px box whose 18 px square
+          // sits 1 px in (#16611).
+          margin: "3px",
           [BORDER_RADIUS]: "2px",
           [FLEX_SHRINK]: "0",
           border: `2px solid ${cssColor(on ? "primary" : "onSurfaceVariant", scope.style) ?? "currentColor"}`,

@@ -81,7 +81,12 @@ const setSensorTool = defineDeviceTool({
     "changed. Sessionless changes persist until reset. Physical devices and iOS are refused. Read current " +
     'values with getDeviceState include: ["sensors"].',
   input: setSensorInput,
-  options: { ...PLAN_RELEVANT, defaultEnabled: false, outputSchema: setSensorResultSchema },
+  options: {
+    platforms: ["android"],
+    ...PLAN_RELEVANT,
+    defaultEnabled: false,
+    outputSchema: setSensorResultSchema,
+  },
 });
 
 export const setSensorSchema = setSensorTool.schema;

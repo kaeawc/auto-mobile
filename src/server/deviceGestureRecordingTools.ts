@@ -310,6 +310,8 @@ export const registerDeviceGestureRecordingTools = () => {
     recordDeviceGesturesSchema,
     {
       handler: recordDeviceGesturesTool,
+      // The recorder reads Android input events only; iOS has no backend yet (#19172).
+      platforms: ["android"],
       defaultEnabled: false,
       outputSchema: recordDeviceGesturesResultSchema,
       assertHeldDeviceStart: assertDeviceGestureRecordingStartHeldDevice,

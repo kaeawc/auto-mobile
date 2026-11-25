@@ -65,4 +65,24 @@ describe("CachedWearOsDetector", () => {
     expect(await detector.isWearOs({ device: unknown, adb })).toBe(false);
     expect(adb.getExecutedCommands()).toEqual([probe, probe]);
   });
+
+  test("a new device incarnation on a reused serial is probed fresh within the TTL (#19187)", async () => {
+    let incarnation: string | undefined = "1";
+    const detector = new CachedWearOsDetector(
+      new FakeTimer(),
+      WEAR_OS_DEVICE_CACHE_TTL_MS,
+      () => incarnation,
+    );
+    const phone = new FakeAdbExecutor();
+    phone.setCommandResponse(probe, createExecResult("false", ""));
+    expect(await detector.isWearOs({ device: unknown, adb: phone })).toBe(false);
+
+    // killDevice, then a watch boots on the same serial with a new pool incarnation.
+    incarnation = "2";
+    const watch = new FakeAdbExecutor();
+    watch.setCommandResponse(probe, createExecResult("true", ""));
+    expect(await detector.isWearOs({ device: unknown, adb: watch })).toBe(true);
+    expect(await detector.isWearOs({ device: unknown, adb: watch })).toBe(true);
+    expect(watch.getExecutedCommands()).toEqual([probe]);
+  });
 });

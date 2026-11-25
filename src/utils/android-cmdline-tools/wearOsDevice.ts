@@ -2,13 +2,16 @@ import type { BootedDevice } from "../../models";
 import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { probeFeature } from "./touchscreenFeature";
+import { deviceIncarnationToken } from "../deviceIncarnation";
 
 /** The system feature every Wear OS build declares. */
 export const WATCH_FEATURE = "android.hardware.type.watch";
 
 /**
- * System features do not change while a device is up; the expiry only guards a serial that a pool
- * reuses for a different AVD (a phone replaced by a watch on emulator-5554).
+ * System features do not change while a device is up. A cached answer holds only for the device
+ * pool incarnation it was read in, so a new boot on a reused serial is probed again; the expiry
+ * guards the case with no incarnation (direct mode) where a serial is reused for a different
+ * AVD (a phone replaced by a watch on emulator-5554).
  */
 export const WEAR_OS_DEVICE_CACHE_TTL_MS = 5 * 60_000;
 
@@ -33,11 +36,18 @@ export interface WearOsDetector {
 
 /** Probes {@link WATCH_FEATURE} once per device when the form factor is unknown. */
 export class CachedWearOsDetector implements WearOsDetector {
-  private readonly cache = new Map<string, { readAt: number; value: boolean }>();
+  /** Keyed by serial; an entry answers only for the pool incarnation it was read in (#19187). */
+  private readonly cache = new Map<
+    string,
+    { readAt: number; incarnation: string | undefined; value: boolean }
+  >();
 
   constructor(
     private readonly timer: Timer = defaultTimer,
     private readonly ttlMs: number = WEAR_OS_DEVICE_CACHE_TTL_MS,
+    private readonly incarnationOf: (
+      deviceId: string,
+    ) => string | undefined = deviceIncarnationToken,
   ) {}
 
   async isWearOs({ device, adb, signal }: WearOsEvidence): Promise<boolean> {
@@ -47,8 +57,13 @@ export class CachedWearOsDetector implements WearOsDetector {
     if (device.formFactor !== undefined) {
       return device.formFactor === "watch";
     }
+    const incarnation = this.incarnationOf(device.deviceId);
     const cached = this.cache.get(device.deviceId);
-    if (cached && this.timer.now() - cached.readAt < this.ttlMs) {
+    if (
+      cached &&
+      cached.incarnation === incarnation &&
+      this.timer.now() - cached.readAt < this.ttlMs
+    ) {
       return cached.value;
     }
     if (!adb) {
@@ -62,7 +77,7 @@ export class CachedWearOsDetector implements WearOsDetector {
       this.cache.delete(device.deviceId);
       return false;
     }
-    this.cache.set(device.deviceId, { readAt: this.timer.now(), value: declared });
+    this.cache.set(device.deviceId, { readAt: this.timer.now(), incarnation, value: declared });
     return declared;
   }
 }

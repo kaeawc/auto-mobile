@@ -114,9 +114,9 @@ Enable it with `setToolEnabled` (see [Dynamic Tools](dynamic-tools.md)).
   It reads the screen back after each. `success` is `true` once one of them changed the screen.
   `method` names it and `attempts` lists every try.
 - A list already at its end does not change, so it reports `success: false`.
-- On a device that is not a Wear OS watch, AutoMobile still sends the input. The result carries
-  `warningCode: "not_watch"` and a `warning`. Phones usually ignore rotary input, so use `swipeOn`
-  there or run the test on a Wear OS image.
+- On a device that is not a Wear OS watch, the call fails without sending input. The error names
+  the device's form factor. Use `swipeOn` on a phone, tablet or foldable, or run the test on a
+  Wear OS image.
 
 On the verified emulator, `input rotaryencoder scroll` moves plain and curved lists both ways, and
 the console attempt always fails. Check `attempts` on other images. `swipeOn` with `lookFor` still

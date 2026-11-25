@@ -20,7 +20,7 @@ export interface SimulatorMemoryWarningPathOptions {
 
 /**
  * `<device set>/<udid>/data/var/run/memory_warning_simulation`. CoreSimulator creates the file
- * when the device boots and exports this path to the simulator as `SIMULATOR_MEMORY_WARNINGS`;
+ * UIKit watches it, so a new mtime delivers `didReceiveMemoryWarning` to running apps (#18754).
  * UIKit watches it, so a new mtime delivers `didReceiveMemoryWarning` to the foreground app.
  */
 export function simulatorMemoryWarningPath(

@@ -8,8 +8,8 @@ final class PrototypeInsertedTextLiteralTests: XCTestCase {
 
     private let shared = #"""
     "state":{"secret":"LEAK","input":"","choice":"a"},
-    "derive":{"x":{"of":{"data":"/raw"}}},
-    "data":{"note":"{secret}","raw":"{secret}",
+    "derive":{"x":{"of":{"data":"/n"},"format":{"number":{}}}},
+    "data":{"note":"{secret}","n":7,
      "items":[{"id":0,"title":"{secret}"},{"id":1,"title":"{derived:x}"}]}
     """#
 
@@ -78,8 +78,8 @@ final class PrototypeInsertedTextLiteralTests: XCTestCase {
              {"type":"listItem","testTag":"head","headline":"{item.label}"}]}]}
         """#)
         let state = spec.state ?? [:]
-        // Authored placeholders still resolve; a derived value is inserted literally.
-        XCTAssertEqual(texts(spec, "authored"), ["LEAK {secret}"])
+        // Authored placeholders still resolve; an inserted `{derived:x}` stays literal.
+        XCTAssertEqual(texts(spec, "authored"), ["LEAK 7"])
         XCTAssertEqual(texts(spec, "data"), ["{secret}"])
         XCTAssertEqual(
             tagged(spec, "bar").map { interpolatePrototypeText($0.title ?? "", state: state, pager: nil) },

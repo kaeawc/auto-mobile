@@ -82,6 +82,14 @@ import { CtrlProxyFocus, type FocusActionOutcome } from "./CtrlProxyFocus";
 import { CtrlProxyGestures } from "./CtrlProxyGestures";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
 import { CtrlProxyPrototypes, type PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
+import {
+  CtrlProxyPrototypeMedia,
+  type PrototypeMediaRequestOptions,
+} from "./CtrlProxyPrototypeMedia";
+import type {
+  PrototypeMediaTransportMessage,
+  PrototypeMediaTransportResult,
+} from "../../prototype/prototypeMediaUpload";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyText, type ImeCommitActionResult } from "./CtrlProxyText";
 import type {
@@ -569,6 +577,12 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   ): Promise<PrototypeAssetResult> {
     return this.prototypes.requestRemovePrototypeAsset(id, options);
   }
+  requestPrototypeMediaMessage(
+    message: PrototypeMediaTransportMessage,
+    options?: PrototypeMediaRequestOptions,
+  ): Promise<PrototypeMediaTransportResult> {
+    return this.prototypeMedia.requestPrototypeMediaMessage(message, options);
+  }
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {
     return this.prototypes.onPrototypeEvent(listener);
   }
@@ -856,6 +870,7 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   protected _focus: CtrlProxyFocus | null = null;
 
   protected _prototypes: CtrlProxyPrototypes | null = null;
+  protected _prototypeMedia: CtrlProxyPrototypeMedia | null = null;
 
   protected _highlights: CtrlProxyHighlights | null = null;
 
@@ -895,6 +910,10 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
 
   protected get prototypes(): CtrlProxyPrototypes {
     return (this._prototypes ??= new CtrlProxyPrototypes(this.createDelegateContext()));
+  }
+
+  protected get prototypeMedia(): CtrlProxyPrototypeMedia {
+    return (this._prototypeMedia ??= new CtrlProxyPrototypeMedia(this.createDelegateContext()));
   }
 
   protected get highlights(): CtrlProxyHighlights {

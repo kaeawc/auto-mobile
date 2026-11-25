@@ -48,6 +48,7 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHiddenCapture
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeHostLink
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImageCache
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeImeWindow
+import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeMediaUploadController
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeRefreshCoalescer
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeSecureValueStores
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeStoragePersistence
@@ -60,8 +61,10 @@ import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeForegroundOrUnsc
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeIdOfTitle
 import dev.jasonpearson.automobile.ctrlproxy.prototype.prototypeStorageRoot
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
+import dev.jasonpearson.automobile.protocol.DirectoryPrototypeMediaFiles
 import dev.jasonpearson.automobile.protocol.ErrorResponse
 import dev.jasonpearson.automobile.protocol.GlobalActionResult
+import dev.jasonpearson.automobile.protocol.PrototypeMediaUploadReceiver
 import dev.jasonpearson.automobile.protocol.WebSocketMessageHandler
 import dev.jasonpearson.automobile.protocol.WebSocketResponse
 import java.io.File
@@ -525,6 +528,18 @@ class CtrlProxy : AccessibilityService() {
       prototypeAssets,
       prototypeResultSink,
       PrototypeBase64Decoder { Base64.decode(it, Base64.DEFAULT) },
+    )
+  }
+  // Chunked video, audio and caption uploads (#14254) stream to their own cache directory, never
+  // the heap, and are owned by the observer session like images.
+  internal val prototypeMediaUploadController by lazy {
+    PrototypeMediaUploadController(
+      PrototypeMediaUploadReceiver(
+        DirectoryPrototypeMediaFiles(File(cacheDir, "prototype-media")),
+        decodeBase64 = { Base64.decode(it, Base64.DEFAULT) },
+      ),
+      prototypeResultSink,
+      session = { webSocketObserverGeneration() },
     )
   }
   internal lateinit var overlayManager: OverlayManager

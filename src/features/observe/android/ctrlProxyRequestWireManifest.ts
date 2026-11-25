@@ -164,6 +164,31 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
     mimeType: "required",
     dataBase64: "required",
   },
+  put_prototype_asset_abort: {
+    type: "required",
+    requestId: "required",
+    id: "required",
+  },
+  put_prototype_asset_begin: {
+    type: "required",
+    requestId: "required",
+    id: "required",
+    mimeType: "required",
+    size: "required",
+    sha256: "required",
+  },
+  put_prototype_asset_chunk: {
+    type: "required",
+    requestId: "required",
+    id: "required",
+    offset: "required",
+    dataBase64: "required",
+  },
+  put_prototype_asset_commit: {
+    type: "required",
+    requestId: "required",
+    id: "required",
+  },
   remove_ca_cert: {
     type: "required",
     requestId: "required",

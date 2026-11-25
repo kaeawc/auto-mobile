@@ -30,6 +30,11 @@ import type { AndroidSettingsPutOptions } from "./AndroidClientRequests";
 import type { AndroidScreenshotRequestOptions } from "./AndroidScreenshotRequester";
 import type { KeyboardProfileCatalog } from "../../action/keyboardProfiles";
 import type { PrototypeAssetRequestOptions } from "./CtrlProxyPrototypes";
+import type { PrototypeMediaRequestOptions } from "./CtrlProxyPrototypeMedia";
+import type {
+  PrototypeMediaTransportMessage,
+  PrototypeMediaTransportResult,
+} from "../../prototype/prototypeMediaUpload";
 import type { PrototypeSpec } from "../../prototype/prototypeSpec";
 import type { PrototypeAssetUpload } from "../../prototype/prototypeAssets";
 import type {
@@ -394,6 +399,11 @@ export interface AndroidCtrlProxy
     id: string,
     options?: PrototypeAssetRequestOptions,
   ): Promise<PrototypeAssetResult>;
+  /** One chunked media upload message (#14254); see CtrlProxyPrototypes. */
+  requestPrototypeMediaMessage(
+    message: PrototypeMediaTransportMessage,
+    options?: PrototypeMediaRequestOptions,
+  ): Promise<PrototypeMediaTransportResult>;
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void;
 
   requestAddHighlight(

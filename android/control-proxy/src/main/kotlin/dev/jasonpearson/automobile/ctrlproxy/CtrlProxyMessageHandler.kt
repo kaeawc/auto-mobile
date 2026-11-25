@@ -30,6 +30,10 @@ import dev.jasonpearson.automobile.protocol.PinSavedPrototype
 import dev.jasonpearson.automobile.protocol.PinchResult
 import dev.jasonpearson.automobile.protocol.PrototypeResult
 import dev.jasonpearson.automobile.protocol.PutPrototypeAsset
+import dev.jasonpearson.automobile.protocol.PutPrototypeAssetAbort
+import dev.jasonpearson.automobile.protocol.PutPrototypeAssetBegin
+import dev.jasonpearson.automobile.protocol.PutPrototypeAssetChunk
+import dev.jasonpearson.automobile.protocol.PutPrototypeAssetCommit
 import dev.jasonpearson.automobile.protocol.QueuePrototypeCallOutcome
 import dev.jasonpearson.automobile.protocol.RemoveCaCert
 import dev.jasonpearson.automobile.protocol.RemovePreference
@@ -306,9 +310,35 @@ class CtrlProxyMessageHandler(
           request.dataBase64,
         )
       is RemovePrototypeAsset -> actions.removePrototypeAsset(request.requestId, request.id)
-      else -> error("Unexpected prototype request")
+      else -> PrototypeMediaRequests().handleMedia(request)
     }
     return null
+  }
+
+  /** The chunked media upload requests (#14254); any other request here is a routing bug. */
+  private inner class PrototypeMediaRequests {
+    suspend fun handleMedia(request: WebSocketRequest) {
+      when (request) {
+        is PutPrototypeAssetBegin ->
+          actions.beginPrototypeMedia(
+            request.requestId,
+            request.id,
+            request.mimeType,
+            request.size,
+            request.sha256,
+          )
+        is PutPrototypeAssetChunk ->
+          actions.putPrototypeMediaChunk(
+            request.requestId,
+            request.id,
+            request.offset,
+            request.dataBase64,
+          )
+        is PutPrototypeAssetCommit -> actions.commitPrototypeMedia(request.requestId, request.id)
+        is PutPrototypeAssetAbort -> actions.abortPrototypeMedia(request.requestId, request.id)
+        else -> error("Unexpected prototype request")
+      }
+    }
   }
 
   private suspend fun handlePrototypeSimulation(request: WebSocketRequest) {
@@ -823,6 +853,10 @@ private class RequestRoute(request: WebSocketRequest) {
       is ClearPrototypeStorage,
       is PatchPrototype,
       is PutPrototypeAsset,
+      is PutPrototypeAssetBegin,
+      is PutPrototypeAssetChunk,
+      is PutPrototypeAssetCommit,
+      is PutPrototypeAssetAbort,
       is RemovePrototypeAsset -> RequestGroup.PROTOTYPE
       is ListPreferenceFiles,
       is GetPreferences,

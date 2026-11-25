@@ -5,6 +5,12 @@ import { prototypePlatformSimulationUnsupportedMessage } from "./prototypePlatfo
 import type { PrototypePatchReply, PrototypePatchRequest } from "./prototypePatchWire";
 import type { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import type { PrototypeAssetRequestOptions } from "../observe/android/CtrlProxyPrototypes";
+import type { PrototypeMediaRequestOptions } from "../observe/android/CtrlProxyPrototypeMedia";
+import type {
+  PrototypeMediaTransportClient,
+  PrototypeMediaTransportMessage,
+  PrototypeMediaTransportResult,
+} from "./prototypeMediaUpload";
 import type {
   PrototypeAssetResult,
   PrototypeDismiss,
@@ -47,6 +53,7 @@ export type AndroidPrototypeClient = Pick<
       | "requestAdvancePrototypeClock"
       | "requestQueuePrototypeCallOutcome"
       | "requestSimulatePrototypePlatform"
+      | "requestPrototypeMediaMessage"
     >
   >;
 
@@ -54,7 +61,9 @@ export type AndroidPrototypeClient = Pick<
  * Forwards every call to CtrlProxy unchanged. `inspect` and `supportsCommand` are Android-only extras outside
  * the shared interface: display targeting is gated on a CtrlProxy capability.
  */
-export class AndroidPrototypeTransport implements PrototypeTransport {
+export class AndroidPrototypeTransport
+  implements PrototypeTransport, PrototypeMediaTransportClient
+{
   constructor(private readonly client: AndroidPrototypeClient) {}
 
   async show(spec: PrototypeSpec, options: PrototypeShowOptions = {}): Promise<PrototypeResult> {
@@ -147,6 +156,19 @@ export class AndroidPrototypeTransport implements PrototypeTransport {
 
   removeAsset(id: string, options?: PrototypeAssetRequestOptions): Promise<PrototypeAssetResult> {
     return this.client.requestRemovePrototypeAsset(id, options);
+  }
+
+  /** One chunked media upload message (#14254), so the uploader can stream through CtrlProxy. */
+  sendPrototypeMediaMessage(
+    message: PrototypeMediaTransportMessage,
+    options?: PrototypeMediaRequestOptions,
+  ): Promise<PrototypeMediaTransportResult> {
+    if (!this.client.requestPrototypeMediaMessage) {
+      throw new ActionableError(
+        `${message.type}: this CtrlProxy client cannot upload prototype media; update the connected CtrlProxy.`,
+      );
+    }
+    return this.client.requestPrototypeMediaMessage(message, options);
   }
 
   /** CtrlProxy has no prototype status request; the tool's status action is host-local. */

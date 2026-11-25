@@ -63,6 +63,9 @@ internal class PrototypeResultBroadcaster(
     error: String,
   ) = emit(requestId) { prototypeRefusalFrame(requestId, code, error) }
 
+  override suspend fun sendMediaRefusal(requestId: String?, code: String, error: String) =
+    emit(requestId) { prototypeMediaRefusalFrame(requestId, code, error) }
+
   override suspend fun sendPatched(
     requestId: String?,
     success: Boolean,

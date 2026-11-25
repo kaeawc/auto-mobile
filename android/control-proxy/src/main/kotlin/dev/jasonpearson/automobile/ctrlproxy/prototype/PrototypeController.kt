@@ -68,6 +68,13 @@ interface PrototypeReplySink {
     code: dev.jasonpearson.automobile.protocol.SavedPrototypeErrorCode,
     error: String,
   ) = send(requestId, false, error)
+
+  /**
+   * A refused `put_prototype_asset_*` media request, with its rejection [code] (#14254). Sinks that
+   * predate it answer a bare refusal.
+   */
+  suspend fun sendMediaRefusal(requestId: String?, code: String, error: String) =
+    send(requestId, false, error)
 }
 
 /** Every reply the prototype controllers send; the rest default to the base reply. */

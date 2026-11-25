@@ -96,8 +96,16 @@ class WebSocketServer(
         null
       }
 
-    /** Requests that carry image bytes; their frames and decoder snippets are never logged. */
-    private val prototypeAssetRequestTypes = setOf("put_prototype_asset", "remove_prototype_asset")
+    /** Requests that carry asset bytes; their frames and decoder snippets are never logged. */
+    private val prototypeAssetRequestTypes =
+      setOf(
+        "put_prototype_asset",
+        "remove_prototype_asset",
+        "put_prototype_asset_begin",
+        "put_prototype_asset_chunk",
+        "put_prototype_asset_commit",
+        "put_prototype_asset_abort",
+      )
 
     /**
      * True for an asset request, including one too broken for its `type` to parse: the raw text

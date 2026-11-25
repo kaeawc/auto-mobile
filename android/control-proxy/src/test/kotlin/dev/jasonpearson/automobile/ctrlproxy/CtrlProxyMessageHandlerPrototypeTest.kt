@@ -168,6 +168,27 @@ internal class CtrlProxyMessageHandlerPrototypeTest : CtrlProxyMessageHandlerFix
   }
 
   @Test
+  fun `dispatch typed chunked media upload requests`() = runTest {
+    val sha = "a".repeat(64)
+    dispatch(
+      """{"type":"put_prototype_asset_begin","requestId":"b","id":"clip","mimeType":"video/mp4","size":3000000,"sha256":"$sha"}""",
+    )
+    assertEquals("beginPrototypeMedia", lastCall.first)
+    assertEquals(listOf("b", "clip", "video/mp4", 3_000_000L, sha), lastCall.second)
+    dispatch(
+      """{"type":"put_prototype_asset_chunk","requestId":"c","id":"clip","offset":1048576,"dataBase64":"AAAA"}""",
+    )
+    assertEquals("putPrototypeMediaChunk", lastCall.first)
+    assertEquals(listOf("c", "clip", 1_048_576L, "AAAA"), lastCall.second)
+    dispatch("""{"type":"put_prototype_asset_commit","requestId":"m","id":"clip"}""")
+    assertEquals("commitPrototypeMedia", lastCall.first)
+    assertEquals(listOf("m", "clip"), lastCall.second)
+    dispatch("""{"type":"put_prototype_asset_abort","requestId":"a","id":"clip"}""")
+    assertEquals("abortPrototypeMedia", lastCall.first)
+    assertEquals(listOf("a", "clip"), lastCall.second)
+  }
+
+  @Test
   fun `invalid prototype combinations return precise correlated failures without actions`() =
     runTest {
       val spec =

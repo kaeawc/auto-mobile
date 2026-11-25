@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetLimits
+import dev.jasonpearson.automobile.protocol.PrototypeMediaLimits
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -82,5 +83,28 @@ class InboundFrameLimitsTest {
     val oversizedPut = asset("A".repeat(putCap.toInt()))
     assertEquals(putCap, InboundFrameLimits.DEFAULT.check(oversizedPut)?.maxBytes)
     assertNull(InboundFrameLimits.DEFAULT.check(asset("A".repeat(64 * 1024))))
+  }
+
+  @Test
+  fun `default caps hold media chunks to one encoded chunk and other media requests to the envelope`() {
+    val encodedChunk = PrototypeMediaLimits().maxEncodedChunkLength
+    val chunkCap = encodedChunk + InboundFrameLimits.ENVELOPE_ALLOWANCE_BYTES
+    fun chunk(data: String) =
+      """{"type":"put_prototype_asset_chunk","requestId":"c1","id":"clip","offset":0,"dataBase64":"$data"}"""
+        .encodeToByteArray()
+    val rejection =
+      checkNotNull(InboundFrameLimits.DEFAULT.check(chunk("A".repeat(chunkCap.toInt()))))
+    assertEquals("put_prototype_asset_chunk", rejection.type)
+    assertEquals("c1", rejection.requestId)
+    assertEquals(chunkCap, rejection.maxBytes)
+    assertNull(InboundFrameLimits.DEFAULT.check(chunk("A".repeat(encodedChunk))))
+    for (type in listOf("begin", "commit", "abort")) {
+      val frame =
+        """{"type":"put_prototype_asset_$type","requestId":"m","id":"${"c".repeat(70 * 1024)}"}"""
+      assertEquals(
+        InboundFrameLimits.ENVELOPE_ALLOWANCE_BYTES,
+        InboundFrameLimits.DEFAULT.check(frame.encodeToByteArray())?.maxBytes,
+      )
+    }
   }
 }

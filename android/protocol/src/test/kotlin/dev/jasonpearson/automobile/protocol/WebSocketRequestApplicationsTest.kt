@@ -173,6 +173,52 @@ class WebSocketRequestApplicationsTest : WebSocketRequestTestSupport() {
   }
 
   @Test
+  fun `chunked media upload requests round trip byte identical shared literals`() {
+    val sha = "a".repeat(64)
+    val literals =
+      listOf(
+        """{"type":"put_prototype_asset_begin","requestId":"b","id":"clip","mimeType":"video/mp4","size":3000000,"sha256":"$sha"}""",
+        """{"type":"put_prototype_asset_chunk","requestId":"c","id":"clip","offset":1048576,"dataBase64":"AAAA"}""",
+        """{"type":"put_prototype_asset_commit","requestId":"m","id":"clip"}""",
+        """{"type":"put_prototype_asset_abort","requestId":"a","id":"clip"}""",
+      )
+    for (literal in literals) {
+      assertEquals(literal, json.encodeToString(json.decodeFromString<WebSocketRequest>(literal)))
+    }
+    val begin =
+      assertIs<PutPrototypeAssetBegin>(json.decodeFromString<WebSocketRequest>(literals[0]))
+    assertEquals(PutPrototypeAssetBegin("b", "clip", "video/mp4", 3_000_000L, sha), begin)
+    val chunk =
+      assertIs<PutPrototypeAssetChunk>(json.decodeFromString<WebSocketRequest>(literals[1]))
+    assertEquals(1_048_576L, chunk.offset)
+    assertIs<PutPrototypeAssetCommit>(json.decodeFromString<WebSocketRequest>(literals[2]))
+    assertIs<PutPrototypeAssetAbort>(json.decodeFromString<WebSocketRequest>(literals[3]))
+  }
+
+  @Test
+  fun `chunked media upload requests reject missing required fields`() {
+    for (literal in
+      listOf(
+        """{"type":"put_prototype_asset_begin","requestId":"r","id":"a","mimeType":"video/mp4","size":1}""",
+        """{"type":"put_prototype_asset_chunk","requestId":"r","id":"a","dataBase64":"AA=="}""",
+        """{"type":"put_prototype_asset_commit","requestId":"r"}""",
+        """{"type":"put_prototype_asset_abort","requestId":"r"}""",
+      )) {
+      assertFailsWith<SerializationException>(literal) {
+        json.decodeFromString<WebSocketRequest>(literal)
+      }
+    }
+  }
+
+  @Test
+  fun `a media chunk never renders its payload`() {
+    val payload = "SECRETBYTES".repeat(20)
+    val request = PutPrototypeAssetChunk("r", "clip", 0, payload)
+    assertFalse(request.toString().contains("SECRETBYTES"))
+    assertTrue(request.toString().contains("${payload.length} chars"))
+  }
+
+  @Test
   fun `put prototype asset never renders its payload`() {
     val payload = "SECRETBYTES".repeat(20)
     val request = PutPrototypeAsset("r", "hero", "image/png", payload)

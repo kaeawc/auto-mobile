@@ -212,6 +212,25 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun removePrototypeAsset(requestId: String?, id: String) = Unit
 
+  override suspend fun beginPrototypeMedia(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    size: Long,
+    sha256: String,
+  ) = Unit
+
+  override suspend fun putPrototypeMediaChunk(
+    requestId: String?,
+    id: String,
+    offset: Long,
+    dataBase64: String,
+  ) = Unit
+
+  override suspend fun commitPrototypeMedia(requestId: String?, id: String) = Unit
+
+  override suspend fun abortPrototypeMedia(requestId: String?, id: String) = Unit
+
   override suspend fun listPreferenceFiles(requestId: String?, packageName: String) = Unit
 
   override suspend fun getPreferences(requestId: String?, packageName: String, fileName: String) =
@@ -566,6 +585,27 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
 
   override suspend fun removePrototypeAsset(requestId: String?, id: String) =
     record("removePrototypeAsset", requestId, id)
+
+  override suspend fun beginPrototypeMedia(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    size: Long,
+    sha256: String,
+  ) = record("beginPrototypeMedia", requestId, id, mimeType, size, sha256)
+
+  override suspend fun putPrototypeMediaChunk(
+    requestId: String?,
+    id: String,
+    offset: Long,
+    dataBase64: String,
+  ) = record("putPrototypeMediaChunk", requestId, id, offset, dataBase64)
+
+  override suspend fun commitPrototypeMedia(requestId: String?, id: String) =
+    record("commitPrototypeMedia", requestId, id)
+
+  override suspend fun abortPrototypeMedia(requestId: String?, id: String) =
+    record("abortPrototypeMedia", requestId, id)
 
   override suspend fun listPreferenceFiles(requestId: String?, packageName: String) =
     record("listPreferenceFiles", requestId, packageName)

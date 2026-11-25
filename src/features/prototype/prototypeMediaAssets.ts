@@ -60,6 +60,10 @@ export interface PrototypeMediaProblem {
   message: string;
 }
 
+export function isPrototypeMediaRejection(value: unknown): value is PrototypeMediaRejection {
+  return PROTOTYPE_MEDIA_REJECTIONS.some((code) => code === value);
+}
+
 export function isPrototypeMediaMimeType(mimeType: string): mimeType is PrototypeMediaMimeType {
   return PROTOTYPE_MEDIA_MIME_TYPES.some((type) => type === mimeType);
 }

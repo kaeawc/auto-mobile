@@ -155,6 +155,17 @@ internal fun prototypeRefusalFrame(
     ),
   )
 
+internal fun prototypeMediaRefusalFrame(requestId: String?, code: String, error: String): String =
+  resultFrameJson.encodeToString<WebSocketResponse>(
+    PrototypeResult(
+      timestamp = System.currentTimeMillis(),
+      requestId = requestId,
+      success = false,
+      error = error,
+      mediaCode = code,
+    ),
+  )
+
 internal fun prototypeStatusFrame(
   requestId: String?,
   prototypes: List<PrototypeStatusEntry>,

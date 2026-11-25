@@ -71,6 +71,10 @@ import type {
   PinSavedPrototypeMessage,
   InspectPrototypesMessage,
   PutPrototypeAssetMessage,
+  PutPrototypeAssetAbortMessage,
+  PutPrototypeAssetBeginMessage,
+  PutPrototypeAssetChunkMessage,
+  PutPrototypeAssetCommitMessage,
   RemovePrototypeAssetMessage,
 } from "./prototypeMessages";
 
@@ -454,6 +458,39 @@ export const ctrlProxyRequests = {
 
   removePrototypeAsset(args: { requestId: string; id: string }): RemovePrototypeAssetMessage {
     return { type: "remove_prototype_asset", requestId: args.requestId, id: args.id };
+  },
+
+  putPrototypeAssetBegin(
+    args: Omit<PutPrototypeAssetBeginMessage, "type">,
+  ): PutPrototypeAssetBeginMessage {
+    return {
+      type: "put_prototype_asset_begin",
+      requestId: args.requestId,
+      id: args.id,
+      mimeType: args.mimeType,
+      size: args.size,
+      sha256: args.sha256,
+    };
+  },
+
+  putPrototypeAssetChunk(
+    args: Omit<PutPrototypeAssetChunkMessage, "type">,
+  ): PutPrototypeAssetChunkMessage {
+    return {
+      type: "put_prototype_asset_chunk",
+      requestId: args.requestId,
+      id: args.id,
+      offset: args.offset,
+      dataBase64: args.dataBase64,
+    };
+  },
+
+  putPrototypeAssetCommit(args: { requestId: string; id: string }): PutPrototypeAssetCommitMessage {
+    return { type: "put_prototype_asset_commit", requestId: args.requestId, id: args.id };
+  },
+
+  putPrototypeAssetAbort(args: { requestId: string; id: string }): PutPrototypeAssetAbortMessage {
+    return { type: "put_prototype_asset_abort", requestId: args.requestId, id: args.id };
   },
 
   addHighlight(args: {

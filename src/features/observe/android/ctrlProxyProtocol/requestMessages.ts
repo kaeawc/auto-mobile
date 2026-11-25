@@ -20,6 +20,10 @@ import type {
   PinSavedPrototypeMessage,
   InspectPrototypesMessage,
   PutPrototypeAssetMessage,
+  PutPrototypeAssetAbortMessage,
+  PutPrototypeAssetBeginMessage,
+  PutPrototypeAssetChunkMessage,
+  PutPrototypeAssetCommitMessage,
   RemovePrototypeAssetMessage,
 } from "./prototypeMessages";
 
@@ -772,6 +776,10 @@ export type CtrlProxyRequest =
   | SimulatePrototypePlatformMessage
   | ClearPrototypeStorageMessage
   | PutPrototypeAssetMessage
+  | PutPrototypeAssetBeginMessage
+  | PutPrototypeAssetChunkMessage
+  | PutPrototypeAssetCommitMessage
+  | PutPrototypeAssetAbortMessage
   | RemovePrototypeAssetMessage
   | AddHighlightMessage
   | ListPreferenceFilesMessage

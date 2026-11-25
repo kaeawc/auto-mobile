@@ -294,6 +294,10 @@ export interface PrototypeResult {
   degradedEffects?: PrototypeDegradedEffect[];
   /** Only a refused `put_prototype_asset_*` media message: the device's rejection code. */
   mediaCode?: PrototypeMediaRejection;
+  /** Only the reply to a `notifications.push` simulate (#14285): whether a handler ran. */
+  pushHandled?: boolean;
+  /** Only the reply to a `notifications.push` simulate: foreground, background or notification. */
+  pushDelivery?: string;
 }
 
 /** One `style.effects` entry the device omitted or froze (#15129). */

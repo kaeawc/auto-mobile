@@ -1,6 +1,9 @@
 import { toActionableError } from "../../models/ActionableError";
 import { logger } from "../../utils/logger";
 import { PROTOTYPE_MEDIA_SIM_EVENTS } from "./prototypeFakeMediaEngine";
+import { PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY } from "../observe/android/ctrlProxyProtocol/capabilities";
+import { PROTOTYPE_PLATFORM_MODULES, prototypePlatformEvent } from "./prototypePlatform";
+import type { PrototypeJson } from "./prototypeJson";
 import { validatePrototypePushPayload, type PrototypePushPayload } from "./prototypePush";
 
 /** The push event `prototype simulate` delivers (#14285). */
@@ -49,6 +52,72 @@ export interface PrototypePushRoute {
 }
 
 export type PrototypePushRoutes = Partial<Record<PrototypePushRouteName, PrototypePushRoute>>;
+
+/** What the `connection` route needs from a shown prototype's runtime transport. */
+export interface PrototypePushRuntime {
+  supports(capability: string): Promise<boolean>;
+  simulatePlatformEvent(
+    id: string,
+    event: string,
+    data: { [key: string]: PrototypeJson },
+    timeoutMs?: number,
+  ): Promise<{
+    success: boolean;
+    error?: string | null;
+    pushHandled?: unknown;
+    pushDelivery?: unknown;
+  }>;
+}
+
+/**
+ * The runtime capabilities a live push needs: platform event injection, the notifications module
+ * and the push event's own capability (`prototype_platform_push_v1`), read from the contract.
+ */
+export const PROTOTYPE_PUSH_CONNECTION_CAPABILITIES: readonly string[] = [
+  PROTOTYPE_PLATFORM_SIMULATION_CAPABILITY,
+  ...[
+    PROTOTYPE_PLATFORM_MODULES.notifications?.capability,
+    prototypePlatformEvent(PROTOTYPE_PUSH_EVENT)?.definition.capability,
+  ].filter((capability): capability is string => capability !== undefined),
+];
+
+function isPushDelivery(value: unknown): value is PrototypePushDelivery {
+  return (PROTOTYPE_PUSH_DELIVERIES as readonly unknown[]).includes(value);
+}
+
+/**
+ * The `connection` route (#14285): RT-8's `simulate_prototype_platform` frame carrying the push
+ * payload as the `notifications.push` event data. It is available only while the runtime
+ * advertises every {@link PROTOTYPE_PUSH_CONNECTION_CAPABILITIES}; the reply's `pushHandled` and
+ * `pushDelivery` are kept only when well-typed, so a runtime that omits them falls back to the
+ * route default.
+ */
+export function prototypePushConnectionRoute(runtime: PrototypePushRuntime): PrototypePushRoute {
+  return {
+    async available() {
+      for (const capability of PROTOTYPE_PUSH_CONNECTION_CAPABILITIES) {
+        if (!(await runtime.supports(capability))) {
+          return false;
+        }
+      }
+      return true;
+    },
+    async deliver(id, payload, timeoutMs) {
+      const reply = await runtime.simulatePlatformEvent(
+        id,
+        PROTOTYPE_PUSH_EVENT,
+        { ...payload },
+        timeoutMs,
+      );
+      return {
+        success: reply.success,
+        ...(typeof reply.pushHandled === "boolean" ? { handled: reply.pushHandled } : {}),
+        ...(isPushDelivery(reply.pushDelivery) ? { delivery: reply.pushDelivery } : {}),
+        ...(typeof reply.error === "string" ? { error: reply.error } : {}),
+      };
+    },
+  };
+}
 
 export interface PrototypePushRequest {
   id: string;

@@ -4145,6 +4145,18 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "pushHandled",
+          "type": "boolean",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "pushDelivery",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },

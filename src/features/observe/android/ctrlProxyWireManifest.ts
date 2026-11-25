@@ -471,6 +471,8 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     degradedEffects: "optional",
     platformRuntime: "optional",
     mediaCode: "optional",
+    pushHandled: "optional",
+    pushDelivery: "optional",
   },
   remove_preference_result: {
     packageName: "optional",

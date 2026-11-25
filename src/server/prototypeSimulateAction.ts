@@ -17,6 +17,7 @@ import {
 import type { AndroidPrototypeTransport } from "../features/prototype/androidPrototypeTransport";
 import type { IosPrototypeTransport } from "../features/prototype/ios/iosPrototypeTransport";
 import {
+  prototypePushConnectionRoute,
   simulatePrototypePush,
   type PrototypePushRoutes,
   type PrototypePushSimulateResult,
@@ -42,7 +43,10 @@ export interface PrototypeSimulateTarget {
     IosPrototypeTransport,
     "supportsCapability" | "advanceClock" | "simulatePlatformEvent" | "queueCallOutcome"
   >;
-  /** Push delivery routes; no runtime accepts a simulated push yet, so devices supply none. */
+  /**
+   * Push delivery routes; absent, the device's runtime is the `connection` route. There is no
+   * `system` route yet (#14286, #14287).
+   */
   push?: PrototypePushRoutes;
   /** The shown prototype's media module; no runtime exposes one to simulate yet. */
   media?: PrototypeMediaSimRoute;
@@ -81,7 +85,7 @@ export async function performPrototypeSimulate(
     });
   }
   if (args.event === PROTOTYPE_PUSH_EVENT) {
-    return simulatePrototypePush(target.push ?? {}, {
+    return simulatePrototypePush(target.push ?? devicePushRoutes(target), {
       id: args.id!,
       data: args.data,
       transport: args.transport,
@@ -92,6 +96,30 @@ export async function performPrototypeSimulate(
     return simulatePlatformEvent(target, args);
   }
   return advancePrototypeClock(target, args);
+}
+/** The shown prototype's runtime as the `connection` route, when the target has one. */
+function devicePushRoutes(target: PrototypeSimulateTarget): PrototypePushRoutes {
+  const { android, ios } = target;
+  if (android) {
+    return {
+      connection: prototypePushConnectionRoute({
+        supports: (capability) => android.supportsCommand(capability),
+        simulatePlatformEvent: (...args) => android.simulatePlatformEvent(...args),
+      }),
+    };
+  }
+  if (ios) {
+    return {
+      connection: prototypePushConnectionRoute({
+        // The agent also names the request type it accepts.
+        supports: async (capability) =>
+          ios.supportsCapability(capability) &&
+          ios.supportsCapability("simulate_prototype_platform"),
+        simulatePlatformEvent: (...args) => ios.simulatePlatformEvent(...args),
+      }),
+    };
+  }
+  return {};
 }
 async function queueCallOutcome(
   target: PrototypeSimulateTarget,

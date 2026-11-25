@@ -180,6 +180,8 @@ function toPrototypeResult(result: PrototypeAgentResult): PrototypeResult {
     ...resultCount("cleared", result.cleared),
     ...(typeof result.error === "string" ? { error: result.error } : {}),
     ...(typeof totalTimeMs === "number" ? { totalTimeMs } : {}),
+    ...(typeof result.pushHandled === "boolean" ? { pushHandled: result.pushHandled } : {}),
+    ...(typeof result.pushDelivery === "string" ? { pushDelivery: result.pushDelivery } : {}),
     ...(Array.isArray(missingAssets) &&
     missingAssets.every((id): id is string => typeof id === "string") &&
     missingAssets.length > 0

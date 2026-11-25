@@ -199,6 +199,7 @@ function boundSessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError)
     sessionUuid: error.sessionUuid,
     reason: error.reason,
     release: error.release,
+    platform: error.platform,
   });
 }
 

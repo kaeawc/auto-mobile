@@ -240,8 +240,7 @@ export class SessionBinding {
     }
   }
 
-  /** A remembered session preserves a released binding until an explicit selection replaces it. */
-  /** Record a watchOS, tvOS or visionOS session's platform for its loss prose (#19186). */
+  /** Record a watchOS, tvOS or visionOS session's platform for its loss recovery (#19186). */
   private rememberApplePlatform(sessionUuid: string, result: unknown): void {
     const platform = getAnyDevicePlatformFromResult(result);
     if (platform !== undefined && !isAndroidOrIosPlatform(platform)) {
@@ -249,6 +248,7 @@ export class SessionBinding {
     }
   }
 
+  /** A remembered session preserves a released binding until an explicit selection replaces it. */
   private bindRememberedSession(sessionUuid: string, selectsDefault: boolean): void {
     if (this.deps.state.terminalBoundSession) {
       if (!selectsDefault) {

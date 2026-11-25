@@ -55,6 +55,24 @@ describe("the proxy names a lost Apple session's platform (#19186)", () => {
       "Session ownership lost for watch-session: released. " +
         'Call startDevice with platform: "watchos" to acquire a new watchOS device session.',
     );
+    expect(payload.error.recovery).toEqual({
+      action: "acquire_replacement_session",
+      tools: ["startDevice"],
+      platform: "watchos",
+    });
+  });
+
+  test("an Android or iOS loss keeps getAndroid and getApple as recovery tools", () => {
+    const payload = JSON.parse(
+      (
+        sessionOwnershipLostResult(new DaemonBoundSessionExpiredError("phone", "released"))
+          .content[0] as { text: string }
+      ).text,
+    );
+    expect(payload.error.recovery).toEqual({
+      action: "acquire_replacement_session",
+      tools: ["getAndroid", "getApple"],
+    });
   });
 
   test("an unrecorded session and other errors pass through unchanged", () => {

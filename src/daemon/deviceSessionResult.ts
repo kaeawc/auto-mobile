@@ -98,16 +98,29 @@ export function noActiveDeviceSessionPayload(error: { message: string; reason: s
  * The fields every terminal-session refusal shares (#11098). The session UUID cannot be retried, so
  * `retryable` is false and `nextAction` says what to do instead.
  */
-export function terminalSessionRefusalFields(ownerPid?: number) {
+export function terminalSessionRefusalFields(ownerPid?: number, platform?: Platform) {
   return {
     retryable: false as const,
     nextAction: ACQUIRE_NEW_SESSION_NEXT_ACTION,
     ...(ownerPid === undefined ? {} : { ownerPid }),
     recovery: {
       action: "acquire_replacement_session" as const,
-      tools: [...DEVICE_SESSION_RECOVERY_TOOLS],
+      ...deviceSessionRecoveryTools(platform),
     },
   };
+}
+
+/**
+ * The structured form of {@link deviceSessionRecoveryPrompt} (#19186): a watchOS, tvOS or visionOS
+ * session is replaced through startDevice with its platform, since getAndroid and getApple refuse it.
+ */
+function deviceSessionRecoveryTools(platform: Platform | undefined): {
+  tools: string[];
+  platform?: Platform;
+} {
+  return platform === undefined || isAndroidOrIosPlatform(platform)
+    ? { tools: [...DEVICE_SESSION_RECOVERY_TOOLS] }
+    : { tools: ["startDevice"], platform };
 }
 
 /**
@@ -141,11 +154,14 @@ export function sessionOwnershipLostPayload({
   reason,
   release,
   idleTimeoutMs,
+  platform,
 }: {
   message: string;
   sessionUuid: string;
   reason: string;
   release?: SessionReleaseSnapshot;
+  /** The lost session's platform; a non-iOS Apple one is told to call startDevice (#19186). */
+  platform?: Platform;
   /** The idle window a `cli-idle-timeout` release ran out, when there is no release snapshot. */
   idleTimeoutMs?: number;
 }) {
@@ -158,7 +174,7 @@ export function sessionOwnershipLostPayload({
       ...idleReleaseField(reason),
       // Only a cli-idle release records a window: its own, or its plan base's (#16940, #16971).
       ...cliIdleTimeoutField(reason, idleTimeoutMs ?? release?.cliIdleTimeoutMs),
-      ...terminalSessionRefusalFields(release?.ownerPid),
+      ...terminalSessionRefusalFields(release?.ownerPid, platform),
       ...(release ? { release } : {}),
     },
   };

@@ -1,4 +1,4 @@
-import { record, type Raw } from "../prototypeTemplate";
+import { prototypeJsonEqual, record, type Raw } from "../prototypeTemplate";
 import type { StillPlatformState } from "./webPlatformState";
 
 /** What a still render knows when it evaluates a condition: spec state and frame platform state. */
@@ -124,7 +124,7 @@ function compareState(condition: Raw, key: string, state: Raw): Decision {
     return (
       Object.hasOwn(state, key) &&
       Object.hasOwn(state, condition.equalsKey) &&
-      state[key] === state[condition.equalsKey]
+      prototypeJsonEqual(state[key], state[condition.equalsKey])
     );
   }
   return Object.hasOwn(state, key) ? compare(state[key], condition) : undefined;

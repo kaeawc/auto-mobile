@@ -1,0 +1,55 @@
+{
+  "spec": {
+    "id": "equals-key-structural",
+    "window": { "placement": { "type": "fullscreen" } },
+    "state": { "chosen": "", "saved": "" },
+    "root": {
+      "type": "button",
+      "label": "Save",
+      "enabledWhen": { "key": "chosen", "equalsKey": "saved" }
+    }
+  },
+  "changes": [
+    {
+      "about": "objects with the same members in another key order",
+      "state": { "chosen": { "id": 1, "tags": ["a"] }, "saved": { "tags": ["a"], "id": 1 } },
+      "enabled": true
+    },
+    {
+      "about": "objects whose nested member differs",
+      "state": { "chosen": { "id": 1, "tags": ["a"] }, "saved": { "id": 1, "tags": ["b"] } },
+      "enabled": false
+    },
+    {
+      "about": "objects with an extra member",
+      "state": { "chosen": { "id": 1 }, "saved": { "id": 1, "name": "x" } },
+      "enabled": false
+    },
+    {
+      "about": "equal arrays",
+      "state": { "chosen": [1, "a", null], "saved": [1, "a", null] },
+      "enabled": true
+    },
+    {
+      "about": "arrays in another order",
+      "state": { "chosen": [1, 2], "saved": [2, 1] },
+      "enabled": false
+    },
+    {
+      "about": "an array against an object",
+      "state": { "chosen": [], "saved": {} },
+      "enabled": false
+    },
+    {
+      "about": "an object against a string",
+      "state": { "chosen": {}, "saved": "{}" },
+      "enabled": false
+    },
+    { "about": "numbers equal by value", "state": { "chosen": 1, "saved": 1.0 }, "enabled": true },
+    {
+      "about": "a number against its string",
+      "state": { "chosen": 1, "saved": "1" },
+      "enabled": false
+    }
+  ]
+}

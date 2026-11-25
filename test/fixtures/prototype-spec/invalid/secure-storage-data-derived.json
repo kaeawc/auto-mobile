@@ -1,0 +1,58 @@
+{
+  "spec": {
+    "id": "secure-storage-data-derived",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "token": "",
+      "remember": false
+    },
+    "data": {
+      "copy": ""
+    },
+    "requires": {
+      "platform": ["secureStorage"]
+    },
+    "storage": {
+      "version": 1,
+      "keys": ["state:remember"],
+      "secure": ["state:token"]
+    },
+    "derive": {
+      "secret": {
+        "of": {
+          "state": "token"
+        },
+        "format": {
+          "number": {}
+        }
+      }
+    },
+    "root": {
+      "type": "column",
+      "children": [
+        {
+          "type": "textField",
+          "stateKey": "token"
+        },
+        {
+          "type": "button",
+          "label": "Copy",
+          "onTap": [
+            {
+              "type": "setData",
+              "path": "/data/copy",
+              "value": {
+                "derived": "secret"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[1].onTap[0].value"
+}

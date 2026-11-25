@@ -1836,6 +1836,7 @@
     "secure-storage-auth-unknown-method.json",
     "secure-storage-auth-without-biometric.json",
     "secure-storage-auth-without-secure.json",
+    "secure-storage-data-derived.json",
     "secure-storage-data-key.json",
     "secure-storage-emit-context-template.json",
     "secure-storage-emit-context.json",

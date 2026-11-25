@@ -1,7 +1,7 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { isPrototypeDataPointer, prototypeDataPointerTokens } from "./prototypeData";
 import type { PrototypeJson } from "./prototypeSpec";
-import { record, STATE_KEY, type Raw } from "./prototypeTemplate";
+import { prototypeJsonEqual, record, STATE_KEY, type Raw } from "./prototypeTemplate";
 import type { PrototypeValidationError } from "./prototypeValidation";
 
 export const { MAX_PROTOTYPE_PATCH_OPS } = contract.limits;
@@ -38,28 +38,6 @@ function put(target: object, key: string, value: unknown): void {
 
 function error(path: string, message: string): PrototypeValidationError {
   return { path, message };
-}
-
-/** JSON equality ignores object order and compares numbers by value, including negative zero. */
-function equal(left: unknown, right: unknown): boolean {
-  if (left === right) {
-    return true;
-  }
-  if (Array.isArray(left)) {
-    return (
-      Array.isArray(right) &&
-      left.length === right.length &&
-      left.every((value, index) => equal(value, right[index]))
-    );
-  }
-  const a = record(left);
-  const b = record(right);
-  return (
-    !!a &&
-    !!b &&
-    Object.keys(a).length === Object.keys(b).length &&
-    Object.keys(a).every((key) => Object.hasOwn(b, key) && equal(own(a, key), own(b, key)))
-  );
 }
 
 function opShape(value: unknown, path: string): Error {
@@ -183,7 +161,7 @@ function applyState(spec: Raw, op: DataOp, at: string, skip: boolean): Error {
     return error(`${at}.path`, "Path does not exist");
   }
   if (op.op === "test") {
-    return skip || equal(own(state, key), op.value)
+    return skip || prototypeJsonEqual(own(state, key), op.value)
       ? undefined
       : error(`${at}.value`, "Test failed");
   }
@@ -226,7 +204,9 @@ function applyMember(parent: Raw, key: string, op: DataOp, at: string): Error {
     return error(`${at}.path`, "Path does not exist");
   }
   if (op.op === "test") {
-    return equal(own(parent, key), op.value) ? undefined : error(`${at}.value`, "Test failed");
+    return prototypeJsonEqual(own(parent, key), op.value)
+      ? undefined
+      : error(`${at}.value`, "Test failed");
   }
   if (op.op === "remove") {
     delete parent[key];
@@ -242,7 +222,9 @@ function applyArray(parent: unknown[], token: string, op: DataOp, at: string): E
   }
   switch (op.op) {
     case "test":
-      return equal(parent[i], op.value) ? undefined : error(`${at}.value`, "Test failed");
+      return prototypeJsonEqual(parent[i], op.value)
+        ? undefined
+        : error(`${at}.value`, "Test failed");
     case "add":
       parent.splice(i, 0, structuredClone(op.value));
       break;

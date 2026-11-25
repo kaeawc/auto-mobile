@@ -14,7 +14,9 @@ const handle = mount(document.querySelector("#prototype"), {
 ```
 
 Pass an embed envelope rather than a bare spec: the library refuses an envelope that needs a
-capability it does not draw, while a bare spec from a newer server may draw incompletely.
+capability it does not draw. A bare spec is refused only for what this release can detect (remote
+images, a spec over the base runtime budget, or a capability in its own `requires`), so one from a
+newer server may still draw incompletely.
 
 Or use the custom element; its attributes set the scalar options and its spec is the `spec`
 property or a child JSON script:

@@ -214,6 +214,29 @@ describeBrowser("prototype-web library build in headless Chromium (#16453)", () 
   );
 
   test(
+    "a bare spec needing remote images or the large budget draws the error view (#16453)",
+    async () => {
+      const bare = {
+        ...spec,
+        data: { rows: Array.from({ length: 2001 }, (_, index) => index) },
+        root: { type: "image", url: "https://example.com/a.png" },
+      };
+      const { page, errors } = await open(browser, libraryPage(library, bare));
+      try {
+        await page.waitForFunction(() => Reflect.get(globalThis, "__library") !== undefined);
+        const drawn = await page.evaluate(() => Reflect.get(globalThis, "__library"));
+        expect(drawn.events).toEqual([["error", "missingCapabilities"]]);
+        const alert = await page.locator("#host [data-error]").textContent();
+        expect(alert).toContain("prototype_large_budget_v1, prototype_remote_image_v1");
+        expect(errors).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    CASE_TIMEOUT_MS,
+  );
+
+  test(
     "<automobile-prototype> draws its child script's spec as mount does, and follows attributes",
     async () => {
       const mounted = await open(browser, libraryPage(library, spec));

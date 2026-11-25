@@ -1,30 +1,31 @@
-import contract from "../../../schemas/prototype-spec-contract.json";
 import { PROTOTYPE_LARGE_BUDGET_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import { expandPrototypeComponents } from "./prototypeComponents";
 import { resolvePrototypeDataPointer } from "./prototypeData";
-import { PROTOTYPE_DATA_ACTION_TYPES } from "./prototypeDataActions";
+import { PROTOTYPE_DATA_ACTION_TYPES } from "./prototypeDataActionTypes";
 import { jsonCost } from "./prototypeJsonCost";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
+import {
+  prototypeBaseRuntimeBudget,
+  prototypeLargeRuntimeBudget,
+} from "./prototypeRenderContract.generated";
 import { record } from "./prototypeTemplate";
+
+// Zod-free and read from the generated contract values, so the web library can check a bare spec
+// against the base budget in the browser (#16453).
 
 /**
  * The contract limits a runtime budget can raise (#18804). The contract's `runtimeBudgets` table
  * is the only place their raised values live; every other limit is the same in every runtime.
  */
-export type PrototypeBudgetLimit =
-  keyof (typeof contract.runtimeBudgets)[typeof PROTOTYPE_LARGE_BUDGET_CAPABILITY];
+export type PrototypeBudgetLimit = keyof typeof prototypeLargeRuntimeBudget;
 
 /** The limits one runtime validates a spec against. */
 export type PrototypeRuntimeBudget = Readonly<Record<PrototypeBudgetLimit, number>>;
 
-const LARGE: PrototypeRuntimeBudget = contract.runtimeBudgets[PROTOTYPE_LARGE_BUDGET_CAPABILITY];
-
-const BUDGET_LIMITS = Object.keys(LARGE) as PrototypeBudgetLimit[];
+const LARGE: PrototypeRuntimeBudget = prototypeLargeRuntimeBudget;
 
 /** Today's limits: the overlay, the iOS agent and any runtime without a budget capability. */
-export const PROTOTYPE_BASE_BUDGET: PrototypeRuntimeBudget = Object.fromEntries(
-  BUDGET_LIMITS.map((name) => [name, contract.limits[name]]),
-) as PrototypeRuntimeBudget;
+export const PROTOTYPE_BASE_BUDGET: PrototypeRuntimeBudget = prototypeBaseRuntimeBudget;
 
 /** An activity-hosted runtime advertising `prototype_large_budget_v1`. */
 export const PROTOTYPE_LARGE_BUDGET: PrototypeRuntimeBudget = LARGE;
@@ -129,7 +130,6 @@ function oversizedDataAction(
   ) {
     fields.push(`${path}.maxItems`);
   }
-  // Read at call time: prototypeDataActions and this module are in one import cycle.
   if (PROTOTYPE_DATA_ACTION_TYPES.some((name) => name === type)) {
     oversizedLiteral(record(action.value), `${path}.value.value`, fields);
   }
@@ -157,8 +157,10 @@ function oversizedLiteral(
   }
 }
 
+const utf8 = new TextEncoder();
+
 function specBytes(spec: unknown): number {
-  return Buffer.byteLength(JSON.stringify(spec) ?? "", "utf8");
+  return utf8.encode(JSON.stringify(spec) ?? "").byteLength;
 }
 
 /**

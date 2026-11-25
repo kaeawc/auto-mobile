@@ -3,11 +3,13 @@ import contract from "../../schemas/prototype-spec-contract.json";
 
 /**
  * The contract values the still renderer's import closure reads, generated so that closure does
- * not bundle the whole contract JSON (#16451). Add a name here before reading a new limit there.
+ * not bundle the whole contract JSON (#16451), nor the web library's bare-spec check (#16453). Add a
+ * name here before reading a new limit there.
  */
 export const renderContractLimitNames = [
   "MAX_PROTOTYPE_DATA_ARRAY_ITEMS",
   "MAX_PROTOTYPE_DATA_POINTER_LENGTH",
+  "MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH",
   "MAX_PROTOTYPE_LIST_ITEMS",
   "MAX_PROTOTYPE_INNER_REPEAT_ITEMS",
   "MAX_PROTOTYPE_NODES",
@@ -21,8 +23,12 @@ export const renderContractLimitNames = [
 export const renderContractOutputPath =
   "src/features/prototype/prototypeRenderContract.generated.ts";
 
+/** The runtime budget whose raised limits `prototypeRuntimeBudget.ts` reads (#18804). */
+const LARGE_BUDGET = "prototype_large_budget_v1";
+
 interface RenderContractSource {
   limits: Readonly<Record<string, number>>;
+  runtimeBudgets: Readonly<Record<string, Readonly<Record<string, number>>>>;
   patterns: Readonly<Record<string, string>>;
   stringFields: readonly string[];
   stringOpaqueFields: readonly string[];
@@ -68,6 +74,17 @@ export function renderPrototypeRenderContract(source: RenderContractSource): str
   if (repeatMax === undefined) {
     throw new Error("Contract repeat.items: no array option with a max");
   }
+  const large = Object.entries(source.runtimeBudgets[LARGE_BUDGET] ?? {});
+  if (large.length === 0) {
+    throw new Error(`Contract runtimeBudgets.${LARGE_BUDGET}: no limits`);
+  }
+  const base = large.map(([name]) => {
+    const value = source.limits[name];
+    if (typeof value !== "number") {
+      throw new Error(`Contract limit ${name}: not found`);
+    }
+    return [name, value] as const;
+  });
   const breakpoints = source.platformModules.device.state.widthClass.breakpoints;
   if (!breakpoints || breakpoints.length !== 2) {
     throw new Error("Contract platformModules.device widthClass: expected two breakpoints");
@@ -80,6 +97,12 @@ export function renderPrototypeRenderContract(source: RenderContractSource): str
     "",
     "/** The largest literal `repeat.items` array. */",
     `export const PROTOTYPE_REPEAT_ITEMS_MAX = ${repeatMax};`,
+    "",
+    `/** The limits \`${LARGE_BUDGET}\` raises, at their base values. */`,
+    ...objectLines("prototypeBaseRuntimeBudget", base),
+    "",
+    `/** The same limits as raised by \`${LARGE_BUDGET}\`. */`,
+    ...objectLines("prototypeLargeRuntimeBudget", large),
     "",
     "/** The `/device/widthClass` medium and expanded breakpoints, in dp. */",
     `export const PROTOTYPE_WIDTH_CLASS_BREAKPOINTS = [${breakpoints.join(", ")}] as const;`,

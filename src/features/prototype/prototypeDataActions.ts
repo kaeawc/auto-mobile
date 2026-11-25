@@ -1,3 +1,10 @@
+/**
+ * Host-side rules for the `setData`, `appendData` and `removeData` actions (#12519). The contract
+ * types each action's fields; this module adds what it cannot: the `/data/<pointer>` path guard,
+ * `{index}` placement, a statically knowable `appendData` target and a literal value that data
+ * could hold (`dataError`, the validator's data walk, is injected because the validator imports
+ * this module). The write itself is {@link applyPrototypeDataWrite}.
+ */
 import {
   PROTOTYPE_DATA_ACTIONS_V2_CAPABILITY,
   PROTOTYPE_DATA_ACTIONS_V3_CAPABILITY,
@@ -6,21 +13,7 @@ import {
 import { prototypeDataPathPointer, resolvePrototypeDataPointer } from "./prototypeData";
 import { prototypeFieldsOfKind } from "./prototypeEmitContext";
 import { record, templateSegments, type Binding } from "./prototypeTemplate";
-
-/**
- * Host-side rules for the `setData`, `appendData` and `removeData` actions (#12519). The contract
- * types each action's fields; this module adds what it cannot: the `/data/<pointer>` path guard,
- * `{index}` placement, a statically knowable `appendData` target and a literal value that data
- * could hold (`dataError`, the validator's data walk, is injected because the validator imports
- * this module). The write itself is {@link applyPrototypeDataWrite}.
- */
-export const PROTOTYPE_DATA_ACTION_TYPES = [
-  "setData",
-  "appendData",
-  "upsertData",
-  "prependData",
-  "removeData",
-] as const;
+import { PROTOTYPE_DATA_ACTION_TYPES } from "./prototypeDataActionTypes";
 
 /** Authored paths of every data action's `path`, including component definitions. */
 export function prototypeDataActionFields(spec: unknown): string[] {

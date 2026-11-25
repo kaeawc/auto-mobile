@@ -1,9 +1,7 @@
 import { prototypeDeclaredCapabilities } from "./prototypeDeclaredCapabilities";
 import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
-import {
-  PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
-  prototypeRemoteImageFields,
-} from "./prototypeRemoteImages";
+import { PROTOTYPE_REMOTE_IMAGE_CAPABILITY } from "./prototypeRemoteImages";
+import { prototypeRemoteImageFields } from "./prototypeRemoteImageFields";
 import {
   PROTOTYPE_LOOPS_CAPABILITY,
   prototypeLoopFields,

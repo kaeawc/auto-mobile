@@ -161,7 +161,7 @@ describe("deleteDevice after killDevice ended the connection's session (#19176)"
     expect(forwarded.length).toBe(before);
   });
 
-  test("a device a surviving session still holds is not deleted under that session", async () => {
+  test("forwards a delete of a surviving session's device without lending that session", async () => {
     await acquire("getAndroid", ANDROID);
     await acquire("getApple", IOS);
     killed(IOS);

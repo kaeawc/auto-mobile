@@ -6,6 +6,7 @@ import {
   parseCarPlayProjectionState,
 } from "../../../src/utils/ios/carPlayProjection";
 import { FakeCarPlayProjectionProbe } from "../../fakes/FakeCarPlayProjectionProbe";
+import { FakeCarPlayRuntimeReader } from "../../fakes/FakeCarPlayRuntimeReader";
 
 // Real projection probe captures from fresh iPhone 17 Pro simulators (#18728), the same lines
 // test/utils/ios/carPlayProjection.test.ts parses.
@@ -38,7 +39,13 @@ describe("CarPlay capture", () => {
     });
     const { signal } = new AbortController();
 
-    expect(await captureCarPlayScreen("udid", { probe, screenshot }, signal)).toBe(image);
+    expect(
+      await captureCarPlayScreen(
+        "udid",
+        { probe, runtime: new FakeCarPlayRuntimeReader(), screenshot },
+        signal,
+      ),
+    ).toBe(image);
     expect(screenshot).toHaveBeenCalledTimes(1);
     expect(screenshot).toHaveBeenCalledWith("udid", "2", signal);
   });
@@ -53,7 +60,11 @@ describe("CarPlay capture", () => {
       const probe = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(json));
       const screenshot = mock(async () => Buffer.from("screenshot"));
 
-      const result = captureCarPlayScreen("udid", { probe, screenshot });
+      const result = captureCarPlayScreen("udid", {
+        probe,
+        runtime: new FakeCarPlayRuntimeReader(),
+        screenshot,
+      });
       await expect(result).rejects.toThrow(message);
       await expect(result).rejects.toThrow("carplay-power-helper power-on");
       expect(screenshot).not.toHaveBeenCalled();
@@ -66,7 +77,9 @@ describe("CarPlay capture", () => {
     probe.error = failure;
     const screenshot = mock(async () => Buffer.from("screenshot"));
 
-    await expect(captureCarPlayScreen("udid", { probe, screenshot })).rejects.toBe(failure);
+    await expect(
+      captureCarPlayScreen("udid", { probe, runtime: new FakeCarPlayRuntimeReader(), screenshot }),
+    ).rejects.toBe(failure);
     expect(screenshot).not.toHaveBeenCalled();
   });
 });

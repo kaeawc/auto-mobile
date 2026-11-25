@@ -36,6 +36,7 @@ portable test/utils/ios/carPlayCapture.test.ts                           # injec
 portable test/utils/ios/carPlayScreenPower.test.ts                       # JSON contract and injected exec only; no host processes
 portable test/utils/ios/carPlayDisplay.test.ts                           # fake powerer, probe and timer only; no host processes
 portable test/utils/ios/carPlayTap.test.ts                               # JSON contract, fake probe and injected exec only; no host processes
+portable test/utils/ios/carPlayRuntime.test.ts                           # fake runtime reader and injected exec only; no host processes
 portable test/utils/ios/healthKitSeeder*.test.ts                         # HealthKit seeder over fake runner, sheet, builder and FakeTimer; temp dirs only
 portable test/utils/ios/simctlHealthSimulatorRunner.test.ts              # injected exec only; no simctl runs
 

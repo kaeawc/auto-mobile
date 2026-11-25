@@ -8,6 +8,7 @@ import {
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, ObserveResult } from "../../src/models";
 import { FakeAccessibilityDetector } from "../fakes/FakeAccessibilityDetector";
+import { FakeCarPlayRuntimeReader } from "../fakes/FakeCarPlayRuntimeReader";
 
 isolateToolRegistry();
 
@@ -120,6 +121,7 @@ describe("observe tool registration", () => {
     const probed: string[] = [];
     registerObserveTools({
       carPlay: {
+        runtime: new FakeCarPlayRuntimeReader(),
         projectionProbe: {
           async probe(deviceId) {
             probed.push(deviceId);

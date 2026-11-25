@@ -17,7 +17,9 @@ export function traitsFormFactorRead(
 /**
  * Refuses anything not confirmed to be a watch before a watch-only command runs. A null trait is
  * not proof of a non-watch (a failed characteristics getprop also reads null), so a session
- * recorded as a watch is trusted unless the build names another form factor.
+ * recorded as a watch is trusted unless the build names another form factor. A session recorded as
+ * XR glasses or a headset is never a watch, whatever the build characteristics say: the AI glasses
+ * image ships a `watch` characteristic (#19196).
  */
 export async function requireWatch(
   device: BootedDevice,
@@ -25,11 +27,12 @@ export async function requireWatch(
   refusal: { tool: string; purpose: string },
 ): Promise<void> {
   const announced = await readFormFactor(device);
-  if (announced === "watch" || (!announced && device.formFactor === "watch")) {
+  const recordedXr = device.formFactor === "xr-glasses" || device.formFactor === "xr-headset";
+  if (!recordedXr && (announced === "watch" || (!announced && device.formFactor === "watch"))) {
     return;
   }
   const formFactor =
-    announced ??
+    (recordedXr ? device.formFactor : announced) ??
     device.formFactor ??
     (announced === null ? "phone or tablet (no watch build announced)" : "unknown");
   const unreadable =

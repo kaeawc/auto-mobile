@@ -2,6 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import { raceWithDeadline } from "../raceWithDeadline";
 import type { Timer } from "../SystemTimer";
 import type { CarPlayProjectionProbe, CarPlayProjectionState } from "./carPlayProjection";
+import { type CarPlayRuntimeReader, requireCarPlayRuntime } from "./carPlayRuntime";
 import type { CarPlayHelperCallOptions, CarPlayScreenPowerer } from "./carPlayScreenPower";
 
 /** What startDevice reports once the simulator's CarPlay screen is the car display. */
@@ -17,6 +18,7 @@ export interface CarPlayDisplayReport {
 export interface CarPlayDisplayDependencies {
   powerer: CarPlayScreenPowerer;
   probe: CarPlayProjectionProbe;
+  runtime: CarPlayRuntimeReader;
   timer: Pick<Timer, "now" | "sleep" | "setTimeout" | "clearTimeout">;
 }
 
@@ -70,8 +72,8 @@ async function withinBounds<T>(
  * Makes an iOS 26.x simulator's TVOut screen the CarPlay car display (#18820) and confirms it
  * with the projection probe. CoreSimulator resets the display config on every boot, so this runs
  * on each request, after the device is ready; running it on a display that is already the car
- * display is harmless. Helper failures (including `[unsupported-runtime]` on iOS 27+) propagate
- * with their message unchanged.
+ * display is harmless. An iOS 27+ simulator is refused with `[unsupported-runtime]` before any
+ * helper runs (#19185); helper failures propagate with their message unchanged.
  */
 export async function activateCarPlayDisplay(
   udid: string,
@@ -81,6 +83,9 @@ export async function activateCarPlayDisplay(
 ): Promise<CarPlayDisplayReport> {
   bounds.signal?.throwIfAborted();
   const headUnitInputs = request.headUnitInputs === true;
+  await withinBounds(dependencies.timer, bounds, `CarPlay runtime check on ${udid}`, (options) =>
+    requireCarPlayRuntime(udid, dependencies.runtime, options.signal),
+  );
   await withinBounds(dependencies.timer, bounds, `CarPlay power-on on ${udid}`, (options) =>
     dependencies.powerer.powerOn(udid, headUnitInputs ? { ...options, headUnitInputs } : options),
   );

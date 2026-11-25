@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { BootedDevice } from "../../../src/models";
+import { ActionableError, type BootedDevice } from "../../../src/models";
 import {
   registerInteractionTools,
   type InteractionToolDependencies,
@@ -11,6 +11,7 @@ import { parseCarPlayProjectionState } from "../../../src/utils/ios/carPlayProje
 import { type CarPlayTapper, parseCarPlayTapResult } from "../../../src/utils/ios/carPlayTap";
 import { FakeCarPlayInputSender } from "../../fakes/FakeCarPlayInputSender";
 import { FakeCarPlayProjectionProbe } from "../../fakes/FakeCarPlayProjectionProbe";
+import { FakeCarPlayRuntimeReader } from "../../fakes/FakeCarPlayRuntimeReader";
 import { toolJson } from "../../helpers/toolResponse";
 import { isolateToolRegistry } from "../../helpers/withTemporaryTool";
 
@@ -31,9 +32,10 @@ const tapper: CarPlayTapper = {
   },
 };
 const sender = new FakeCarPlayInputSender();
+const runtime = new FakeCarPlayRuntimeReader();
 const deps: InteractionToolDependencies = {
-  carPlayTapFactory: () => ({ probe, tapper }),
-  carPlayInputFactory: () => ({ probe, sender }),
+  carPlayTapFactory: () => ({ probe, runtime, tapper }),
+  carPlayInputFactory: () => ({ probe, runtime, sender }),
   pressButtonFactory: () => {
     throw new Error("the phone pressButton path must not run");
   },
@@ -171,5 +173,47 @@ describe('pressButton display "carPlay"', () => {
     sender.calls.length = 0;
     await expect(pressButton(iphone, { button: "siri" })).rejects.toThrow('pass display "carPlay"');
     expect(sender.calls).toEqual([]);
+  });
+});
+
+describe("CarPlay actions on an iOS 27 simulator (#19185)", () => {
+  test("tapAt and pressButton report unsupported-runtime before any probe or helper", async () => {
+    taps.length = 0;
+    sender.calls.length = 0;
+    probe.calls.length = 0;
+    runtime.version = "27.2";
+    probe.error = new ActionableError("projection probe helper missing");
+    try {
+      const unsupported = "[unsupported-runtime] Headless CarPlay needs an iOS 26.x runtime";
+      await expect(tapAt(iphone, { x: 558, y: 80 })).rejects.toThrow(unsupported);
+      await expect(pressButton(iphone, { button: "siri", display: "carPlay" })).rejects.toThrow(
+        unsupported,
+      );
+      await expect(
+        pressButton(iphone, { button: "rotary_rotate_cw", display: "carPlay" }),
+      ).rejects.toThrow(unsupported);
+      expect(probe.calls).toEqual([]);
+      expect(taps).toEqual([]);
+      expect(sender.calls).toEqual([]);
+    } finally {
+      runtime.version = "26.5";
+      probe.error = undefined;
+    }
+  });
+
+  test("usage errors still come back before the runtime check", async () => {
+    runtime.version = "27.2";
+    runtime.calls.length = 0;
+    try {
+      await expect(tapAt(iphone, { x: 1, y: 1, action: "longPress" })).rejects.toThrow(
+        "action is not supported there",
+      );
+      await expect(
+        pressButton(iphone, { button: "back", durationMs: 600, display: "carPlay" }),
+      ).rejects.toThrow("durationMs is not supported there");
+      expect(runtime.calls).toEqual([]);
+    } finally {
+      runtime.version = "26.5";
+    }
   });
 });

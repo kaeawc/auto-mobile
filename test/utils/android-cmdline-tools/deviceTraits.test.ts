@@ -268,9 +268,9 @@ describe("AndroidDeviceTraitsReader", () => {
       );
 
       expect(traits.formFactor).toBe(formFactor);
-      expect(adb.getExecutedCommands().some((command) => command.includes("pm has-feature"))).toBe(
-        false,
-      );
+      expect(
+        adb.getExecutedCommands().some((command) => command.includes("android.software.leanback")),
+      ).toBe(false);
     },
   );
 

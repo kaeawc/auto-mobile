@@ -16,6 +16,7 @@ import {
   defaultDeviceTraits,
   type DeviceTraits,
 } from "../utils/android-cmdline-tools/deviceTraits";
+import { ActionableError } from "../models/ActionableError";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -46,7 +47,7 @@ export const glassesInputResultSchema = z
     count: z.number().int().min(1).max(GLASSES_MAX_COUNT),
     keyCodes: z.array(z.string()),
     commands: z.array(z.string()),
-    warningCode: z.enum(["not_glasses", "traits_unavailable"]).optional(),
+    warningCode: z.enum(["traits_unavailable"]).optional(),
     warning: z.string().optional(),
   })
   .passthrough();
@@ -78,11 +79,14 @@ export function traitsGlassesCheck(
   };
 }
 
-/** The ai-glasses image reports `watch` characteristics but a `sdk_glasses_*` product device. */
+/**
+ * The ai-glasses image reports `watch` characteristics but a `sdk_glasses_*` product device. A
+ * failed read is unknown, not "not glasses", so a glasses device is never refused for it.
+ */
 async function productNamesGlasses(
   adbFactory: AdbClientFactory,
   device: BootedDevice,
-): Promise<boolean> {
+): Promise<boolean | undefined> {
   try {
     const result = await adbFactory
       .create(device)
@@ -90,20 +94,23 @@ async function productNamesGlasses(
     return /glasses/i.test(result.stdout);
   } catch (error) {
     logger.warn(`glassesInput product probe failed: ${errorMessage(error)}`, error);
-    return false;
+    return undefined;
   }
 }
 
-function glassesWarning(glasses: boolean | undefined) {
-  if (glasses === true) {
-    return undefined;
-  }
-  return glasses === false
-    ? {
-        warningCode: "not_glasses" as const,
-        warning:
-          "This device is not confirmed as Android XR glasses. DPAD input is still sent and may move or click focus. Use observe afterwards to verify the effect.",
-      }
+/**
+ * The refusal for a device confirmed not to be Android XR glasses (#19179): DPAD center would
+ * click whatever has focus on a watch, TV or phone, so no key is sent.
+ */
+export function notGlassesError(device: BootedDevice): ActionableError {
+  return new ActionableError(
+    `glassesInput only works on Android XR glasses; ${device.deviceId} is not glasses, so no key was sent. Check formFactor in listDevices, or use pressButton or tapOn on other devices.`,
+  );
+}
+
+function glassesWarning(glasses: true | undefined) {
+  return glasses === true
+    ? undefined
     : {
         warningCode: "traits_unavailable" as const,
         warning:
@@ -123,7 +130,11 @@ export const createGlassesInputHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    const warning = glassesWarning(await checkGlasses(device));
+    const glasses = await checkGlasses(device);
+    if (glasses === false) {
+      throw notGlassesError(device);
+    }
+    const warning = glassesWarning(glasses);
     const result = await makeInjector(device).inject({ ...args, signal });
     return withIsErrorOnFailure(
       createStructuredToolResponse({ ...result, ...warning }),
@@ -134,7 +145,7 @@ export const createGlassesInputHandler =
 const glassesInputTool = defineDeviceTool({
   name: "glassesInput",
   description:
-    "Android XR glasses touchpad tap and forward/back swipe as focus input. Tap clicks the focused item; swipeForward/swipeBack move focus using DPAD keys (vertical down/up by default, horizontal right/left). count repeats any gesture 1..20 times. Success means adb commands exited cleanly; no read-back is performed, so observe afterwards. Voice input uses the existing injectAudioInput tool. Long press and two-finger gestures are not injectable yet: key holds produce no long click and raw touchpad holds/gestures are swallowed by the unpaired glasses system UI (raw input also requires adb root). Direct DPAD avoids unreliable touchnavigation swipes and touchpad motion that does not change focus. Unconfirmed glasses receive a warning but input is still sent.",
+    "Android XR glasses touchpad tap and forward/back swipe as focus input. Tap clicks the focused item; swipeForward/swipeBack move focus using DPAD keys (vertical down/up by default, horizontal right/left). count repeats any gesture 1..20 times. Success means adb commands exited cleanly; no read-back is performed, so observe afterwards. Voice input uses the existing injectAudioInput tool. Long press and two-finger gestures are not injectable yet: key holds produce no long click and raw touchpad holds/gestures are swallowed by the unpaired glasses system UI (raw input also requires adb root). Direct DPAD avoids unreliable touchnavigation swipes and touchpad motion that does not change focus. Devices that are not glasses are refused without sending a key; when the traits cannot be read, input is sent with a warning.",
   input: glassesInput,
   handler: createGlassesInputHandler(),
   options: {

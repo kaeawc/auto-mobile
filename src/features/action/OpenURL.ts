@@ -3,7 +3,7 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { unsupportedPlatformError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, OpenURLResult } from "../../models";
+import { BootedDevice, ExecResult, OpenURLResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { toActionableError } from "../../models/ActionableError";
 import {
@@ -28,6 +28,7 @@ import { sequenceBackoff } from "../../utils/Backoff";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { resolveSignalCall, type ActionCall } from "./ActionCall";
+import { amStartFailureText, wearUriRedirectError } from "./OpenUrlUnsupportedError";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
 const FOREGROUND_CHANGE_TIMEOUT_MS = 5_000;
@@ -339,14 +340,26 @@ export class OpenURL extends BaseVisualChange {
     // so the URL is single-quoted for that shell (issue #4213). Double quotes
     // would leave `"`, `$`, backticks and `\` live.
     throwIfAborted(signal);
-    const result = await awaitWhileRequestIsLive(
-      this.adb.execute(["shell", `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`], {
+    let result: ExecResult;
+    try {
+      result = await awaitWhileRequestIsLive(
+        this.adb.execute(
+          ["shell", `am start -a android.intent.action.VIEW -d ${shellQuote(url)}`],
+          { signal },
+        ),
         signal,
-      }),
-      signal,
-    );
+      );
+    } catch (error) {
+      throwIfAborted(signal);
+      // #19180: a Wear OS web link fails with a SecurityException the generic error truncates.
+      throw wearUriRedirectError(url, amStartFailureText(error)) ?? error;
+    }
     throwIfAborted(signal);
 
+    const redirect = wearUriRedirectError(url, `${result.stdout}\n${result.stderr}`);
+    if (redirect) {
+      throw redirect;
+    }
     if (amStartReportedFailure(result.stdout, result.stderr)) {
       return {
         success: false,

@@ -2,6 +2,7 @@ import { effectiveStepField } from "./effectiveStepField";
 import { Plan, PlanStep, PlanDeviceDefinition } from "../../models/Plan";
 import { ActionableError } from "../../models";
 import { normalizePlanDevices } from "./PlanDevices";
+import { PlanNormalizer } from "./PlanNormalizer";
 import { MAX_SETTIMEOUT_DELAY_MS } from "../SystemTimer";
 import {
   CoordinationEvent,
@@ -297,6 +298,23 @@ export class PlanValidator {
     }
   }
 
+  /**
+   * Sub-steps reach validation un-normalized; criticalSectionHandler normalizes
+   * them at run time, so resolve the device with the same params-wins merge and
+   * accept the flat form (`device:` beside `tool:`) like top-level steps (#19171).
+   */
+  private static resolveSubstepToolAndDevice(sub: object): { tool: string; device: unknown } {
+    const merged = PlanNormalizer.toolAndParams(sub);
+    if (merged) {
+      return { tool: merged.tool, device: merged.params.device };
+    }
+    const subParams = (sub as { params?: Record<string, unknown> }).params;
+    return {
+      tool: String((sub as { tool?: unknown }).tool ?? "unknown"),
+      device: subParams?.device,
+    };
+  }
+
   private static recordCriticalSectionSubstepLabel(
     sub: unknown,
     i: number,
@@ -312,9 +330,7 @@ export class PlanValidator {
     if (!sub || typeof sub !== "object") {
       return;
     }
-    const subParams = (sub as { params?: Record<string, unknown> }).params;
-    const subDevice = subParams?.device;
-    const subTool = String((sub as { tool?: unknown }).tool ?? "unknown");
+    const { tool: subTool, device: subDevice } = this.resolveSubstepToolAndDevice(sub);
 
     if (subDevice === undefined || subDevice === null || subDevice === "") {
       labelErrors.missingInCriticalSection.push({

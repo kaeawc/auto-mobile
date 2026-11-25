@@ -97,8 +97,8 @@ describe("rotaryScroll tool", () => {
     expect(rotaryScrollResultSchema.safeParse(json).success).toBe(true);
   });
 
-  for (const formFactor of ["tablet", "foldable", "automotive", "tv"] as const) {
-    test(`a ${formFactor} is refused before any input is sent`, async () => {
+  for (const formFactor of ["automotive", "tv", "xr-headset"] as const) {
+    test(`a build announcing ${formFactor} is refused before any input is sent`, async () => {
       const { handler, calls } = setup(scrolled, formFactor);
       await expect(handler(android, { delta: 3 })).rejects.toThrow(
         `rotaryScroll requires a Wear OS watch; this device's form factor is ${formFactor}, so nothing was changed.`,
@@ -107,13 +107,15 @@ describe("rotaryScroll tool", () => {
     });
   }
 
-  test("a phone (no characteristics announced) is refused without input", async () => {
-    const { handler, calls } = setup(scrolled, null);
-    await expect(handler({ ...android, formFactor: "phone" }, { delta: 3 })).rejects.toThrow(
-      "rotaryScroll requires a Wear OS watch; this device's form factor is phone",
-    );
-    expect(calls).toEqual([]);
-  });
+  for (const formFactor of ["phone", "tablet", "foldable"] as const) {
+    test(`a ${formFactor} (no characteristics announced) is refused without input`, async () => {
+      const { handler, calls } = setup(scrolled, null);
+      await expect(handler({ ...android, formFactor }, { delta: 3 })).rejects.toThrow(
+        `rotaryScroll requires a Wear OS watch; this device's form factor is ${formFactor}, so nothing was changed.`,
+      );
+      expect(calls).toEqual([]);
+    });
+  }
 
   test("unreadable traits on a session not recorded as a watch are refused", async () => {
     const { handler, calls } = setup(scrolled, "unreadable");

@@ -2,6 +2,10 @@ import type { AdbCommandRunner } from "./interfaces/AdbExecutor";
 import { defaultTimer, type Timer } from "../SystemTimer";
 import { logger } from "../logger";
 import { errorMessage } from "../describeUnknownError";
+import { adbFailureOutput } from "./adbFailureOutput";
+import { parseFailedHasFeature, parseHasFeature } from "./touchscreenFeature";
+import { WATCH_FEATURE } from "./wearOsDevice";
+import { XR_PERIPHERAL_FEATURE } from "./androidXrDevice";
 
 /**
  * The only module that reads `ro.kernel.qemu` and the other identifying build props
@@ -46,7 +50,10 @@ export interface AndroidDeviceTraits {
   skin: DeviceSkin | null;
   /**
    * `ro.build.characteristics` containing `watch`, `automotive`, `tv`, `xr` (headset) or `glasses`
-   * (XR glasses). Null for everything else,
+   * (XR glasses). A `watch` characteristic counts only when the device does not deny
+   * `android.hardware.type.watch`: the Android AI glasses image ships `nosdcard,watch` but declares
+   * no watch feature, and reads as `xr-glasses` when it declares `android.hardware.type.xr_peripheral`
+   * (#19196). Null for everything else,
    * including a prop that could not be read: callers gate special behaviour on a positive
    * match and leave every other device on today's path.
    */
@@ -218,6 +225,45 @@ function parseSdk(value: string | null): number | null {
   return Number.isFinite(sdk) ? sdk : null;
 }
 
+/**
+ * `pm has-feature <feature>`: true/false, or null when the probe failed or was not understood.
+ * `pm` exits 1 with `false` for a missing feature, so a rejected command can still carry the answer.
+ */
+async function hasFeature(
+  adb: AdbCommandRunner,
+  feature: string,
+  timeoutMs: number,
+): Promise<boolean | null> {
+  try {
+    const result = await adb.executeCommand(`shell pm has-feature ${feature}`, {
+      noRetry: true,
+      timeoutMs,
+    });
+    return parseHasFeature(result.stdout);
+  } catch (error) {
+    const answer = parseFailedHasFeature(adbFailureOutput(error).stdout);
+    if (answer === null) {
+      // The feature is advisory evidence; an unreadable probe keeps the build characteristic.
+      logger.debug(`[DeviceTraits] ${feature} probe failed: ${errorMessage(error)}`);
+    }
+    return answer;
+  }
+}
+
+/**
+ * Resolve a `watch` build characteristic against the device's declared features (#19196). Every
+ * Wear OS build declares {@link WATCH_FEATURE}; a device that denies it is not a watch, and is XR
+ * glasses when it declares {@link XR_PERIPHERAL_FEATURE}. An unreadable watch probe keeps `watch`.
+ */
+export async function confirmWatch(
+  feature: (name: string) => Promise<boolean | null>,
+): Promise<TraitFormFactor | null> {
+  if ((await feature(WATCH_FEATURE)) !== false) {
+    return "watch";
+  }
+  return (await feature(XR_PERIPHERAL_FEATURE)) === true ? "xr-glasses" : null;
+}
+
 export class AndroidDeviceTraitsReader implements DeviceTraits {
   private readonly cache = new Map<string, CacheEntry>();
 
@@ -281,6 +327,9 @@ export class AndroidDeviceTraitsReader implements DeviceTraits {
       optional(BUILD_CHARACTERISTICS_PROP),
     ]);
     let formFactor = parseTraitFormFactor(characteristics);
+    if (formFactor === "watch") {
+      formFactor = await confirmWatch((feature) => hasFeature(adb, feature, timeoutMs));
+    }
     if (formFactor === null && isEmulator === true) {
       try {
         const result = await adb.executeCommand("shell pm has-feature android.software.leanback", {

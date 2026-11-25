@@ -66,37 +66,47 @@ function hasOwnLabel(attributes: Record<string, unknown>): boolean {
 /** Ancestors searched for a label-less control's row title. */
 const ROW_TITLE_MAX_ANCESTORS = 3;
 
-/** Labels in `node`'s subtree, skipping the `exclude` subtree. */
+/** Resource-id suffix of a row's title label (`android:id/title`, `<app>:id/title`). */
+const ROW_TITLE_RESOURCE_ID_SUFFIX = ":id/title";
+
+interface RowLabel {
+  resourceId: string;
+  label: string;
+}
+
+/** Labelled nodes in `node`'s subtree in document order, skipping the `exclude` subtree. */
 function subtreeLabels(
   node: ViewHierarchyNode,
   exclude: ViewHierarchyNode,
-  labels: string[],
-): string[] {
+  labels: RowLabel[],
+): RowLabel[] {
   if (node === exclude) {
     return labels;
   }
   const attributes: Record<string, unknown> = node;
-  for (const field of ["text", "content-desc"]) {
-    const value = String(attributes[field] ?? "");
-    if (value !== "") {
-      labels.push(value);
-    }
+  const label = String(attributes["text"] ?? "") || String(attributes["content-desc"] ?? "");
+  if (label !== "") {
+    labels.push({ resourceId: String(attributes["resource-id"] ?? ""), label });
   }
   toNodeArray(node.node).forEach((child) => subtreeLabels(child, exclude, labels));
   return labels;
 }
 
 /**
- * The title of the row a label-less control sits in: the labels of the nearest
- * ancestor (within {@link ROW_TITLE_MAX_ANCESTORS}) whose subtree holds any
- * outside the control itself. Empty when no such ancestor has a label.
+ * The title of the row a label-less control sits in, read from the nearest
+ * ancestor (within {@link ROW_TITLE_MAX_ANCESTORS}) whose subtree holds a label
+ * outside the control itself: the label whose resource id ends in `:id/title`,
+ * else the first label in document order (the title on Android preference rows
+ * and iOS cells). Later labels such as a summary that follows the toggle ("On"
+ * to "Off") are ignored (#19148). Empty when no such ancestor has a label.
  */
 function rowTitle(node: DiffRepairNode): string {
   let ancestor = node.parent;
   for (let depth = 0; ancestor && node.source && depth < ROW_TITLE_MAX_ANCESTORS; depth++) {
     const labels = subtreeLabels(ancestor.source, node.source, []);
     if (labels.length > 0) {
-      return labels.join("\0");
+      const title = labels.find((entry) => entry.resourceId.endsWith(ROW_TITLE_RESOURCE_ID_SUFFIX));
+      return (title ?? labels[0]).label;
     }
     ancestor = ancestor.parent;
   }

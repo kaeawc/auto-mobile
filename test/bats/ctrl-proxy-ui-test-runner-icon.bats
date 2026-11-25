@@ -130,6 +130,23 @@ PY
   grep -F "embedSimulatedEntitlements.ts ${RUNNER_APP}/CtrlProxyUITests-Runner" "${BUN_CALLS}"
 }
 
+@test "fails with a clear message before touching the runner signature when bun is missing" {
+  cat > "${STUB_DIR}/codesign" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "${CODESIGN_CALLS}"
+STUB
+  chmod +x "${STUB_DIR}/codesign"
+  export CODESIGN_CALLS="${TEST_ROOT}/codesign-calls"
+
+  run env PATH="${STUB_DIR}:$PATH" PLIST_BUDDY="${STUB_DIR}/PlistBuddy" PLUTIL="${STUB_DIR}/plutil" \
+    BUN="${TEST_ROOT}/missing-bun" bash "${SCRIPT}" --derived-data "${DERIVED_DATA}"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"${TEST_ROOT}/missing-bun not found; bun is required"* ]]
+  [ ! -e "${BUN_CALLS}" ]
+  [ ! -e "${CODESIGN_CALLS}" ]
+}
+
 @test "all maintained CtrlProxy UI-test startup paths use patched build artifacts" {
   local repository_root
   repository_root="$(cd "$(dirname "$BATS_TEST_FILENAME")/../.." && pwd)"

@@ -16,38 +16,13 @@ import org.junit.Test
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class FakeMediaPlatformModuleTest {
-  private fun spec(vararg players: String) =
-    PrototypeSpec(
-      "player",
-      PrototypeWindow(PrototypeFullscreenPlacement()),
-      root = PrototypeTextNode(text = "{platform:/media/players/main/status}"),
-      requires = PrototypeRequires(platform = listOf("media")),
-      media =
-        buildJsonObject {
-          put(
-            "players",
-            buildJsonObject {
-              players.forEach { id ->
-                put(
-                  id,
-                  buildJsonObject {
-                    put("kind", "video")
-                    put("source", buildJsonObject { put("url", "https://example.test/$id.mp4") })
-                  },
-                )
-              }
-            },
-          )
-        },
-    )
-
   private fun TestScope.runtime(
     module: FakeMediaPlatformModule,
     events: MutableList<PrototypeEvent> = mutableListOf(),
   ): PrototypeRuntime {
     var sequence = 0L
     return PrototypeRuntime(
-        spec("main"),
+        mediaSpec("main"),
         sink = { events += it },
         clock = { testScheduler.currentTime },
         nextSequence = { ++sequence },
@@ -60,11 +35,6 @@ class FakeMediaPlatformModuleTest {
 
   private fun PrototypeRuntime.player(id: String = "main"): JsonObject? =
     (current.platformState["media"] as? JsonObject)?.get("players")?.jsonObject?.get(id)?.jsonObject
-
-  private fun data(vararg pairs: Pair<String, JsonElement>) = JsonObject(mapOf(*pairs))
-
-  private fun call(name: String, vararg args: Pair<String, JsonElement>) =
-    PlatformCall("call-1", name, data("player" to JsonPrimitive("main"), *args))
 
   @Test
   fun `the template advertises the media capability in fake mode`() {
@@ -93,10 +63,11 @@ class FakeMediaPlatformModuleTest {
     val events = mutableListOf<PrototypeEvent>()
     val runtime = runtime(FakeMediaPlatformModule(), events)
     runCurrent()
-    val buffering = data("player" to JsonPrimitive("main"), "status" to JsonPrimitive("buffering"))
+    val buffering =
+      mediaData("player" to JsonPrimitive("main"), "status" to JsonPrimitive("buffering"))
     assertTrue(runtime.simulatePlatformEvent("media.statusChanged", buffering))
     assertEquals(true, runtime.player()?.getValue("buffering")?.jsonPrimitive?.boolean)
-    val ended = data("player" to JsonPrimitive("main"), "advanceMs" to JsonPrimitive(5000))
+    val ended = mediaData("player" to JsonPrimitive("main"), "advanceMs" to JsonPrimitive(5000))
     assertTrue(runtime.simulatePlatformEvent("media.ended", ended))
     runCurrent()
     assertEquals("ended", runtime.player()?.getValue("status")?.jsonPrimitive?.content)
@@ -118,9 +89,9 @@ class FakeMediaPlatformModuleTest {
     val runtime = runtime(FakeMediaPlatformModule())
     runCurrent()
     assertFalse(
-      runtime.simulatePlatformEvent("media.ended", data("player" to JsonPrimitive("other"))),
+      runtime.simulatePlatformEvent("media.ended", mediaData("player" to JsonPrimitive("other"))),
     )
-    val bad = data("player" to JsonPrimitive("main"), "status" to JsonPrimitive("dancing"))
+    val bad = mediaData("player" to JsonPrimitive("main"), "status" to JsonPrimitive("dancing"))
     assertFalse(runtime.simulatePlatformEvent("media.statusChanged", bad))
     assertEquals("ready", runtime.player()?.getValue("status")?.jsonPrimitive?.content)
   }
@@ -131,16 +102,23 @@ class FakeMediaPlatformModuleTest {
     val first = runtime(module)
     val second = runtime(module)
     runCurrent()
-    val buffering = data("player" to JsonPrimitive("main"), "status" to JsonPrimitive("buffering"))
+    val buffering =
+      mediaData("player" to JsonPrimitive("main"), "status" to JsonPrimitive("buffering"))
     assertTrue(first.simulatePlatformEvent("media.statusChanged", buffering))
     assertEquals(true, first.player()?.getValue("buffering")?.jsonPrimitive?.boolean)
     assertEquals(false, second.player()?.getValue("buffering")?.jsonPrimitive?.boolean)
   }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class FakeMediaPlatformSessionTest {
+  private fun call(name: String, vararg args: Pair<String, JsonElement>) =
+    PlatformCall("call-1", name, mediaData("player" to JsonPrimitive("main"), *args))
 
   @Test
   fun `calls drive the player and emit the engine's transitions`() = runTest {
     val session = FakeMediaPlatformModule().session(backgroundScope)
-    (session as PrototypeSpecAwareModule).configure(spec("main"))
+    (session as PrototypeSpecAwareModule).configure(mediaSpec("main"))
     val emitted = mutableListOf<PlatformEvent>()
     backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
       session.events.collect { emitted += it }
@@ -174,9 +152,9 @@ class FakeMediaPlatformModuleTest {
   @Test
   fun `an unknown player, a missing argument and a foreign call are refused`() = runTest {
     val session = FakeMediaPlatformModule().session(backgroundScope)
-    (session as PrototypeSpecAwareModule).configure(spec("main"))
+    (session as PrototypeSpecAwareModule).configure(mediaSpec("main"))
     val unknown =
-      session.call(PlatformCall("c", "media.play", data("player" to JsonPrimitive("other"))))
+      session.call(PlatformCall("c", "media.play", mediaData("player" to JsonPrimitive("other"))))
     assertEquals(
       PlatformErrorCode.INVALID_ARGS,
       (unknown as PlatformCallResult.Failure).error.code,
@@ -191,17 +169,44 @@ class FakeMediaPlatformModuleTest {
   fun `a replacement spec loads new players and releases removed ones`() = runTest {
     val session = FakeMediaPlatformModule().session(backgroundScope)
     val aware = session as PrototypeSpecAwareModule
-    aware.configure(spec("main"))
+    aware.configure(mediaSpec("main"))
     session.call(call("media.play"))
-    aware.configure(spec("main", "trailer"))
+    aware.configure(mediaSpec("main", "trailer"))
     var players = session.state.value.getValue("players").jsonObject
     assertEquals(setOf("main", "trailer"), players.keys)
     assertEquals(
       true,
       players.getValue("main").jsonObject.getValue("playing").jsonPrimitive.boolean,
     )
-    aware.configure(spec("trailer"))
+    aware.configure(mediaSpec("trailer"))
     players = session.state.value.getValue("players").jsonObject
     assertEquals(setOf("trailer"), players.keys)
   }
 }
+
+private fun mediaSpec(vararg players: String) =
+  PrototypeSpec(
+    "player",
+    PrototypeWindow(PrototypeFullscreenPlacement()),
+    root = PrototypeTextNode(text = "{platform:/media/players/main/status}"),
+    requires = PrototypeRequires(platform = listOf("media")),
+    media =
+      buildJsonObject {
+        put(
+          "players",
+          buildJsonObject {
+            players.forEach { id ->
+              put(
+                id,
+                buildJsonObject {
+                  put("kind", "video")
+                  put("source", buildJsonObject { put("url", "https://example.test/$id.mp4") })
+                },
+              )
+            }
+          },
+        )
+      },
+  )
+
+private fun mediaData(vararg pairs: Pair<String, JsonElement>) = JsonObject(mapOf(*pairs))

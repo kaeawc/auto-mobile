@@ -17,6 +17,7 @@ import type {
   PackageSigning,
   PackageSigningInspection,
 } from "../../../../../src/models/PackageSigningInspection";
+import { ActionableError } from "../../../../../src/models/ActionableError";
 import { FakeAdbExecutor } from "../../../../fakes/FakeAdbExecutor";
 import { FakeDisposableAppStamper } from "../../../../fakes/FakeDisposableAppStamper";
 import { FakeTimer } from "../../../../fakes/FakeTimer";
@@ -76,6 +77,7 @@ let devices: string[];
 beforeEach(() => {
   adb = new FakeAdbExecutor();
   adb.setDefaultResponse(result(""));
+  adb.setAndroidApiLevel(34);
   signing = new FakeSigningReader();
   devices = [];
   installer = new AndroidDisposableAppInstaller((deviceId) => {
@@ -132,50 +134,150 @@ describe("AndroidDisposableAppInstaller.resetStorage", () => {
   });
 });
 
+/** `dumpsys package` for APP: each requested permission with its grant and flags for user 0. */
+function dumpsys(permissions: Record<string, { granted: boolean; flags?: string }>): string {
+  const names = Object.keys(permissions);
+  return [
+    `  Package [${APP}] (abc123):`,
+    "    requested permissions:",
+    ...names.map((permission) => `      ${permission}`),
+    "    User 0: ceDataInode=1 installed=true",
+    "      runtime permissions:",
+    ...names.map(
+      (permission) =>
+        `        ${permission}: granted=${permissions[permission].granted}, flags=[ ${permissions[permission].flags ?? ""} ]`,
+    ),
+  ].join("\n");
+}
+
+const USER_FIXED = "USER_SET|USER_FIXED";
+
+function pm(verb: string, permission: string, suffix = ""): string {
+  return `shell pm ${verb} --user 0 '${APP}' 'android.permission.${permission}'${suffix}`;
+}
+
 describe("AndroidDisposableAppInstaller.applyPermissions", () => {
-  test("grants each manifest permission once and denies with user-fixed", async () => {
-    await installer.applyPermissions(DEVICE, APP, {
+  test("grants and user-fixes denials, then reads back every declared name verified", async () => {
+    adb.setCommandResponse(
+      "dumpsys package",
+      result(
+        dumpsys({
+          "android.permission.CAMERA": { granted: true },
+          "android.permission.READ_CONTACTS": { granted: false, flags: USER_FIXED },
+          "android.permission.ACCESS_FINE_LOCATION": { granted: true },
+          "android.permission.ACCESS_COARSE_LOCATION": { granted: true },
+        }),
+      ),
+    );
+    const results = await installer.applyPermissions(DEVICE, APP, {
+      declared: ["camera", "contacts", "location"],
       granted: ["camera", "location"],
       denied: ["contacts"],
     });
-    expect(adb.getExecutedArgv()).toEqual([
-      ["shell", "pm", "grant", APP, "android.permission.CAMERA"],
-      ["shell", "pm", "grant", APP, "android.permission.ACCESS_FINE_LOCATION"],
-      ["shell", "pm", "grant", APP, "android.permission.ACCESS_COARSE_LOCATION"],
-      ["shell", "pm", "revoke", APP, "android.permission.READ_CONTACTS"],
-      [
-        "shell",
-        "pm",
-        "set-permission-flags",
-        APP,
-        "android.permission.READ_CONTACTS",
-        "user-set",
-        "user-fixed",
-      ],
+    expect(results).toEqual([
+      { name: "camera", state: "granted", verified: true },
+      { name: "contacts", state: "blocked", verified: true },
+      { name: "location", state: "granted", verified: true },
+    ]);
+    expect(adb.getExecutedCommands()).toEqual([
+      pm("clear-permission-flags", "CAMERA", " user-set user-fixed"),
+      pm("grant", "CAMERA"),
+      pm("revoke", "READ_CONTACTS"),
+      pm("set-permission-flags", "READ_CONTACTS", " user-set user-fixed"),
+      pm("clear-permission-flags", "ACCESS_FINE_LOCATION", " user-set user-fixed"),
+      pm("grant", "ACCESS_FINE_LOCATION"),
+      pm("clear-permission-flags", "ACCESS_COARSE_LOCATION", " user-set user-fixed"),
+      pm("grant", "ACCESS_COARSE_LOCATION"),
+      `shell dumpsys package '${APP}'`,
+      `shell dumpsys package '${APP}'`,
+      `shell dumpsys package '${APP}'`,
     ]);
   });
 
-  test("prompt mode runs no command, and a name with no runtime grant is skipped", async () => {
-    await installer.applyPermissions(DEVICE, APP, { granted: [], denied: [] });
-    await installer.applyPermissions(DEVICE, APP, { granted: ["photosAdd"], denied: [] });
-    expect(adb.getExecutedArgv()).toEqual([]);
+  test("a grant the device did not keep is reported unverified", async () => {
+    adb.setCommandResponse(
+      "dumpsys package",
+      result(dumpsys({ "android.permission.CAMERA": { granted: false } })),
+    );
+    expect(
+      await installer.applyPermissions(DEVICE, APP, {
+        declared: ["camera"],
+        granted: ["camera"],
+        denied: [],
+      }),
+    ).toEqual([{ name: "camera", state: "notDetermined", verified: false }]);
+  });
+
+  test("prompt mode only reads, and reports each declared name notDetermined", async () => {
+    adb.setCommandResponse(
+      "dumpsys package",
+      result(dumpsys({ "android.permission.CAMERA": { granted: false } })),
+    );
+    expect(
+      await installer.applyPermissions(DEVICE, APP, {
+        declared: ["camera"],
+        granted: [],
+        denied: [],
+      }),
+    ).toEqual([{ name: "camera", state: "notDetermined", verified: true }]);
+    expect(adb.getExecutedCommands()).toEqual([`shell dumpsys package '${APP}'`]);
+  });
+
+  test("a name with no runtime grant is never written, and denying it is notRevocable", async () => {
+    const results = await installer.applyPermissions(DEVICE, APP, {
+      declared: ["photosAdd"],
+      granted: [],
+      denied: ["photosAdd"],
+    });
+    expect(results).toEqual([
+      { name: "photosAdd", state: "granted", verified: false, reason: "notRevocable" },
+    ]);
+    expect(adb.getExecutedCommands()).toEqual([]);
+  });
+
+  test("a spec without permissions runs no command", async () => {
+    expect(
+      await installer.applyPermissions(DEVICE, APP, { declared: [], granted: [], denied: [] }),
+    ).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
+    expect(adb.getApiLevelCalls()).toEqual([]);
   });
 
   test("refuses a grant and a deny that share a manifest permission before any write", async () => {
     await expect(
-      installer.applyPermissions(DEVICE, APP, { granted: ["microphone"], denied: ["speech"] }),
+      installer.applyPermissions(DEVICE, APP, {
+        declared: ["microphone", "speech"],
+        granted: ["microphone"],
+        denied: ["speech"],
+      }),
     ).rejects.toThrow(/microphone and speech share android\.permission\.RECORD_AUDIO/);
-    expect(adb.getExecutedArgv()).toEqual([]);
+    expect(adb.getExecutedCommands()).toEqual([]);
   });
 
-  test("a pm exception fails with the permission named", async () => {
+  test("a pm exception fails with the command named", async () => {
     adb.setCommandResponse(
       "pm grant",
       result("", "Exception occurred while executing 'grant': SecurityException"),
     );
     await expect(
-      installer.applyPermissions(DEVICE, APP, { granted: ["camera"], denied: [] }),
-    ).rejects.toThrow(/Granting android\.permission\.CAMERA/);
+      installer.applyPermissions(DEVICE, APP, {
+        declared: ["camera"],
+        granted: ["camera"],
+        denied: [],
+      }),
+    ).rejects.toThrow(/pm grant --user 0 '.*' 'android\.permission\.CAMERA'` failed: Exception/);
+  });
+
+  test("an unreadable API level refuses before any write", async () => {
+    adb.setAndroidApiLevel(null);
+    await expect(
+      installer.applyPermissions(DEVICE, APP, {
+        declared: ["camera"],
+        granted: ["camera"],
+        denied: [],
+      }),
+    ).rejects.toThrow(/Cannot read the API level of emulator-5554/);
+    expect(adb.getExecutedCommands()).toEqual(["shell getprop ro.build.version.sdk"]);
   });
 });
 
@@ -248,6 +350,15 @@ describe("AndroidDisposableAppInstaller behind DisposableAppManager", () => {
   test("removes a host-signed app but refuses one signed by another key", async () => {
     adb.setCommandResponse("install -r", result("Success"));
     adb.setCommandResponse("uninstall", result("Success"));
+    adb.setCommandResponse(
+      "dumpsys package",
+      result(
+        dumpsys({
+          "android.permission.CAMERA": { granted: false },
+          "android.permission.POST_NOTIFICATIONS": { granted: false },
+        }),
+      ),
+    );
     const input: DisposableAppInstallInput = {
       deviceId: DEVICE,
       platform: "android",
@@ -272,5 +383,40 @@ describe("AndroidDisposableAppInstaller behind DisposableAppManager", () => {
       /not signed by this host's disposable-app key/,
     );
     expect(adb.wasCommandExecuted("uninstall")).toBe(false);
+  });
+
+  test("returns the read-back results, and a failed grant keeps the install recorded", async () => {
+    adb.setCommandResponse("install -r", result("Success"));
+    adb.setCommandResponse(
+      "dumpsys package",
+      result(
+        dumpsys({
+          "android.permission.CAMERA": { granted: true },
+          "android.permission.POST_NOTIFICATIONS": { granted: false, flags: USER_FIXED },
+        }),
+      ),
+    );
+    const input: DisposableAppInstallInput = {
+      deviceId: DEVICE,
+      platform: "android",
+      spec: fixture,
+      app: {
+        slug: "feedly",
+        label: "Feedly",
+        permissions: { grant: ["camera"], deny: ["notifications"] },
+      },
+    };
+    const apps = manager();
+    expect((await apps.install(input)).permissions.results).toEqual([
+      { name: "camera", state: "granted", verified: true },
+      { name: "notifications", state: "blocked", verified: true },
+    ]);
+    adb.setCommandResponse("pm grant", result("", "Exception occurred while executing 'grant'"));
+    const failure = apps.install(input);
+    await expect(failure).rejects.toBeInstanceOf(ActionableError);
+    await expect(failure).rejects.toThrow(
+      /is installed on emulator-5554 \(expires .*\), but its permissions were not applied: `pm grant/,
+    );
+    expect((await apps.list(DEVICE, "android")).map(({ appId }) => appId)).toEqual([APP]);
   });
 });

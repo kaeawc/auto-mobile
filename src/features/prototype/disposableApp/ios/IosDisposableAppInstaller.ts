@@ -7,29 +7,26 @@ import type { FileSystem } from "../../../../utils/filesystem/DefaultFileSystem"
 import { getIosInstalledAppBundleId } from "../../../../utils/ios-cmdline-tools/iosInstalledApp";
 import { SimulatorIosPermissionsBackend } from "../../../../utils/ios-cmdline-tools/IosPermissionsBackend";
 import type { SimCtlClient } from "../../../../utils/ios-cmdline-tools/SimCtlClient";
-import { logger } from "../../../../utils/logger";
+import type { TccPermissionReader } from "../../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { DataContainerWriter, PrototypeSimctl } from "../../ios/iosPrototypeInstaller";
 import { prototypeJsonSchema, type PrototypeJson } from "../../prototypeJson";
-import { PROTOTYPE_PERMISSION_MAP, PROTOTYPE_PERMISSION_NAMES } from "../../prototypePermissionMap";
+import type { PrototypePermissionResult } from "../../prototypePermissionGrants";
+import { IosSimulatorPrototypePermissionBackend } from "../../prototypeIosSimulatorPermissionBackend";
 import type { DisposableAppInstallation, DisposableAppInstaller } from "../DisposableAppManager";
 import {
   assertDisposableAppId,
   DISPOSABLE_APP_ID_PREFIX,
   isDisposableAppId,
 } from "../disposableAppId";
-import type { DisposableAppPermissionGrants } from "../disposableAppPermissions";
+import {
+  applyDisposableAppPermissions,
+  type DisposableAppPermissionPlan,
+} from "../disposableAppPermissions";
 import {
   IOS_DISPOSABLE_APP_SIGNER,
   IOS_DISPOSABLE_APP_SPEC,
   requireDisposableAppSimulator,
 } from "./iosDisposableAppIdentity";
-
-const PRIVACY_SERVICES = new Map<string, string | null>(
-  PROTOTYPE_PERMISSION_NAMES.map((name) => [
-    name,
-    PROTOTYPE_PERMISSION_MAP[name].ios.simctlService,
-  ]),
-);
 
 interface IosDisposableAppInstallerDependencies {
   simctl: PrototypeSimctl;
@@ -37,6 +34,8 @@ interface IosDisposableAppInstallerDependencies {
   files: Pick<FileSystem, "readFile">;
   clearStorage(deviceId: string, appId: string): Promise<ClearAppDataResult>;
   data: DataContainerWriter;
+  /** Reads the simulator's TCC rows, so each declared permission is read back after the grants. */
+  tcc: TccPermissionReader;
 }
 
 export class IosDisposableAppInstaller implements DisposableAppInstaller {
@@ -92,17 +91,23 @@ export class IosDisposableAppInstaller implements DisposableAppInstaller {
   async applyPermissions(
     deviceId: string,
     appId: string,
-    grants: DisposableAppPermissionGrants,
-  ): Promise<void> {
+    plan: DisposableAppPermissionPlan,
+  ): Promise<PrototypePermissionResult[]> {
     assertDisposableAppId(appId);
     requireDisposableAppSimulator(deviceId);
-    if (grants.granted.length === 0 && grants.denied.length === 0) {
-      return;
+    if (plan.declared.length === 0) {
+      return [];
     }
-    // Coordinate with the app permissions tool, which also mutates the device's shared TCC state.
-    await withDeviceReadinessLock(
+    const backend = new IosSimulatorPrototypePermissionBackend(
+      new SimulatorIosPermissionsBackend({ deviceId, simctl: this.deps.commands }),
+      this.deps.tcc,
+      { deviceId, bundleId: appId },
+    );
+    // Coordinate with the app permissions tool, which also mutates the device's shared TCC state;
+    // the read-back runs under the same lock so no other write lands between a grant and its read.
+    return withDeviceReadinessLock(
       `ios-privacy:${deviceId}`,
-      () => this.updatePrivacy(deviceId, appId, grants),
+      () => applyDisposableAppPermissions(plan, backend),
       { signal: getAbortSignal() },
     );
   }
@@ -132,29 +137,6 @@ export class IosDisposableAppInstaller implements DisposableAppInstaller {
     return apps.some((app) => app.bundleId === appId)
       ? { installed: true, signer: IOS_DISPOSABLE_APP_SIGNER }
       : { installed: false };
-  }
-
-  private async updatePrivacy(
-    deviceId: string,
-    appId: string,
-    grants: DisposableAppPermissionGrants,
-  ): Promise<void> {
-    const backend = new SimulatorIosPermissionsBackend({ deviceId, simctl: this.deps.commands });
-    for (const [action, names] of [
-      ["grant", grants.granted],
-      ["revoke", grants.denied],
-    ] as const) {
-      for (const name of names) {
-        const service = PRIVACY_SERVICES.get(name);
-        if (!service) {
-          logger.debug(
-            `Skipping iOS disposable app permission "${name}": no simctl privacy service.`,
-          );
-          continue;
-        }
-        await backend.setPrivacy({ action, permission: service, appId });
-      }
-    }
   }
 
   private async readSpec(bundle: string): Promise<PrototypeJson> {

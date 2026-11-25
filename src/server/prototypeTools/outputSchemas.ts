@@ -730,6 +730,27 @@ export const prototypeOutputSchema = z.object({
         declared: z.array(z.string()),
         granted: z.array(z.string()),
         denied: z.array(z.string()),
+        results: z
+          .array(
+            z.object({
+              name: z.string(),
+              state: z.enum([
+                "granted",
+                "denied",
+                "blocked",
+                "notDetermined",
+                "limited",
+                "restricted",
+                "unavailable",
+              ]),
+              verified: z.boolean().describe("true when state is what the permissions mode set"),
+              reason: z
+                .enum(["notGrantableOnSimulator", "notRevocable"])
+                .optional()
+                .describe("Why the mode could not be applied to this name on this device"),
+            }),
+          )
+          .describe("Each declared permission's state read back from the device after the grants"),
       }),
       updated: z.boolean().describe("true when the slug was already installed and was updated"),
       launched: z.literal(false),

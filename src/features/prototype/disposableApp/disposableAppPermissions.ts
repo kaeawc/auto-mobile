@@ -2,6 +2,15 @@ import { ActionableError } from "../../../models/ActionableError";
 import type { PrototypeJson } from "../prototypeJson";
 import { expandPrototypeComponents } from "../prototypeComponents";
 import { prototypePlatformError } from "../prototypePlatform";
+import {
+  PROTOTYPE_PERMISSION_NAMES,
+  type PrototypePermissionName,
+} from "../prototypePermissionMap";
+import {
+  applyPrototypePermissions,
+  type PrototypePermissionBackend,
+  type PrototypePermissionResult,
+} from "../prototypePermissionGrants";
 import { prototypeRequiresSchema } from "../prototypePlatformSchema";
 
 /**
@@ -171,6 +180,36 @@ export type DisposableAppPermissionMode =
 export interface DisposableAppPermissionGrants {
   granted: string[];
   denied: string[];
+}
+
+/** The resolved grants with every declared name, so an installer can read each one back. */
+export interface DisposableAppPermissionPlan extends DisposableAppPermissionGrants {
+  declared: readonly string[];
+}
+
+function canonicalPermissionName(name: string): PrototypePermissionName {
+  const canonical = PROTOTYPE_PERMISSION_NAMES.find((candidate) => candidate === name);
+  if (canonical === undefined) {
+    throw new ActionableError(
+      `Permission ${name} is not a prototype permission name (${PROTOTYPE_PERMISSION_NAMES.join(", ")}). Fix requires.permissions in the spec and retry.`,
+    );
+  }
+  return canonical;
+}
+
+/**
+ * Applies a resolved plan through the shared #14297 planner, which writes every grant and deny
+ * and then reads each declared name back as `{name, state, verified, reason?}`.
+ */
+export function applyDisposableAppPermissions(
+  plan: DisposableAppPermissionPlan,
+  backend: PrototypePermissionBackend,
+): Promise<PrototypePermissionResult[]> {
+  return applyPrototypePermissions(
+    plan.declared.map(canonicalPermissionName),
+    { grant: plan.granted, deny: plan.denied },
+    backend,
+  );
 }
 
 /**

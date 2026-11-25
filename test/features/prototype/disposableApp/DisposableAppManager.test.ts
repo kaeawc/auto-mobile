@@ -176,6 +176,10 @@ describe("DisposableAppManager.install", () => {
         declared: ["camera", "notifications"],
         granted: ["camera", "notifications"],
         denied: [],
+        results: [
+          { name: "camera", state: "granted", verified: true },
+          { name: "notifications", state: "granted", verified: true },
+        ],
       },
       updated: false,
       launched: false,
@@ -184,9 +188,30 @@ describe("DisposableAppManager.install", () => {
       "android.permission.CAMERA",
     );
     expect(installer.grants).toEqual([
-      { appId, grants: { granted: ["camera", "notifications"], denied: [] } },
+      {
+        appId,
+        plan: {
+          declared: ["camera", "notifications"],
+          granted: ["camera", "notifications"],
+          denied: [],
+        },
+      },
     ]);
     expect((await registry.list(DEVICE))[0]).toMatchObject({ appId, template: "media" });
+  });
+
+  test("reports the installer's read-back for every declared permission", async () => {
+    const denied = await manager.install(input({ permissions: { deny: ["camera"] } }));
+    expect(denied.permissions.results).toEqual([
+      { name: "camera", state: "blocked", verified: true },
+      { name: "notifications", state: "notDetermined", verified: true },
+    ]);
+    const prompted = await manager.install(input());
+    expect(prompted.permissions).toMatchObject({ granted: [], denied: [] });
+    expect(prompted.permissions.results.map(({ state }) => state)).toEqual([
+      "notDetermined",
+      "notDetermined",
+    ]);
   });
 
   test("re-installing a slug updates in place and keeps storage unless reset", async () => {

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
 import {
   bootFailureGuidanceError,
+  classifySimctlError,
   classifySimctlFailure,
   planSimctlRecovery,
   runSimctlWithRecovery,
@@ -108,6 +109,51 @@ describe("classifySimctlFailure (captured Xcode 26.6 text)", () => {
 
   test("other text is unclassified", () => {
     expect(classifySimctlFailure("boot", "Command failed").kind).toBe("unclassified");
+  });
+});
+
+describe("classifySimctlFailure across Xcode versions", () => {
+  // #14116: the "current state" error has carried code 405, 163 and 165; only the text decides.
+  test.each(["163", "165"])("the code=%s variant of boot on Booted is the same success", (code) => {
+    const text = BOOT_ON_BOOTED.replace("code=405", `code=${code}`);
+    expect(text).toContain(`code=${code}`);
+    expect(classifySimctlFailure("boot", text)).toEqual({
+      kind: "already-in-target-state",
+      verb: "boot",
+      state: "Booted",
+    });
+  });
+
+  test("a two-word state is captured whole", () => {
+    const text = BOOT_ON_BOOTED.replace("state: Booted", "state: Shutting Down");
+    expect(classifySimctlFailure("boot", text)).toEqual({
+      kind: "state-conflict",
+      verb: "boot",
+      state: "Shutting Down",
+    });
+  });
+
+  test("a domain clause appended after the state is not part of the state", () => {
+    const text =
+      "Unable to boot device in current state: Booted " +
+      "(domain=com.apple.CoreSimulator.SimError, code=405)";
+    expect(classifySimctlFailure("boot", text)).toMatchObject({ state: "Booted" });
+  });
+});
+
+describe("classifySimctlError", () => {
+  test("reads the simctl failure a wrapping error carries as its cause", () => {
+    const failure = execFailure(148, INVALID_DEVICE);
+    const wrapped = new ActionableError(`Simulator with UDID ${UDID} not found`, {
+      cause: new ActionableError("boot failed", { cause: failure }),
+    });
+    expect(classifySimctlError("boot", wrapped)).toEqual({ kind: "unknown-device" });
+  });
+
+  test("an error with no recognizable text in its chain is unclassified", () => {
+    const looped: Error & { cause?: unknown } = new Error("boot failed");
+    looped.cause = looped;
+    expect(classifySimctlError("boot", looped)).toEqual({ kind: "unclassified" });
   });
 });
 

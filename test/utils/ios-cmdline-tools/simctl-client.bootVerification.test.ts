@@ -1671,6 +1671,25 @@ describe("SimCtlClient boot self-verification", () => {
     expect(harness.timer.getSleepCallCount()).toBe(0);
   });
 
+  // #14116: other Xcode versions report the same "current state" rejection as code 163 or 165;
+  // the message text, not the code, decides that the simulator is already Booted.
+  test.each(["163", "165"])(
+    "accepts the code=%s variant of the already-Booted response",
+    async (code) => {
+      const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
+      harness.setStates(["Booted"]);
+      harness.failBootStatusWith(
+        coreSimulator405Error(ALREADY_BOOTED_405.replace("code=405", `code=${code}`)),
+      );
+
+      const handle = await harness.timer.resolvePromise(harness.simctl.startSimulator(UDID, 5000));
+
+      expect(handle).toBeDefined();
+      expect(bootstatusCalls(harness.calls).length).toBe(1);
+      expect(shutdownCalls(harness.calls).length).toBe(0);
+    },
+  );
+
   test("retries a contradictory CoreSimulator 405 response when the simulator is not Booted", async () => {
     const harness = createHarness({ maxAttempts: 2, retryBackoffMs: 10 });
     // The verification read after the 405 sees the genuine wedge (Shutdown);

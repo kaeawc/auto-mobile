@@ -15,6 +15,7 @@ import {
   type SimCtl,
 } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { iosVersionStringFromRuntimeId } from "../utils/ios-cmdline-tools/iosVersion";
+import { classifySimctlError } from "../utils/ios-cmdline-tools/simctlFailureClassifier";
 import { logger } from "../utils/logger";
 import { defaultTimer } from "../utils/SystemTimer";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -37,7 +38,10 @@ export interface CiIosBootRecoveryDependencies {
 /**
  * GitHub Actions-only recovery for the deterministic simulator AutoMobile owns.
  * It is deliberately not a general iOS recovery policy: arbitrary simulators
- * must never be erased by product boot.
+ * must never be erased by product boot. The first failure's simctl text decides
+ * how far recovery goes: an unknown device or host resource exhaustion is not
+ * recovered, a launchd_sim bind failure is shut down and booted again without an
+ * erase, and anything else is shut down, erased and booted again.
  */
 export class CiIosBootRecovery implements DeviceBootRecovery {
   constructor(private readonly dependencies: CiIosBootRecoveryDependencies) {}
@@ -56,6 +60,13 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
       }
       firstFailure = error;
     }
+    const failureKind = classifySimctlError("boot", firstFailure).kind;
+    // Neither a device simctl does not know nor a host out of resources is fixed by
+    // shutting down, erasing or booting this simulator again (#14116).
+    if (failureKind === "unknown-device" || failureKind === "resource-exhaustion") {
+      logger.warn(`[CI iOS boot] ${failureKind} boot failure; skipping recovery`, firstFailure);
+      throw firstFailure;
+    }
     this.throwIfCancelled(signal);
     try {
       await this.recover(signal, () => this.dependencies.shutdown(target), true);
@@ -70,8 +81,12 @@ export class CiIosBootRecovery implements DeviceBootRecovery {
       throw error;
     }
     this.throwIfCancelled(signal);
-    await this.recover(signal, () => this.dependencies.erase(target.deviceId!));
-    this.throwIfCancelled(signal);
+    // A launchd_sim bind failure is a runtime boot timeout, not broken device data:
+    // shut down and boot again, but keep the simulator's contents.
+    if (failureKind !== "launchd-sim-bind-failure") {
+      await this.recover(signal, () => this.dependencies.erase(target.deviceId!));
+      this.throwIfCancelled(signal);
+    }
     try {
       return await boot();
     } catch {

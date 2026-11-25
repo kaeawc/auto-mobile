@@ -28,11 +28,14 @@ The watch refuses these options: `waitFor` with `for`, `posture`, `activeDisplay
 
 ## `tapOn` and `tapAt`
 
-`tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. It supports
-only `action: "tap"`. A match past the screen edge is scrolled into view first, in up to 4 steps.
-The crown scrolls a system alert, such as the permission prompt's `Allow`; a swipe scrolls app
-content. A match still partly off screen is tapped on its visible part. One wholly off screen fails
-with a hint to scroll. `sendKeys` selectors behave the same.
+`tapOn` takes a `selector` with an exact `elementId` or `text`, an optional `index`, and only
+`action: "tap"`. `index` counts on-screen matches in `observe` order. `sendKeys` selectors match
+the same way.
+
+With no match on screen, AutoMobile scrolls one past the edge into view, in up to 4 steps. It turns
+the crown for a system alert, such as the permission prompt's `Allow`. App content gets a short
+swipe, which may not scroll an app list (#19218). AutoMobile taps the visible part of a match when
+at least 8 points of it show each way. Otherwise the call fails with a hint to scroll.
 
 `tapAt` takes absolute coordinates in points from `observe`, within `screenSize`. A point outside
 the watch screen fails with `tap is outside the watch screen`.
@@ -40,15 +43,15 @@ the watch screen fails with `tap is outside the watch screen`.
 Outside the Smart Stack, both results include `effect: {screenChanged, basis}`. AutoMobile checks
 the screen for about 1 second after the tap. `basis` is `viewHierarchy changed`,
 `viewHierarchy unchanged`, `system alert dismissed` (the tap closed an alert) or
-`insufficient observation data`. AutoMobile never retries the tap. A
-changed screen does not prove the intended control responded, so `observe` when it matters.
+`insufficient observation data`. AutoMobile never retries the tap. A changed screen does not prove
+the control responded.
 
 When an alert covers the app, `tapOn` refuses a target outside it. The error names the alert title
 and its buttons. Tap one, for example `text: "Allow"`, then retry.
 `tapAt` has no such guard: a point under an alert taps the alert.
 
-With the host app in the background and no Smart Stack open, `tapAt` taps the watch face. Whether
-that opens a complication is unverified, so `observe` after. Outside a notification look or the
+With the host app in the background and no Smart Stack open, `tapAt` taps the watch face. Call
+`observe` after to see whether it opened a complication. Outside a notification look or the
 Smart Stack, `tapOn` needs the host app foregrounded.
 
 ### Smart Stack widgets
@@ -56,18 +59,18 @@ Smart Stack, `tapOn` needs the host app foregrounded.
 When the Smart Stack is open and the host app is not in the foreground:
 
 - `tapOn` matches a widget's exact text or cell identifier on the watch face. Only cards wholly on
-  screen match. AutoMobile refuses text that only an off-screen widget shows, with a hint to scroll
-  the Smart Stack first.
+  screen match. Text that only an off-screen widget shows fails with a hint to scroll the
+  Smart Stack.
 - `tapAt` taps widgets by point coordinates.
 - `observe` returns `hierarchyUnavailable` and no hierarchy fields.
 
 Tapping a widget opens its host app, where the normal tools work. A widget you just added
-shows its text about 2 seconds after the final Done tap, so wait before matching it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md) for how this works.
+shows its text about 2 seconds after the final Done tap, so wait before matching it. See [Smart Stack](../how-it-works/plat/watchos/smart-stack.md).
 
 ## `swipeOn` and `pressButton`
 
 `swipeOn` swipes in a direction, including on the watch face after `pressButton` with `home`. With
-`lookFor`, it swipes until an exact `text` or `elementId` is at least partly on screen, up to
+`lookFor`, it swipes until an exact `text` or `elementId` shows at least 8 points each way, up to
 `maxSwipes` (default 10, maximum 100). Each `lookFor` step drags about one row, so reads overlap. You cannot set coordinates or duration.
 
 `pressButton` supports `home` only.
@@ -127,15 +130,14 @@ Call `observe` after rotating. Retry, after tapping the control, only if the tur
 `sendKeys` accepts non-empty text only and appends to the focused field. Focus a field with `tapOn`
 first, or pass a selector with an exact `elementId` or `text`. That `text` matches a field's label,
 value or placeholder, preferring text fields over static text. Like `tapOn`, a selector refuses a
-field covered by an alert and names its buttons; tap one, then retry. A focused field opens the
+field under an alert. A focused field opens the
 watch keyboard, and AutoMobile types through it. Input fails with no text field or keyboard up.
 The watch refuses commands that clear, replace or press keys.
 
 ## `postNotification`
 
 `postNotification` sends a simulated push to the watch app named by `appId`. The simulator cannot
-pre-grant notification authorization, so the app must request it. Tap Allow with `tapOn`, which
-scrolls it into view. A "CtrlProxyWatch" permission prompt may appear first.
+pre-grant notification authorization, so the app must request it. Tap Allow with `tapOn`. A "CtrlProxyWatch" permission prompt may appear first.
 
 - If the watch dropped the push because the app's notifications are denied, `postNotification`
   returns `success: false`, after Don't Allow or when Allow was never reached.

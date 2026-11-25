@@ -38,6 +38,7 @@ import { requireWatchRunner } from "./WatchRunnerRecovery";
 import {
   WATCH_SCROLL_INTO_VIEW_MAX_STEPS,
   isFullyOnWatchScreen,
+  isUsefullyOnWatchScreen,
   isWatchScrollReachable,
   watchRevealCommand,
   watchRevealDirection,
@@ -146,10 +147,7 @@ async function findWatchLookFor(
 ): Promise<Element | undefined> {
   const hierarchy = normalizeWatchHierarchy(await client.hierarchy(signal));
   return watchHierarchyElements(hierarchy).all.find(
-    (element) =>
-      matches(element, lookFor) &&
-      (isFullyOnWatchScreen(element.bounds, hierarchy) ||
-        watchVisibleTapPoint(element.bounds, hierarchy) !== undefined),
+    (element) => matches(element, lookFor) && isUsefullyOnWatchScreen(element.bounds, hierarchy),
   );
 }
 
@@ -284,8 +282,9 @@ function validateWatchTapOn(options: TapOnElementOptions): void {
 }
 
 /**
- * Matches among elements the screen can scroll to, not only those already on it: observe lists a
- * row just past the edge as tappable, so tapOn must be able to reach it (#19184).
+ * Matches among elements on screen first, so `index` counts what observe shows and a visible match
+ * wins over a hidden one. Only when none is on screen does it match elements the screen can scroll
+ * to: observe lists a row just past the edge as tappable, so tapOn must be able to reach it (#19184).
  */
 function resolveWatchTapMatch(
   hierarchy: ViewHierarchyResult,
@@ -294,8 +293,10 @@ function resolveWatchTapMatch(
 ): { element: Element; all: Element[] } {
   const { all } = watchHierarchyElements(hierarchy);
   const reachable = all.filter((element) => isWatchScrollReachable(element.bounds, hierarchy));
+  const matched = matchWatchTapCandidates(reachable, options);
+  const onScreen = matched.filter((element) => isUsefullyOnWatchScreen(element.bounds, hierarchy));
   const candidates = orderWatchTapCandidates(
-    matchWatchTapCandidates(reachable, options),
+    onScreen.length > 0 ? onScreen : matched,
     options.text !== undefined && preferTextInput,
   );
   const element = candidates[options.index ?? 0];
@@ -350,7 +351,7 @@ async function scrollWatchTapTargetIntoView(
 ): Promise<WatchTapTarget> {
   const { options, preferTextInput } = match;
   let current = raw;
-  let previous: string | undefined;
+  const seen = new Set<string>();
   for (let step = 0; ; step++) {
     const hierarchy = normalizeWatchHierarchy(current);
     const { element, all } = resolveWatchTapMatch(hierarchy, options, preferTextInput);
@@ -358,10 +359,11 @@ async function scrollWatchTapTargetIntoView(
     const { left, top, right, bottom } = element.bounds;
     const position = `${left},${top},${right},${bottom}`;
     const target = { raw: current, hierarchy, element, all };
-    if (!reveal || step >= WATCH_SCROLL_INTO_VIEW_MAX_STEPS || position === previous) {
+    // Any position seen before means the scroll is stuck or oscillating, so stop revealing.
+    if (!reveal || step >= WATCH_SCROLL_INTO_VIEW_MAX_STEPS || seen.has(position)) {
       return target;
     }
-    previous = position;
+    seen.add(position);
     if (
       !(await revealWatchStep(
         client,

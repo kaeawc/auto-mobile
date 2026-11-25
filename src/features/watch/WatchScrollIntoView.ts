@@ -59,6 +59,11 @@ export function watchVisibleTapPoint(
   return { x: (visible.left + visible.right) / 2, y: (visible.top + visible.bottom) / 2 };
 }
 
+/** Whether the element is wholly on screen, or shows enough of itself for a tap to land on it. */
+export function isUsefullyOnWatchScreen(bounds: Bounds, screen: Screen): boolean {
+  return isFullyOnWatchScreen(bounds, screen) || watchVisibleTapPoint(bounds, screen) !== undefined;
+}
+
 /**
  * Element-targeted tools may scroll vertically to a match: a non-empty element that shares the
  * screen's columns. One beside the screen (another navigation page) is never a target.

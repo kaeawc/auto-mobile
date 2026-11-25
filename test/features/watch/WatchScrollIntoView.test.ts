@@ -189,6 +189,75 @@ describe("watch element-targeted tools below the fold (#19184)", () => {
     expect(actions(client)).toEqual([]);
   });
 
+  /** Rows sharing the "Text entry" label, each with its own identifier. */
+  function withRows(rows: Array<{ id: string; bounds: Bounds }>) {
+    const tree = structuredClone(hierarchy);
+    tree.root.children = [
+      ...tree.root.children,
+      ...rows.map(({ id, bounds }) =>
+        node(75, "Text entry", bounds, { accessibilityIdentifier: id }),
+      ),
+    ];
+    return tree;
+  }
+
+  test("tapOn prefers a visible match over an earlier off-screen one, without scrolling", async () => {
+    const client = register(
+      new FakeWatchRunnerClient(
+        withRows([
+          { id: "hidden-entry", bounds: { left: 2, top: -100, right: 182, bottom: -44 } },
+          { id: "visible-entry", bounds: { left: 2, top: 40, right: 182, bottom: 96 } },
+        ]),
+      ),
+    );
+    const result = await watchTapOn(deviceId, { action: "tap", text: "Text entry" }, undefined, {
+      timer: timer(),
+    });
+    expect(result).toMatchObject({ element: { "resource-id": "visible-entry" } });
+    expect(actions(client)).toEqual([{ type: "tap", identifier: "visible-entry" }]);
+  });
+
+  test("tapOn index counts only visible matches when any is on screen", async () => {
+    const client = register(
+      new FakeWatchRunnerClient(
+        withRows([
+          { id: "hidden-entry", bounds: { left: 2, top: -100, right: 182, bottom: -44 } },
+          { id: "first-entry", bounds: { left: 2, top: 20, right: 182, bottom: 76 } },
+          { id: "second-entry", bounds: { left: 2, top: 100, right: 182, bottom: 156 } },
+          { id: "below-entry", bounds: { left: 2, top: 300, right: 182, bottom: 356 } },
+        ]),
+      ),
+    );
+    await watchTapOn(deviceId, { action: "tap", text: "Text entry", index: 1 }, undefined, {
+      timer: timer(),
+    });
+    expect(actions(client)).toEqual([{ type: "tap", identifier: "second-entry" }]);
+    await expect(
+      watchTapOn(deviceId, { action: "tap", text: "Text entry", index: 2 }, undefined, {
+        timer: timer(),
+      }),
+    ).rejects.toThrow("No watch element matched");
+  });
+
+  test("a tall row that oscillates between reveal directions stops at a repeated position", async () => {
+    const tall = { left: 2, top: 10, right: 182, bottom: 230 };
+    const client = register(
+      new FakeSequencedWatchRunner([
+        withRow(tall),
+        withRow({ left: 2, top: -80, right: 182, bottom: 140 }),
+        withRow(tall),
+      ]),
+    );
+    await watchTapOn(deviceId, { action: "tap", text: "Text entry" }, undefined, {
+      timer: timer(),
+    });
+    expect(actions(client)).toEqual([
+      { type: "swipe", direction: "up", distance: WATCH_SCROLL_INTO_VIEW_SWIPE_DISTANCE },
+      { type: "swipe", direction: "down", distance: WATCH_SCROLL_INTO_VIEW_SWIPE_DISTANCE },
+      { type: "tap", x: 92, y: 117 },
+    ]);
+  });
+
   test("sendKeys with a selector reaches a field below the screen edge", async () => {
     const client = register(
       new FakeSequencedWatchRunner([

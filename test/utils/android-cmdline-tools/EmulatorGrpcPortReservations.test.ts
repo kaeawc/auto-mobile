@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   DefaultEmulatorPortReservations,
   resetEmulatorLaunchReservations,
@@ -265,7 +265,7 @@ describe("FileEmulatorGrpcPortRegistry", () => {
 
   test("the default lease directory is host-wide, not per ADB server or coordination dir", async () => {
     expect(defaultEmulatorGrpcLeaseDir("/Users/dev")).toBe(
-      join("/Users/dev", ".auto-mobile", "emulator-grpc"),
+      join(resolve("/Users/dev"), ".auto-mobile", "emulator-grpc"),
     );
     const timer = new FakeTimer();
     const files = new FakeLockFileSystem(() => timer.now());

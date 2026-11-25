@@ -15,7 +15,9 @@ final class PrototypeNestedRepeatMappingTests: XCTestCase {
             let spec = try JSONDecoder().decode(PrototypeSpec.self, from: fixture.envelope())
             var rows: [PrototypeNestedRepeatTests.Fixture.Row] = []
             for (outerIndex, container) in (spec.root.children ?? []).enumerated() {
+                // Compare drawn text: expanded row values keep their shield until drawn (#18628).
                 let texts = (container.children ?? []).compactMap(\.text)
+                    .map(PrototypeTextShield.unshield)
                 let width = fixture.expected.rows.first?.texts.count ?? 1
                 for offset in stride(from: 0, to: texts.count, by: width) {
                     rows.append(.init(

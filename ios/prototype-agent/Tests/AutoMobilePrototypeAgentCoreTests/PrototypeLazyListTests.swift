@@ -404,6 +404,8 @@ final class PrototypeLazyListTests: XCTestCase {
             text: "{data:/note} {row.id}",
             data: #"{"note":"{row.x} {index}","posts":[{"id":"a","x":"BOUND"}]}"#
         )
-        XCTAssertEqual(try rowText(json, index: 0), "{row.x} {index} a")
+        // The inserted value stays shielded until the final interpolation draws it literally (#18628).
+        let text = try XCTUnwrap(rowText(json, index: 0))
+        XCTAssertEqual(interpolatePrototypeText(text, state: ["index": .number(9)], pager: nil), "{row.x} {index} a")
     }
 }

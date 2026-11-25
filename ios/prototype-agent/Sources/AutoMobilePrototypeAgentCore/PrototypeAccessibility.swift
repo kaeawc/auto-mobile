@@ -12,6 +12,9 @@ struct PagerPosition: Equatable {
 /// placeholder stays as written, and `{page}`/`{pageCount}` resolve only inside a pager (they stay
 /// literal outside one even when state has keys of those names). Unicode scalars are scanned, so a
 /// brace followed by a combining mark is not mistaken for part of a token.
+///
+/// Values inserted by earlier passes (data, platform and row values) carry `PrototypeTextShield`'s
+/// mark, so they stay literal here; this pass removes it from the text around its placeholders (#18628).
 func interpolatePrototypeText(
     _ text: String,
     state: [String: JSONValue],
@@ -24,13 +27,14 @@ func interpolatePrototypeText(
     let scalars = Array(text.unicodeScalars)
     var out = String.UnicodeScalarView()
     var index = 0
+    var literalStart = 0
     var substitutedLength = 0
     while index < scalars.count {
         guard let end = interpolationTokenEnd(scalars, from: index) else {
-            out.append(scalars[index])
             index += 1
             continue
         }
+        PrototypeTextShield.appendUnshielded(scalars[literalStart ..< index], to: &out)
         let key = String(String.UnicodeScalarView(scalars[(index + 1) ..< (end - 1)]))
         let token = String(String.UnicodeScalarView(scalars[index ..< end]))
         let value: String?
@@ -44,7 +48,9 @@ func interpolatePrototypeText(
             out.append(contentsOf: token.unicodeScalars)
         }
         index = end
+        literalStart = end
     }
+    PrototypeTextShield.appendUnshielded(scalars[literalStart...], to: &out)
     return String(out)
 }
 
@@ -125,8 +131,93 @@ extension PrototypeNode {
         if type == "icon", tappable, let name, !name.isEmpty { return name }
         // Icon-only controls (#10439): an extended FAB's label, else the icon name.
         if type == "iconButton" || type == "fab" {
-            return [label, icon].compactMap(\.self).first { !$0.isEmpty }
+            return [label.map(PrototypeTextShield.unshield), icon].compactMap(\.self).first { !$0.isEmpty }
         }
         return nil
+    }
+}
+
+/// Keeps an inserted value literal through every later placeholder scan (#18628), like Android's
+/// `PrototypeTextShield`. Data, platform and row values are inserted into authored text before later
+/// passes read that text for `{key}`, `{derived:name}`, `{data:/pointer}`, string and row
+/// placeholders. `shield` puts U+2060 WORD JOINER right after each `{` in the value that opens a key,
+/// so no scanner matches it. `interpolatePrototypeText` removes it from the fields it draws, and
+/// `unshieldDrawnFields` from the fields components read as written. The joiner is zero-width.
+///
+/// A `{` already followed by joiners before a key gets one more, and `unshield` removes exactly one,
+/// so every inserted value round-trips exactly.
+enum PrototypeTextShield {
+    static let mark: Unicode.Scalar = "\u{2060}"
+
+    static func shield(_ value: String) -> String {
+        guard value.unicodeScalars.contains("{") else { return value }
+        let scalars = Array(value.unicodeScalars)
+        var out = String.UnicodeScalarView()
+        for (index, scalar) in scalars.enumerated() {
+            out.append(scalar)
+            if scalar == "{", opensAfterMarks(scalars[...], from: index + 1) { out.append(mark) }
+        }
+        return String(out)
+    }
+
+    static func unshield(_ text: String) -> String {
+        guard text.unicodeScalars.contains(mark) else { return text }
+        var out = String.UnicodeScalarView()
+        appendUnshielded(Array(text.unicodeScalars)[...], to: &out)
+        return String(out)
+    }
+
+    /// Appends `scalars` to `out`, removing one joiner after each shielded `{`.
+    static func appendUnshielded(_ scalars: ArraySlice<Unicode.Scalar>, to out: inout String.UnicodeScalarView) {
+        var index = scalars.startIndex
+        while index < scalars.endIndex {
+            out.append(scalars[index])
+            index += isShieldedOpen(scalars, at: index) ? 2 : 1
+        }
+    }
+
+    /// Top-level fields a later `interpolatePrototypeText` draws, which keep their shield until then:
+    /// text and spans, a button, fab or select label, a list item's headline and supporting text,
+    /// titles, an image or web view url and semantics.
+    private static let interpolatedFields: Set = [
+        "text", "spans", "label", "headline", "supporting", "title", "url", "semantics",
+    ]
+
+    /// `node`'s tree with the shield removed from every other text field, such as option, menu,
+    /// action and button-part labels, placeholders and error messages, which components read as
+    /// written. A lazy list's row template keeps its shield until each row is resolved.
+    static func unshieldDrawnFields(_ node: JSONValue) -> JSONValue {
+        guard case var .object(fields) = node else { return node }
+        let interpolated = fields.filter { interpolatedFields.contains($0.key) }
+        PrototypeRepeat.bindTextFields(&fields, transform: unshield)
+        fields.merge(interpolated) { _, original in original }
+        let slots = fields["type"] == .string("adaptive") ? PrototypeAdaptive.slots : ["child", "header", "footer"]
+        for name in slots {
+            if let child = fields[name] { fields[name] = unshieldDrawnFields(child) }
+        }
+        if fields["type"] != .string("list"), case let .array(children)? = fields["children"] {
+            fields["children"] = .array(children.map(unshieldDrawnFields))
+        }
+        if case let .object(screens)? = fields["screens"] {
+            fields["screens"] = .object(screens.mapValues(unshieldDrawnFields))
+        }
+        return .object(fields)
+    }
+
+    /// Whether a shielded `{` starts at `index`: a joiner follows it and then a key.
+    private static func isShieldedOpen(_ scalars: ArraySlice<Unicode.Scalar>, at index: Int) -> Bool {
+        scalars[index] == "{" && index + 1 < scalars.endIndex && scalars[index + 1] == mark &&
+            opensAfterMarks(scalars, from: index + 1)
+    }
+
+    /// Whether the joiners from `start` are followed by a key's first character.
+    private static func opensAfterMarks(_ scalars: ArraySlice<Unicode.Scalar>, from start: Int) -> Bool {
+        var index = start
+        while index < scalars.endIndex, scalars[index] == mark {
+            index += 1
+        }
+        guard index < scalars.endIndex else { return false }
+        let scalar = scalars[index]
+        return ("A" ... "Z").contains(scalar) || ("a" ... "z").contains(scalar) || scalar == "_"
     }
 }

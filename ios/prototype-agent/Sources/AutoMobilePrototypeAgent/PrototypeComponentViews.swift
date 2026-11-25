@@ -505,10 +505,12 @@
                     PrototypeGlyph(symbol: symbol)
                         .foregroundColor(colors.authored(style?.color) ?? colors.contentVariant)
                 }
+                // Drawn as written, so an inserted value loses its shield here (#18628).
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(node.headline ?? "").foregroundColor(colors.authored(style?.color) ?? colors.content)
+                    Text(PrototypeTextShield.unshield(node.headline ?? ""))
+                        .foregroundColor(colors.authored(style?.color) ?? colors.content)
                     if let supporting = node.supporting {
-                        Text(supporting).font(.subheadline)
+                        Text(PrototypeTextShield.unshield(supporting)).font(.subheadline)
                             .foregroundColor(colors.authored(style?.color) ?? colors.contentVariant)
                     }
                 }

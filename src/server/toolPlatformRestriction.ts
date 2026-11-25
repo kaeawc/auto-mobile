@@ -7,6 +7,7 @@ import { PLATFORM_LABELS, type Platform } from "../models/Platform";
  */
 export type ToolPlatforms = readonly [Platform, ...Platform[]];
 
+/** The platforms joined with `conjunction`: "and" for what a tool supports, "or" for one device. */
 function platformList(platforms: ToolPlatforms, conjunction: "and" | "or"): string {
   const labels = platforms.map((platform) => PLATFORM_LABELS[platform]);
   return labels.length === 1
@@ -19,7 +20,7 @@ export function toolPlatformRestrictionMessage(
   platforms: ToolPlatforms,
   device: Pick<BootedDevice, "platform" | "deviceId">,
 ): string {
-  // A device runs one platform, so the target suggestion offers the alternatives with "or" (#19172).
+  // One device runs one platform, so the advice names the alternatives with "or" (#19186).
   return (
     `${toolName} is only supported on ${platformList(platforms, "and")}; ${device.deviceId} is ` +
     `${PLATFORM_LABELS[device.platform]}. Target a device running ${platformList(platforms, "or")} instead.`

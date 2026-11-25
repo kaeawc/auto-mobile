@@ -266,18 +266,21 @@ struct PrototypeSpec: Decodable {
         try PrototypeLimits.guardSubstitutedText(collections, data: data, derived: formatContext, state: menuState)
         // Route params bind before data resolution, so `{data:/posts/{route.id}/title}` resolves (#14188).
         let routed = PrototypeRouteBinder.bind(collections, scope: routes)
-        let bound = PrototypeDataResolver.resolveRoot(routed, data: data, platform: platform, derived: values)
+        // Inserted data and row values are shielded, so later passes keep them literal (#18628).
+        let bound = PrototypeDataResolver.resolveRoot(
+            routed, data: data, platform: platform, derived: values, shield: true
+        )
         let resolved = strings
             .map { PrototypeStrings.resolve(bound, strings: $0, locales: locales, data: data) } ?? bound
         try PrototypeLimits.guardTree(resolved)
         try PrototypeRepeat.validateDerivedRows(
             resolved, formatter: formatContext.formatter, environment: formatContext.environment
         )
-        let expanded = PrototypeRepeat.expand(
+        let expanded = PrototypeTextShield.unshieldDrawnFields(PrototypeRepeat.expand(
             resolved,
             formatter: formatContext.formatter,
             environment: formatContext.environment
-        )
+        ))
         try PrototypeBarScroll.validate(expanded)
         try PrototypePagerOptions.validate(expanded)
         try PrototypeSwipe.validate(expanded)

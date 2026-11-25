@@ -164,13 +164,15 @@
         var body: some View {
             let value = node.stateKey.flatMap { model.state[$0]?.stringValue }
             let selected = node.options?.first { $0.value == value }?.label ?? ""
+            // Read as written, so an inserted value loses its shield here (#18628).
+            let fieldLabel = node.label.map(PrototypeTextShield.unshield)
             Button {
                 model.consumeDeadTap()
                 model.expandedSelect = model.expandedSelect === node ? nil : node
             } label: {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
-                        if let label = node.label { Text(label).font(.caption).foregroundColor(.secondary) }
+                        if let fieldLabel { Text(fieldLabel).font(.caption).foregroundColor(.secondary) }
                         Text(selected.isEmpty ? " " : selected)
                     }
                     Spacer(minLength: 12)
@@ -184,7 +186,7 @@
                 .overlay(RoundedRectangle(cornerRadius: 4).stroke(ComponentColors(palette: palette).outline))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(node.contentDescription ?? node.label ?? selected)
+            .accessibilityLabel(node.contentDescription ?? fieldLabel ?? selected)
             .accessibilityValue(selected)
         }
     }

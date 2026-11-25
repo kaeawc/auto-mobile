@@ -691,7 +691,7 @@ struct PrototypeRepeatInstance {
     /// One template node bound to this instance; descendants are bound too.
     func bind(_ node: JSONValue, descendants: Bool = true) -> JSONValue {
         guard case var .object(fields) = node else { return node }
-        PrototypeRepeat.bindTextFields(&fields, transform: interpolate)
+        PrototypeRepeat.bindTextFields(&fields, transform: display)
         bindComponentActions(&fields)
         if fields["type"] == .string("pasteButton"), let into = fields["into"]?.stringValue {
             fields["into"] = .string(bindDataPath(into))
@@ -1015,6 +1015,18 @@ struct PrototypeRepeatInstance {
         return .string(interpolate(text))
     }
 
+    /// Display text: like `interpolate`, but each inserted item value is shielded so the later data,
+    /// state and derived passes keep it literal (#18628).
+    func display(_ text: String) -> String {
+        PrototypeRepeat.segments(text, alias: alias, outerAlias: outerAlias).map { segment in
+            switch segment {
+            case let .literal(literal): literal
+            case .index: String(index)
+            case let .field(name): item[name].map(shielded) ?? "{\(alias).\(name)}"
+            }
+        }.joined()
+    }
+
     /// Unknown fields cannot occur after validation; they are left as their literal placeholder.
     func interpolate(_ text: String) -> String {
         PrototypeRepeat.segments(text, alias: alias, outerAlias: outerAlias).map { segment in
@@ -1029,5 +1041,9 @@ struct PrototypeRepeatInstance {
     /// Numbers render as the host does (`PrototypeScalarText`); strings and booleans pass through.
     private func rendered(_ value: JSONValue) -> String {
         value.displayString
+    }
+
+    private func shielded(_ value: JSONValue) -> String {
+        PrototypeTextShield.shield(rendered(value))
     }
 }

@@ -86,8 +86,10 @@ enum PrototypeLazyList {
         let expanded = PrototypeRepeat.expand(
             sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
         )
-        let bound = PrototypeDataResolver.resolveRoot(expanded, data: data, derived: derived)
-        return (fields[spec.key]?.displayString ?? "", RowShield.unshield(bound))
+        let bound = PrototypeDataResolver.resolveRoot(expanded, data: data, derived: derived, shield: true)
+        // Interpolated text keeps its row and data values shielded until it is drawn (#18628).
+        let drawn = PrototypeTextShield.unshieldDrawnFields(RowShield.unshield(bound))
+        return (fields[spec.key]?.displayString ?? "", drawn)
     }
 
     static func row(

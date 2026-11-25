@@ -124,6 +124,7 @@ export class SessionBinding {
         this.deps.sessionPlatforms.set(mintedSessionUuid, platform);
       }
       this.deps.port.clearHeldSessionLossesForSelection(mintedSessionUuid);
+      await this.resumeRecoveredBinding(mintedSessionUuid, acquisitionReleaseEpoch);
       return;
     }
     rememberSessionDeviceId(
@@ -185,6 +186,31 @@ export class SessionBinding {
     // can arrive while it is in flight, fence and clear the binding, and make
     // this acquisition result stale before it reaches the caller.
     this.deps.port.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
+  }
+
+  /**
+   * An acquisition handed back the latest binding the daemon had answered not-found for: a
+   * device-restart reservation the acquisition recovered (#19232). The result proves the daemon
+   * knows the session again, so its not-found history ends here, its next heartbeat claims
+   * ownership, and the acquisition returns only once that heartbeat was sent and the keeper runs
+   * for it. Without this the keeper stays stopped for a session the daemon reports ready, and the
+   * daemon reaps it for silence (`heartbeat-timeout`). A live binding re-acquired keeps its keeper.
+   */
+  private async resumeRecoveredBinding(
+    sessionUuid: string,
+    acquisitionReleaseEpoch: number,
+  ): Promise<void> {
+    const { state } = this.deps;
+    if (!state.notFoundStopped.has(sessionUuid) && !state.notFoundWindows.has(sessionUuid)) {
+      return;
+    }
+    state.notFoundStopped.delete(sessionUuid);
+    state.notFoundWindows.delete(sessionUuid);
+    state.sessionDaemonInstances.delete(sessionUuid);
+    state.livenessOwnershipClaimSent = false;
+    await this.deps.port.establishBoundSessionHeartbeat();
+    // As for a fresh binding: a release landing during that heartbeat makes this result stale.
+    this.deps.port.throwIfSessionReleasedSince(sessionUuid, acquisitionReleaseEpoch);
   }
 
   // Called with the FORWARDED args (post-withBoundSessionUuid), so an implicit

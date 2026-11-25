@@ -80,7 +80,10 @@ describe("TransportAXBridgeClient", () => {
 test("an exited transport rejects future actions immediately", async () => {
   const { transport, client, timer } = setup();
   transport.emitExit();
-  await expect(client.invokeAction({ actionName: "Edit" })).rejects.toThrow("closed");
+  await expect(client.invokeAction({ actionName: "Edit" })).rejects.toThrow(
+    "AXBridge process exited",
+  );
+  expect(transport.sent).toEqual([]);
   expect(timer.getPendingTimeouts()).toEqual([]);
 });
 

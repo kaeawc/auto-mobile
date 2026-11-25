@@ -215,7 +215,8 @@ export class BoundSessionFenceGate {
       this.port.state.terminalBoundSession !== undefined &&
       this.sessionUuidFromArgs(callerArgs) === undefined &&
       (this.port.isDeviceInventoryTool(name) ||
-        this.isSessionlessReadAfterRelease(name, callerArgs));
+        this.isSessionlessReadAfterRelease(name, callerArgs) ||
+        this.isSessionlessDeleteAfterRelease(name));
     const usesDeviceSelector =
       this.port.toolTargetsDevice(name) &&
       this.hasImplicitDeviceSelector(callerArgs, name === "setActiveDevice") &&
@@ -280,6 +281,22 @@ export class BoundSessionFenceGate {
       !this.port.state.stallHandovers.has(terminal.sessionUuid) &&
       this.port.state.releaseSurfacedFor === terminal.sessionUuid &&
       this.port.isDeviceReadOnlyTool(name, args)
+    );
+  }
+
+  /**
+   * `deleteDevice` names its target by `stableId` and needs no device session; acquiring one would
+   * boot the device the caller wants gone (#19176). After the binding is terminally released (for
+   * example by `killDevice`), a call naming no session is forwarded without the released binding,
+   * like inventory. The daemon's lifecycle holder check still refuses a target another session
+   * holds, since a sessionless caller is never its holder. A liveness handover keeps the fence.
+   */
+  private isSessionlessDeleteAfterRelease(name: string): boolean {
+    const terminal = this.port.state.terminalBoundSession;
+    return (
+      name === "deleteDevice" &&
+      terminal !== undefined &&
+      !this.port.state.stallHandovers.has(terminal.sessionUuid)
     );
   }
 

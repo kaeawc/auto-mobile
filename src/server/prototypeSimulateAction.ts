@@ -48,7 +48,7 @@ export interface PrototypeSimulateTarget {
    * `system` route yet (#14286, #14287).
    */
   push?: PrototypePushRoutes;
-  /** The shown prototype's media module; no runtime exposes one to simulate yet. */
+  /** The shown prototype's media module: Android CtrlProxy's debug fake player (#14257). */
   media?: PrototypeMediaSimRoute;
   /** This session's mock backends: advanceTimeMs also moves their actors' clock (#14211). */
   mocks?: Pick<PrototypeMockBackendRegistry, "advanceClock" | "ids">;

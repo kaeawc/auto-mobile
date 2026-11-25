@@ -76,7 +76,7 @@ class PrototypeRuntimeIsolationTest {
   @Test
   fun `service permissioned modules equal its explicit allow list`() {
     assertEquals(
-      SERVICE_PERMISSIONED_MODULES + debugModules,
+      SERVICE_PERMISSIONED_MODULES + debugPermissionedModules,
       permissionedModules intersect registered(overlay),
     )
   }
@@ -84,7 +84,7 @@ class PrototypeRuntimeIsolationTest {
   @Test
   fun `saved Activity permissioned modules equal its explicit allow list`() {
     assertEquals(
-      ACTIVITY_PERMISSIONED_MODULES + debugModules,
+      ACTIVITY_PERMISSIONED_MODULES + debugPermissionedModules,
       permissionedModules intersect registered(saved),
     )
   }
@@ -187,9 +187,10 @@ class PrototypeRuntimeIsolationTest {
     }
     expected.forEach { name ->
       assertTrue("$name is missing from the registry", name in registered(platform))
-      capabilities(modules.getValue(name).jsonObject).forEach { capability ->
-        assertTrue("$name server omits $capability", capability in commands)
-      }
+      (capabilities(modules.getValue(name).jsonObject) - EXEMPT_CALL_CAPABILITIES[name].orEmpty())
+        .forEach { capability ->
+          assertTrue("$name server omits $capability", capability in commands)
+        }
     }
   }
 
@@ -212,7 +213,15 @@ class PrototypeRuntimeIsolationTest {
     private val ACTIVITY_MODULES = SERVICE_MODULES + ACTIVITY_IDENTITY_MODULES + "permissions"
     private val SERVICE_PERMISSIONED_MODULES = setOf("location", "sensors")
     private val ACTIVITY_PERMISSIONED_MODULES = setOf("location", "sensors", "permissions")
-    private val debugModules = if (BuildConfig.DEBUG) setOf("test") else emptySet()
+    private val debugModules = if (BuildConfig.DEBUG) setOf("test", "media") else emptySet()
+    /**
+     * Per-call capabilities a registered module deliberately does not advertise, so the host
+     * refuses those calls: the debug fake media player has no queue until #14249 adds one.
+     */
+    private val EXEMPT_CALL_CAPABILITIES =
+      mapOf("media" to setOf("prototype_platform_media_queue_v1"))
+    /** Of [debugModules], the ones whose calls need permissions: the fake media player has none. */
+    private val debugPermissionedModules = if (BuildConfig.DEBUG) setOf("test") else emptySet()
 
     // These requirements live in Kotlin validators, outside the per-call JSON contract.
     private val BLOCK_NODE_PERMISSIONS =

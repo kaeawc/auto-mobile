@@ -470,6 +470,7 @@ class PrototypeRuntime(
         is PrototypeLocationModule -> it.session(requestScope)
         is PrototypeSensorsModule -> it.session(requestScope)
         is PrototypeWebViewModule -> it.session()
+        is PrototypePerRuntimeModule -> it.session(requestScope)
         else -> it
       }
     }
@@ -565,8 +566,16 @@ class PrototypeRuntime(
     }
   }
 
+  /** Hands the shown spec to the modules that need it (#14257), such as a media player module. */
+  private fun configureSpecModules() {
+    platformRegistry.modules.filterIsInstance<PrototypeSpecAwareModule>().forEach {
+      it.configure(current.spec)
+    }
+  }
+
   /** Start streams only after the host has installed this runtime in its surface table. */
   fun startPlatformModules() {
+    configureSpecModules()
     platformDispatcher.subscribe()
     platformModulesStarted = true
     startPlatformUpdates()
@@ -601,6 +610,7 @@ class PrototypeRuntime(
     if (!current.active) return
     stateWriteValidator = null
     mutableSnapshot.value = replacementSnapshot(spec)
+    configureSpecModules()
     startPlatformUpdates()
     updateRealtime()
   }

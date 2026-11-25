@@ -1,3 +1,4 @@
+import { androidPrototypeMediaSimRoute } from "../../features/prototype/androidPrototypeMediaSimRoute";
 import {
   parsePrototypeDegradedEffects,
   prototypeDegradedEffectsOutput,
@@ -282,7 +283,14 @@ export async function deviceRequestAction(
   }: { target: PrototypeTarget; scope: PrototypeScope; signal: AbortSignal | undefined },
 ): Promise<PrototypeOutput> {
   if (args.action === "simulate") {
-    return performPrototypeSimulate({ ...target, mocks: host.mocks }, args);
+    return performPrototypeSimulate(
+      {
+        ...target,
+        mocks: host.mocks,
+        ...(target.android ? { media: androidPrototypeMediaSimRoute(target.android) } : {}),
+      },
+      args,
+    );
   }
   if (args.action === "clearStorage") {
     return performPrototypeClearStorage(target, args, host.store, device.deviceId);

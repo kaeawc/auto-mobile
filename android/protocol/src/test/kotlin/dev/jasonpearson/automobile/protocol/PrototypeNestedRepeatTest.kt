@@ -137,7 +137,7 @@ class PrototypeNestedRepeatTest {
         val case = raw.jsonObject
         DynamicTest.dynamicTest(case.getValue("name").jsonPrimitive.content) {
           val result = PrototypeSpecValidator.validate(case.getValue("spec").toString())
-          val error = case["error"]?.jsonObject
+          val error = case["error"] as? JsonObject
           assertEquals(
             error?.let {
               PrototypeSpecError(

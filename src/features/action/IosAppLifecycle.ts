@@ -139,7 +139,8 @@ const MECHANISMS = {
  * `killBackgrounded` does. There is no cheap iOS foreground read, so `killBackgrounded` presses
  * Home first (verified by HomeScreen, a no-op when already on Home) instead of refusing.
  * `trimMemory` on a simulator updates the device's `memory_warning_simulation` file, which UIKit
- * delivers to the foreground app only (#18754); physical devices have no equivalent.
+ * delivers to running apps; a backgrounded app may be suspended and miss it, so the target must be
+ * in front (#18754). Physical devices have no equivalent.
  */
 export class IosAppLifecycle {
   private readonly control: IosAppProcessControl;
@@ -231,8 +232,9 @@ export class IosAppLifecycle {
   }
 
   /**
-   * The warning goes to whichever app is in front, so a different foreground app is refused. An
-   * unreadable foreground still sends it, with a message that delivery was not verified.
+   * Only the app in front is sure to receive the warning (a backgrounded app may be suspended), so
+   * a different foreground app is refused. An unreadable foreground still sends it, with a message
+   * that delivery was not verified.
    */
   private async memoryWarning(
     base: AppLifecycleResult,
@@ -254,7 +256,8 @@ export class IosAppLifecycle {
         errorCode: "app_not_foreground",
         error:
           `${appId} is not the foreground app (${foreground} is). A simulated memory warning ` +
-          "reaches only the foreground app; bring it to the front with launchApp, then retry.",
+          "is only sure to reach the app in front; a backgrounded app may be suspended and miss " +
+          "it. Bring it to the front with launchApp, then retry.",
       };
     }
     const path = simulatorMemoryWarningPath(

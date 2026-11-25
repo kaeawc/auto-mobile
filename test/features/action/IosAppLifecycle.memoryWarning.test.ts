@@ -125,7 +125,8 @@ describe("iOS simulator trimMemory memoryWarning (#18754)", () => {
       errorCode: "app_not_foreground",
     });
     expect(result.error).toContain(`${OTHER_APP} is`);
-    expect(result.error).toContain("reaches only the foreground app");
+    expect(result.error).toContain("a backgrounded app may be suspended and miss it");
+    expect(result.error).toContain("launchApp");
     expect(h.fileSystem.calls).toEqual([]);
     expect(h.mutations).toEqual([]);
   });

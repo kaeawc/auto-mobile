@@ -28,6 +28,19 @@ const runtimeGuidance = {
   },
 } satisfies Record<PrototypeRuntimeKind, { device: string; advice: string }>;
 
+// CtrlProxy runs without an Activity; the disposable shell and ProtoViewer register these modules.
+export const PROTOTYPE_CTRLPROXY_APP_ONLY_MODULES: ReadonlySet<string> = new Set([
+  "biometric",
+  "permissions",
+  "secureStorage",
+]);
+
+// The injected agent excludes the permission prompt module; the saved Viewer enables it.
+export const PROTOTYPE_IOS_AGENT_EXCLUDED_MODULES: ReadonlySet<string> = new Set(["permissions"]);
+
+// Only the standalone per-prototype Viewer registers these modules on iOS.
+export const PROTOTYPE_IOS_VIEWER_ONLY_MODULES: ReadonlySet<string> = new Set(["notifications"]);
+
 export function prototypeRuntimeRefusalGuidance(
   platform: "android" | "ios",
   runtime?: PrototypeRuntimeKind,

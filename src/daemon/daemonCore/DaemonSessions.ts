@@ -1,6 +1,9 @@
 import { defaultIosCameraPosterDaemonHooks } from "../iosCameraPosterSessionCleanup";
 import { lazyDeviceClaims, StoreDeviceClaimMirror, type DeviceClaimMirror } from "../deviceClaims";
-import { localClaimRegistryExpectation } from "../deviceClaimRegistryExpectation";
+import {
+  localClaimRegistryExpectation,
+  localPreBindRegistryOpen,
+} from "../deviceClaimRegistryExpectation";
 import type { DeviceClaimMirrorHub } from "../deviceClaimMirrorHub";
 import type { SqliteBindingRegistry } from "../sessionBroker/registry/sqliteBindingRegistry";
 import { bindingRegistryFileExists } from "../sessionBroker/registry/sqliteBindingRegistry";
@@ -102,10 +105,12 @@ export interface DaemonSessionsHost {
     | "recorderDeviceIncarnationListener"
     | "shutdownReleaseNotifications"
     | "shutdownFallbackReleaseNotifications"
+    | "sessionBrokerConfigPath"
   >;
   bindingExclusionFactory: () => (timer: Timer) => BindingExclusion;
   /** The current registry open, served only after it settles. */
   bindingRegistry: () => Promise<SqliteBindingRegistry> | undefined;
+  openBindingRegistry: DaemonBroker["openBindingRegistry"];
   startBackgroundRegistryUpgrade: DaemonBroker["startBackgroundRegistryUpgrade"];
   lastBindingRegistryOpenFailure: DaemonBroker["lastBindingRegistryOpenFailure"];
   deviceClaimMirrors: () => DeviceClaimMirrorHub;
@@ -133,12 +138,25 @@ export class DaemonSessions {
       () => this.host.services.sessionManager().sessionNow(),
     );
     const claimStore = lazyDeviceClaims(() => this.host.bindingRegistry());
+    // A registry file that appeared after startup's check is opened by the first pre-bind claim
+    // that needs it, migrate-free, so its outcome decides the claim (#11811, E1). Shared by
+    // both mirrors so they back off together.
+    const startPreBindRegistryOpen = localPreBindRegistryOpen({
+      preBind: () =>
+        this.host.lifecycle.sessionBrokerConfigPath() === undefined &&
+        !this.host.identity.socketBindCommitted(),
+      openCached: () => this.host.bindingRegistry() !== undefined,
+      registryFileExists: bindingRegistryFileExists,
+      open: () => this.host.openBindingRegistry(undefined, { quiet: true }),
+      timer: this.host.services.timer(),
+    });
     const claimMirror = (platform: "android" | "ios"): StoreDeviceClaimMirror =>
       this.host.deviceClaimMirrors().register(
         new StoreDeviceClaimMirror({
           platform,
           store: claimStore,
           whenOpen: async () => (await this.host.bindingRegistry())?.deviceClaims(),
+          startOpen: startPreBindRegistryOpen,
           registryFileExists: bindingRegistryFileExists,
           openRegistry: () => this.host.startBackgroundRegistryUpgrade(),
           // Bound daemons always create the registry, so from then on the table must decide;

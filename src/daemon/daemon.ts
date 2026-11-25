@@ -668,6 +668,7 @@ export class Daemon {
       identity,
       lifecycle,
       bindingExclusionFactory: () => daemon.injected.bindingExclusionFactory,
+      openBindingRegistry: (...args) => this.openBindingRegistry(...args),
       startBackgroundRegistryUpgrade: () => this.broker.startBackgroundRegistryUpgrade(),
       lastBindingRegistryOpenFailure: () => this.broker.lastBindingRegistryOpenFailure(),
       bindingRegistry: () => daemon.runtime.bindingRegistry,

@@ -127,6 +127,13 @@ export interface StoreDeviceClaimMirrorOptions {
   store: () => DeviceClaims | undefined;
   /** Joins an open already started by startup or maintenance; never starts an open. */
   whenOpen?: () => Promise<DeviceClaims | undefined>;
+  /**
+   * Called by a claim or read that finds no open registry, before it joins {@link whenOpen}: it
+   * may start an open for {@link whenOpen} to join, so the open's outcome decides the claim
+   * (#11811, E1). It declines when an open is cached, no registry file exists, or one was tried
+   * too recently.
+   */
+  startOpen?: () => void;
   /** Probe only on deferred writes, using the existing bounded retry ladder. */
   registryFileExists?: () => boolean;
   /** True once registry opening is handled; false means ask again on the next write. */
@@ -401,19 +408,22 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
     return row;
   }
 
-  /** Join a pending open without letting a terminal skip surface its already-reported failure. */
+  /**
+   * Join a pending open (starting one when none is open) without letting a terminal skip surface
+   * its already-reported failure.
+   */
   private async readStore(): Promise<DeviceClaims | undefined> {
-    let store: DeviceClaims | undefined;
+    const cached = this.options.store();
+    if (cached || !this.options.whenOpen) {
+      return cached;
+    }
+    this.startOpen();
     try {
-      store =
-        this.options.store() ??
-        (this.options.whenOpen
-          ? await raceWithDeadline(this.options.whenOpen, {
-              timer: this.options.timer,
-              timeoutMs: DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS,
-              label: "Device claim registry open",
-            })
-          : undefined);
+      return await raceWithDeadline(this.options.whenOpen, {
+        timer: this.options.timer,
+        timeoutMs: DEVICE_CLAIM_READ_OPEN_TIMEOUT_MS,
+        label: "Device claim registry open",
+      });
     } catch (error) {
       if (!this.skipped) {
         throw error;
@@ -422,7 +432,19 @@ export class StoreDeviceClaimMirror implements DeviceClaimMirror {
       logger.debug(`[DeviceClaims] Ignoring skipped registry open: ${errorMessage(error)}`);
       return undefined;
     }
-    return store;
+  }
+
+  /** Best effort: a claim that cannot start an open still joins any open and is then decided. */
+  private startOpen(): void {
+    if (this.disposed || this.skipped) {
+      // Shutdown has taken the registry away (or files decide): nothing would close a new open.
+      return;
+    }
+    try {
+      this.options.startOpen?.();
+    } catch (error) {
+      logger.warn(`[DeviceClaims] Cannot start a registry open: ${errorMessage(error)}`, error);
+    }
   }
 
   /**

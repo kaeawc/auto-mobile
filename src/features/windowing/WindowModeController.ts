@@ -527,6 +527,15 @@ export class AndroidWindowModeController implements WindowModeController {
         )
       ).info;
     }
+    // The WM Shell will not split a freeform window, so bring either app back to
+    // fullscreen first (#19194); a fullscreen launch also brings it to the top.
+    for (const appId of [partner, call.appId]) {
+      const left = await this.leaveFreeform(call, info, appId);
+      if (!left.matched) {
+        return left;
+      }
+      info = left.info;
+    }
     if (!isTop(info, call.appId)) {
       info = (
         await this.tryCommands(
@@ -549,6 +558,23 @@ export class AndroidWindowModeController implements WindowModeController {
         ? {}
         : { reason: `The system did not put ${call.appId} and ${partner} into split screen.` }),
     };
+  }
+
+  private async leaveFreeform(call: Call, info: BackStackInfo, appId: string): Promise<Outcome> {
+    if (!isFreeform(info, appId)) {
+      return { info, matched: true };
+    }
+    const left = await this.tryCommands(
+      call,
+      [launcherStart(await this.launcher(call, appId), WINDOWING_MODE.fullscreen)],
+      (next) => appTask(next, appId)?.windowingMode === "fullscreen",
+    );
+    return left.matched
+      ? left
+      : {
+          ...left,
+          reason: `${appId} is in a freeform window and did not return to fullscreen, which split screen needs; call windowMode with mode fullscreen for it, then retry.`,
+        };
   }
 
   /** Runs each candidate until a read-back satisfies `reached`; records every attempt. */

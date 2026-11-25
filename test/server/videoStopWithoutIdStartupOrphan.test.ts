@@ -237,6 +237,11 @@ test("owner stops the only startup orphan without an id exactly once", async () 
   expect(videoManager.getStartupOrphanCaptures()!.list(device.deviceId)).toEqual([]);
   const again = await outcome({ action: "stop", sessionUuid: OWNER });
   expect(again.error?.message).toContain("No active video recording found for device.");
+  // The refusal points at the recording that already ended (#19194).
+  expect(again.error?.message).toContain(
+    "The most recent recording on this device, startup-orphan, already ended",
+  );
+  expect(again.error?.message).toContain("automobile:video/archive/startup-orphan");
   expect(stops).toBe(1);
 });
 

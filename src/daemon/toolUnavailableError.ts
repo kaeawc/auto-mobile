@@ -6,6 +6,17 @@ import {
 } from "./types";
 export { UnknownToolError } from "./UnknownToolError";
 
+/** Marks a plan-only refusal in prose, so the proxy can lead with the fix (#19194). */
+export const PLAN_ONLY_CALL_HINT = "runs only as a step inside executePlan";
+
+/** What a direct call of a plan-only tool (`barrier`, `criticalSection`) must do instead. */
+export function planOnlyCallGuidance(toolName: string): string {
+  return (
+    `"${toolName}" ${PLAN_ONLY_CALL_HINT}: put it in the plan's steps and pass the ` +
+    `participating devices in executePlan's devices list; it cannot be called directly`
+  );
+}
+
 /**
  * A tool this server registers but whose availability gate (debug-only,
  * embedded-SDK-only, plan-only) rejects the call (issue #10177).

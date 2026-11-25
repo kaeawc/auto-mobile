@@ -12,6 +12,15 @@ import {
   isLaunchPermissionDialogObservation,
 } from "./launchObservationPackages";
 import { describeLaunchDrivingRestriction } from "./launchDrivingRestriction";
+import { findSystemUiAnrDialog } from "../../utils/androidSystemUiAnr";
+
+/** A System UI ANR dialog also reports as a SystemUI overlay; name it instead of the shade (#19194). */
+const SYSTEM_UI_ANR_LAUNCH_BLOCKER =
+  'a "System UI isn\'t responding" (ANR) dialog is covering the app, not the notification shade. Tap its Wait button (tapOn { text: "Wait" }), give System UI a few seconds to recover (observe to confirm the dialog is gone), then retry launchApp.';
+
+function showsSystemUiAnrDialog({ viewHierarchy }: ObserveResult): boolean {
+  return viewHierarchy !== undefined && findSystemUiAnrDialog(viewHierarchy) !== undefined;
+}
 
 const LAUNCH_OBSERVATION_TIMEOUT_MS = 5000;
 const LAUNCH_OBSERVATION_POLL_INTERVAL_MS = 200;
@@ -363,6 +372,10 @@ export class LaunchObservation {
       latestObservation.viewHierarchy?.hierarchy?.unavailableReason === "device_locked"
     ) {
       return "the device is locked (the lock screen is covering the app); call `wakeAndUnlock` first.";
+    }
+
+    if (showsSystemUiAnrDialog(latestObservation)) {
+      return SYSTEM_UI_ANR_LAUNCH_BLOCKER;
     }
 
     if (this.isSystemUiOverlayObservation(latestObservation)) {

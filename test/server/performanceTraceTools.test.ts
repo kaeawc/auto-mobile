@@ -9,6 +9,7 @@ import {
   performanceTraceResultSchema,
   performanceTraceSchema,
   registerPerformanceTraceTools,
+  type PerformanceTraceSessionHost,
 } from "../../src/server/performanceTraceTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { CountingIdGenerator } from "../../src/utils/IdGenerator";
@@ -23,6 +24,7 @@ const device: BootedDevice = { deviceId: "emulator-5554", name: "Pixel", platfor
 function fakeManager(stopError?: Error) {
   const stops: string[] = [];
   const starts: string[] = [];
+  const discards: string[] = [];
   const recorder: PerformanceTraceRecorder = {
     start: async (request) => (
       starts.push(request.traceId),
@@ -36,6 +38,9 @@ function fakeManager(stopError?: Error) {
             throw stopError;
           }
         },
+        discard: async () => {
+          discards.push(request.traceId);
+        },
         summarize: async () => ({ summary: { durationMs: 900 }, warnings: [] }),
       }
     ),
@@ -46,7 +51,56 @@ function fakeManager(stopError?: Error) {
     idGenerator: new CountingIdGenerator("t"),
     timer: new FakeTimer(),
   });
-  return { manager, stops, starts };
+  return { manager, stops, starts, discards };
+}
+
+interface FakeSession {
+  sessionId: string;
+  assignedDevice: string;
+}
+
+/** A session host whose one session can be released before or during a tracked start. */
+class FakeTraceSessionHost implements PerformanceTraceSessionHost<FakeSession> {
+  readonly session: FakeSession = { sessionId: "session-a", assignedDevice: device.deviceId };
+  admitted = true;
+  /** The release drain gave up: the session ends right after the start finished. */
+  releaseDuringStart = false;
+  /** The session began releasing before the tracked setup could run. */
+  refuseSetup = false;
+  tracked = 0;
+  readonly pending: Array<{ deviceId: string; cleanup: Promise<unknown> }> = [];
+
+  getSession(sessionId: string): FakeSession | null {
+    return sessionId === this.session.sessionId ? this.session : null;
+  }
+
+  isAdmittedForAutomation(): boolean {
+    return this.admitted;
+  }
+
+  async trackSessionSetup(_session: FakeSession, createSetup: () => Promise<void>): Promise<void> {
+    if (this.refuseSetup) {
+      return;
+    }
+    this.tracked += 1;
+    await createSetup();
+    if (this.releaseDuringStart) {
+      this.admitted = false;
+    }
+  }
+
+  registerPendingDeviceCleanup(deviceId: string, cleanup: Promise<unknown>): void {
+    this.pending.push({ deviceId, cleanup });
+  }
+}
+
+function sessionCall(
+  manager: PerformanceTraceManager,
+  host: FakeTraceSessionHost,
+  args: Record<string, unknown>,
+) {
+  const handler = createPerformanceTraceHandler(manager, { sessionHost: () => host });
+  return handler(device, performanceTraceSchema.parse({ sessionUuid: "session-a", ...args }));
 }
 
 async function call(manager: PerformanceTraceManager, args: Record<string, unknown>) {
@@ -176,5 +230,60 @@ describe("performanceTrace categories (#18688)", () => {
       handler(iphone, performanceTraceSchema.parse({ action: "start", categories: ["sched"] })),
     ).rejects.toThrow("categories are Android (Perfetto) only");
     expect(starts).toEqual([]);
+  });
+});
+
+describe("performanceTrace start against session release (#18698)", () => {
+  test("a live session's start runs as tracked session setup", async () => {
+    const { manager } = fakeManager();
+    const host = new FakeTraceSessionHost();
+
+    const started = toolStructured(
+      await sessionCall(manager, host, { action: "start", template: "hitches" }),
+    );
+
+    expect(started).toMatchObject({ traceId: "trace-t-1", state: "recording" });
+    expect(host.tracked).toBe(1);
+    expect(host.pending).toEqual([]);
+  });
+
+  test("a start on a released session is refused before any recorder runs", async () => {
+    const { manager, starts } = fakeManager();
+    const host = new FakeTraceSessionHost();
+    host.admitted = false;
+
+    await expect(
+      sessionCall(manager, host, { action: "start", template: "hitches" }),
+    ).rejects.toThrow("Cannot start a performance trace: session is released");
+    expect(starts).toEqual([]);
+    expect(host.tracked).toBe(0);
+  });
+
+  test("a start is refused when the session began releasing before its setup ran", async () => {
+    const { manager, starts } = fakeManager();
+    const host = new FakeTraceSessionHost();
+    host.refuseSetup = true;
+
+    await expect(
+      sessionCall(manager, host, { action: "start", template: "hitches" }),
+    ).rejects.toThrow("before the trace started; nothing was recorded");
+    expect(starts).toEqual([]);
+  });
+
+  test("a start that finishes after release is discarded as pending device cleanup", async () => {
+    const { manager, starts, stops, discards } = fakeManager();
+    const host = new FakeTraceSessionHost();
+    host.releaseDuringStart = true;
+
+    await expect(
+      sessionCall(manager, host, { action: "start", template: "hitches" }),
+    ).rejects.toThrow("trace-t-1 was discarded");
+
+    expect(starts).toEqual(["trace-t-1"]);
+    expect(host.pending.map((entry) => entry.deviceId)).toEqual([device.deviceId]);
+    await host.pending[0]!.cleanup;
+    expect(discards).toEqual(["trace-t-1"]);
+    expect(stops).toEqual([]);
+    expect(manager.activeTraceIds()).toEqual([]);
   });
 });

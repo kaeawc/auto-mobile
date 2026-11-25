@@ -43,6 +43,11 @@ export interface RecordingPerformanceTrace {
   readonly signalled: boolean;
   /** Stop the recorder, wait for it to finish writing, and leave the artifact on the host. */
   stop(signal?: AbortSignal): Promise<void>;
+  /**
+   * End the recorder without keeping its artifact: no pull and no finalisation wait, and what it
+   * wrote is deleted. For a start that outlived its session (#18698).
+   */
+  discard(): Promise<void>;
   /** Read the finished artifact into a bounded summary; failures become warnings. */
   summarize(
     signal?: AbortSignal,

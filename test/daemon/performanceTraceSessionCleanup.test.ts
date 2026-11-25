@@ -27,6 +27,7 @@ function setup() {
         stops.push(request.traceId);
         stopSignals.push(getAbortSignal());
       },
+      discard: async () => {},
       summarize: async () => ({ summary: {}, warnings: [] }),
     }),
   };
@@ -60,6 +61,7 @@ function setupWithLeftover() {
           remotePath: LEFTOVER,
         });
       },
+      discard: async () => {},
       summarize: async () => ({ summary: {}, warnings: [] }),
     }),
   };

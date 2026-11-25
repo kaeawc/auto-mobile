@@ -209,6 +209,32 @@ export class PerformanceTraceManager {
     return forgotten.map((trace) => trace.traceId);
   }
 
+  /**
+   * End a trace whose start outlived its session (#18698) without pulling or summarising it.
+   * A stop already in flight (a release cleanup) is waited for instead. Never rejects: a failure
+   * is logged, and a recorder that was never signalled runs until its `timeLimitMs`.
+   */
+  async discard(traceId: string): Promise<void> {
+    const trace = this.active.get(traceId);
+    if (!trace) {
+      return;
+    }
+    if (this.finishing.has(traceId)) {
+      await trace.deviceDone;
+      return;
+    }
+    this.active.delete(traceId);
+    try {
+      await trace.recording.discard();
+    } catch (error) {
+      logger.warn(
+        `[performanceTrace] failed to discard ${traceId} on ${trace.device.deviceId}` +
+          `${trace.recording.signalled ? "" : `; it runs until its ${trace.options.timeLimitMs} ms limit`}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+  }
+
   /** Stop every trace on a released or removed device. */
   async stopTracesOnDevice(deviceId: string): Promise<void> {
     await this.stopMatching((traceDevice) => traceDevice === deviceId);

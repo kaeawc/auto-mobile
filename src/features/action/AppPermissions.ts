@@ -144,6 +144,11 @@ export interface SetAppPermissionsResult {
    * a microphone grant lands on a device whose host has no audio input (#13627).
    */
   diagnostics?: AudioInputDiagnostic[];
+  /**
+   * True when an Apple TV simulator applied a change: `simctl privacy` terminates the app, so the
+   * next interaction would otherwise reach the tvOS home screen (#19186).
+   */
+  appTerminated?: true;
 }
 
 export interface GetAppPermissionsResult {
@@ -309,6 +314,8 @@ export class AppPermissions {
         ...(permissionResult.error ? { error: permissionResult.error } : {}),
       })),
       ...(result.error ? { error: result.error } : {}),
+      // simctl privacy terminates the app it changes; nothing else tells the caller (#19186).
+      ...(result.changedCount > 0 ? { appTerminated: true as const } : {}),
     };
   }
 

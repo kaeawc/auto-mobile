@@ -5,13 +5,13 @@
 | 💿 <code>listDeviceImages</code> | List device images | <span class="tool-platforms">—</span> | <span class="tool-needs">—</span> |
 
 `listDeviceImages` lists the configured emulators (Android) or simulators (iOS,
-tvOS, visionOS) on this host, booted or not.
+watchOS, tvOS, visionOS) on this host, booted or not.
 
-| Parameter     | Values                               | Default   |
-| ------------- | ------------------------------------ | --------- |
-| `platform`    | `android`, `ios`, `tvos`, `visionos` | required  |
-| `detail`      | `compact`, `full`                    | `compact` |
-| `sessionUuid` | session used for admission           | none      |
+| Parameter     | Values                                          | Default   |
+| ------------- | ----------------------------------------------- | --------- |
+| `platform`    | `android`, `ios`, `watchos`, `tvos`, `visionos` | required  |
+| `detail`      | `compact`, `full`                               | `compact` |
+| `sessionUuid` | session used for admission                      | none      |
 
 ## Result
 

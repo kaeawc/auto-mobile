@@ -2,6 +2,7 @@ import { defaultDeviceFrameId } from "../deviceFrames";
 import type { WebOrientation } from "../webFrame";
 import { prototypeWebFitScale } from "../webPageRuntime";
 import { FADE_EDGES_PAGE_CSS } from "../webStylePolish";
+import { ANCHORED_LAYERS_PAGE_CSS } from "../webMenu";
 import { buildPrototypeDom } from "./prototypeWebDom";
 import { markupGlyphParser, type PrototypeGlyphParser } from "./prototypeWebGlyphs";
 import { PrototypeWebRefusal } from "./prototypeWebInput";
@@ -40,6 +41,7 @@ const SHELL_CSS = [
   "[data-error]{margin:16px;padding:12px;border:1px solid #b3261e;border-radius:8px;color:#b3261e;background:#fff}",
   "[hidden]{display:none!important}",
   FADE_EDGES_PAGE_CSS,
+  ANCHORED_LAYERS_PAGE_CSS,
 ].join("");
 
 interface Shell {

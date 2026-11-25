@@ -6,7 +6,9 @@ export const WEB_LAYER_TYPES: ReadonlySet<string> = new Set([
   "bottomSheet",
   "dialog",
   "drawer",
+  "menu",
   "snackbar",
+  "tooltip",
 ]);
 
 /** Whether `type` draws only in the window's layer while its `openWhen` holds, never in place. */

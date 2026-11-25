@@ -1,0 +1,111 @@
+{
+  "id": "menu-tooltip-open",
+  "window": {
+    "placement": {
+      "type": "fullscreen"
+    }
+  },
+  "state": {
+    "menuOpen": true,
+    "tipOpen": true
+  },
+  "root": {
+    "type": "column",
+    "style": {
+      "width": "fill",
+      "height": "fill",
+      "padding": {
+        "start": 16,
+        "end": 16,
+        "top": 16,
+        "bottom": 16
+      },
+      "spacing": 16
+    },
+    "children": [
+      {
+        "type": "row",
+        "style": {
+          "width": "fill",
+          "alignment": "center"
+        },
+        "children": [
+          {
+            "type": "text",
+            "text": "Inbox",
+            "style": {
+              "textStyle": "titleLarge",
+              "weight": 1
+            }
+          },
+          {
+            "type": "iconButton",
+            "icon": "more_vert"
+          },
+          {
+            "type": "menu",
+            "testTag": "overflow",
+            "openWhen": {
+              "key": "menuOpen",
+              "equals": true
+            },
+            "items": [
+              {
+                "label": "Mark all read",
+                "icon": "done"
+              },
+              {
+                "label": "Settings",
+                "icon": "settings",
+                "trailingText": "Ctrl+,"
+              },
+              {
+                "type": "divider"
+              },
+              {
+                "label": "Archive",
+                "enabled": false
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "Three new messages",
+        "style": {
+          "textStyle": "bodyLarge"
+        }
+      },
+      {
+        "type": "spacer",
+        "style": {
+          "weight": 1
+        }
+      },
+      {
+        "type": "button",
+        "id": "compose",
+        "label": "Compose"
+      },
+      {
+        "type": "tooltip",
+        "testTag": "tip",
+        "text": "Start a new message",
+        "anchorTo": "compose",
+        "caret": "bottom",
+        "spotlight": {
+          "padding": 6
+        },
+        "openWhen": {
+          "key": "tipOpen",
+          "equals": true
+        }
+      }
+    ],
+    "safeAreaPadding": {
+      "edges": ["top", "bottom"],
+      "types": ["systemBars"]
+    }
+  }
+}

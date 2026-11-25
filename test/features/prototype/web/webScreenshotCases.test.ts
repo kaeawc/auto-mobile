@@ -18,9 +18,9 @@ const cases = webScreenshotCases();
 
 describe("prototype web screenshot goldens (#16346)", () => {
   test("every case has a fixture and a viewport-sized golden per orientation", () => {
-    // Fourteen specs in two frames, the largest text and RTL settings in both (#16552), and one
+    // Seventeen specs in two frames, the largest text and RTL settings in both (#16552), and one
     // spec in each watch, TV and car frame (#16446).
-    expect(cases.length).toBe(37);
+    expect(cases.length).toBe(43);
     for (const entry of cases) {
       expect(existsSync(entry.fixture)).toBe(true);
       const goldens = webScreenshotGoldens(entry);

@@ -13,6 +13,13 @@ import {
   STRETCH,
 } from "./webCss";
 import { prototypeSpecForDevice } from "../prototypeComponents";
+import { walkPrototypeNodes } from "../prototypeNodeChildren";
+import {
+  WEB_BACKDROP_WALLPAPER,
+  webBackdropCss,
+  webBackdropPlan,
+  type WebBackdropPlan,
+} from "./webBackdrop";
 import type { PrototypeFormatLogger } from "../prototypeFormat";
 import { resolvePrototypeStrings } from "../prototypeStrings";
 import { prototypeRolePalette, type PrototypeColorMode } from "../prototypeContrast";
@@ -253,6 +260,28 @@ function placed(
 }
 
 /**
+ * The window blurring what is behind it under its tint, or its tonal fallback (#16536): a
+ * fullscreen window's own box, a sheet's or floating window's region inside its placement.
+ */
+function withBackdrop(
+  window: WebElement,
+  plan: WebBackdropPlan | undefined,
+  style: WebStyleContext,
+): WebElement {
+  if (!plan) {
+    return window;
+  }
+  const frosted = (box: WebElement): WebElement => ({
+    ...box,
+    style: { ...box.style, ...webBackdropCss(plan, style) },
+  });
+  const [region] = window.children;
+  return window.attrs[DATA_WINDOW] === "fullscreen" || typeof region !== "object"
+    ? frosted(window)
+    : { ...window, children: [frosted(region), ...window.children.slice(1)] };
+}
+
+/**
  * The theme's `typography.fontFamily` on the app window, so every label inherits it, not only nodes
  * with a `textStyle` role: Android replaces the family in every Material type role, which control
  * labels (buttons, checkboxes, switches) draw with, and iOS applies the theme design wherever a
@@ -372,6 +401,7 @@ function stillScope(
       ? { top: 0, bottom: 0 }
       : { top: frame.safeArea[orientation].top, bottom: frame.safeArea[orientation].bottom },
     ...optionalScope(options),
+    ...anchorTargetsScope(expanded),
     stacks: [],
     layers: [],
     imageDraws: [],
@@ -386,6 +416,17 @@ function stillScope(
     ...scope,
     style: { ...scope.style, mode, palette: prototypeDrawnPalette(expanded, mode, surface) },
   };
+}
+
+/** The node ids the spec's tooltips anchor to (#16536); a spec without one sets none. */
+function anchorTargetsScope(spec: unknown): Partial<WebRenderScope> {
+  const targets = new Set<string>();
+  walkPrototypeNodes(spec, (node) => {
+    if (node.type === "tooltip" && typeof node.anchorTo === "string") {
+      targets.add(node.anchorTo);
+    }
+  });
+  return targets.size === 0 ? {} : { anchorTargets: targets };
 }
 
 /** The scope fields only some callers set: the screen to draw and the inlinable images' slots. */
@@ -488,13 +529,18 @@ export function renderPrototypeStill(
   const dark = scope.style.mode === "dark";
   const textColor = cssColor("onSurface", scope.style) ?? (dark ? "#e6e0e9" : "#1d1b20");
   const background = screenBackground(scope.style);
-  const placedContent = themedFamily(placed(expanded, root, scope, locale), scope.style);
+  const backdrop = webBackdropPlan(expanded, scope.skin === "ios" ? "ios" : "android");
+  const placedContent = themedFamily(
+    withBackdrop(placed(expanded, root, scope, locale), backdrop, scope.style),
+    scope.style,
+  );
   // A d-pad device always has a focused item, so a TV still shows where focus starts.
   const content = frame.input === "dpad" ? markInitialFocus(placedContent) : placedContent;
   const paint = {
     dark,
     textColor,
     background,
+    ...(backdrop ? { wallpaper: WEB_BACKDROP_WALLPAPER } : {}),
     ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
   };
   const element = options.chromeless

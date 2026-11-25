@@ -18,6 +18,7 @@ import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
+import { FakeXrGlassesDetector } from "../../fakes/FakeXrGlassesDetector";
 import { FakeWearOsDetector } from "../../fakes/FakeWearOsDetector";
 import { FakeAndroidTvDetector } from "../../fakes/FakeAndroidTvDetector";
 import { FakeAndroidAutomotiveDetector } from "../../fakes/FakeAndroidAutomotiveDetector";
@@ -108,6 +109,7 @@ describe("Rotate", () => {
       timer: fakeTimer,
       options: {
         xrDetector: new FakeAndroidXrDetector(),
+        glassesDetector: new FakeXrGlassesDetector(),
         wearOsDetector: new FakeWearOsDetector(),
         tvDetector: new FakeAndroidTvDetector(),
         automotiveDetector: new FakeAndroidAutomotiveDetector(),

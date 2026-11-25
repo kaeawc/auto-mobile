@@ -6,6 +6,10 @@ import {
   type AndroidXrDetector,
 } from "../../utils/android-cmdline-tools/androidXrDevice";
 import {
+  defaultXrGlassesDetector,
+  type XrGlassesDetector,
+} from "../../utils/android-cmdline-tools/xrGlassesDevice";
+import {
   defaultWearOsDetector,
   type WearOsDetector,
 } from "../../utils/android-cmdline-tools/wearOsDevice";
@@ -24,6 +28,8 @@ import {
  */
 export interface RotateXrOptions {
   xrDetector?: AndroidXrDetector;
+  /** AI glasses declare no spatial XR feature, so they are asked about separately (#19196). */
+  glassesDetector?: XrGlassesDetector;
   wearOsDetector?: WearOsDetector;
   tvDetector?: AndroidTvDetector;
   automotiveDetector?: AndroidAutomotiveDetector;
@@ -82,8 +88,9 @@ export function androidAutomotiveRotateUnsupportedError(deviceId: string): Rotat
 
 /**
  * Throw {@link RotateUnsupportedError} when the shared XR predicate says the device is Android XR,
- * the Wear OS predicate says it is a watch, the Android TV predicate says it is a TV, or the
- * Android Automotive predicate says it is a head unit, before any rotation setting is written or a
+ * the glasses predicate says it is Android XR glasses, the Wear OS predicate says it is a watch, the
+ * Android TV predicate says it is a TV, or the Android Automotive predicate says it is a head unit,
+ * before any rotation setting is written or a
  * rotation wait starts.
  */
 export async function refuseRotateOnFixedOrientationDevice(
@@ -91,6 +98,7 @@ export async function refuseRotateOnFixedOrientationDevice(
   adb: AdbCommandRunner,
   {
     xrDetector = defaultAndroidXrDetector,
+    glassesDetector = defaultXrGlassesDetector,
     wearOsDetector = defaultWearOsDetector,
     tvDetector = defaultAndroidTvDetector,
     automotiveDetector = defaultAndroidAutomotiveDetector,
@@ -104,6 +112,10 @@ export async function refuseRotateOnFixedOrientationDevice(
     refusal: (deviceId: string) => RotateUnsupportedError;
   }> = [
     { matches: () => xrDetector.isAndroidXr(evidence), refusal: androidXrRotateUnsupportedError },
+    {
+      matches: () => glassesDetector.isXrGlasses(evidence),
+      refusal: androidXrRotateUnsupportedError,
+    },
     { matches: () => wearOsDetector.isWearOs(evidence), refusal: wearOsRotateUnsupportedError },
     { matches: () => tvDetector.isAndroidTv(evidence), refusal: androidTvRotateUnsupportedError },
     {

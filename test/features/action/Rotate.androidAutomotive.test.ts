@@ -16,6 +16,7 @@ import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeXrGlassesDetector } from "../../fakes/FakeXrGlassesDetector";
 import { FakeWearOsDetector } from "../../fakes/FakeWearOsDetector";
 import { FakeWindow } from "../../fakes/FakeWindow";
 
@@ -42,6 +43,7 @@ function setup(
     timer,
     options: {
       xrDetector: new FakeAndroidXrDetector(false),
+      glassesDetector: new FakeXrGlassesDetector(),
       wearOsDetector: new FakeWearOsDetector(false),
       tvDetector,
       automotiveDetector,

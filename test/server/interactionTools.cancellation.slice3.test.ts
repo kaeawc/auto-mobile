@@ -2,6 +2,8 @@ import type {
   ObservedActionResult,
   ObservedEnvelope,
 } from "../../src/features/action/observedInteractionTypes";
+import { FakeAndroidTvDetector } from "../fakes/FakeAndroidTvDetector";
+import { FakeXrGlassesDetector } from "../fakes/FakeXrGlassesDetector";
 import {
   cancellationHandlers,
   cancellationTests,
@@ -216,7 +218,16 @@ test("single-use openLink dispatches once and preserves unknown dispatch in the 
     { timer, retryExecutor: new DefaultRetryExecutor(timer) },
   );
   interactionDeps.openUrlFactory = () =>
-    new UnobservedOpenURL(device, { adb, simctl: null, devicectl: null, timer });
+    new UnobservedOpenURL(device, {
+      adb,
+      simctl: null,
+      devicectl: null,
+      timer,
+      formFactors: {
+        tvDetector: new FakeAndroidTvDetector(false),
+        glassesDetector: new FakeXrGlassesDetector(false),
+      },
+    });
   const url = "myapp://sign-in?token=single-use";
   const error = await handler("openLink")(device, { url }).then(
     () => undefined,

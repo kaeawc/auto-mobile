@@ -246,6 +246,32 @@ describe("prototype tool on an iOS simulator", () => {
       expect((await call({ action: "status" })).payload.platformRuntime).toEqual(platformRuntime);
     });
 
+    test("inspect surfaces the notifications module report", async () => {
+      const report = {
+        permission: "granted",
+        badge: 0,
+        channels: [{ id: "messages", importance: "high", blocked: false }],
+        active: [
+          {
+            id: "welcome",
+            channel: "messages",
+            title: "Welcome",
+            ongoing: false,
+            actions: [],
+            postedAt: 1003,
+          },
+        ],
+        pending: [{ id: "later", fireAt: 9000 }],
+      };
+      const platformRuntime: PrototypePlatformReport = {
+        runtime: "iosViewer",
+        modules: { notifications: { availability: "ready", inFlight: 0, report } },
+      };
+      agent.queueReplies(agentStatus({ platformRuntime }));
+      const { payload } = await call({ action: "inspect" });
+      expect(payload.platformRuntime?.modules.notifications?.report).toEqual(report);
+    });
+
     test("inspect and status preserve iOS stack paths", async () => {
       const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
       agent.queueReplies(agentStatus({ stacks }));

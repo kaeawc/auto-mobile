@@ -2,7 +2,11 @@ import { expect, test } from "bun:test";
 import reports from "../../fixtures/prototype-platform-report/report.json";
 import { InMemoryPrototypeStatusStore } from "../../../src/features/prototype/PrototypeStatusStore";
 import { prototypeRuntimeNotes } from "../../../src/features/prototype/prototypePlatformNotes";
-import { prototypePlatformReportSchema } from "../../../src/features/prototype/prototypePlatformReport";
+import {
+  parsePrototypePlatformReport,
+  prototypePlatformReportSchema,
+} from "../../../src/features/prototype/prototypePlatformReport";
+import type { PrototypeNotificationsReport } from "../../../src/features/prototype/prototypeNotificationsReport";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { event } from "../../helpers/prototypeTestEvent";
 
@@ -14,6 +18,55 @@ test("replays the shared runtime reports with all availability reasons", () => {
       modules: { cast: { availability: "degraded", reason: "unknown" } },
     }).success,
   ).toBe(false);
+});
+
+const notificationsReport: PrototypeNotificationsReport = {
+  permission: "granted",
+  badge: 1,
+  channels: [{ id: "messages", importance: "high", blocked: false }],
+  active: [
+    {
+      id: "welcome",
+      channel: "messages",
+      title: "Welcome",
+      ongoing: false,
+      actions: ["open"],
+      postedAt: 1003,
+    },
+  ],
+  pending: [{ id: "later", fireAt: 9000 }],
+};
+
+function runtimeWith(modules: Record<string, unknown>): unknown {
+  return { runtime: "iosViewer", modules };
+}
+
+test("keeps the notifications module report", () => {
+  expect(
+    parsePrototypePlatformReport(
+      runtimeWith({
+        notifications: { availability: "ready", inFlight: 0, report: notificationsReport },
+        haptics: { availability: "ready", mode: "real" },
+      }),
+    )?.modules.notifications?.report,
+  ).toEqual(notificationsReport);
+});
+
+test("drops the whole runtime report for a malformed notifications report", () => {
+  const malformed = { ...notificationsReport, active: [{ id: "welcome" }] };
+  expect(
+    parsePrototypePlatformReport(
+      runtimeWith({ notifications: { availability: "ready", report: malformed } }),
+    ),
+  ).toBeUndefined();
+});
+
+test("refuses a report on any module other than notifications", () => {
+  expect(
+    parsePrototypePlatformReport(
+      runtimeWith({ haptics: { availability: "ready", report: notificationsReport } }),
+    ),
+  ).toBeUndefined();
 });
 
 test("mirrors explicit call telemetry only within the reporting scope", () => {

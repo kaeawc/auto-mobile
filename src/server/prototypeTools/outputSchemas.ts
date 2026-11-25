@@ -513,7 +513,7 @@ export const prototypeOutputSchema = z.object({
   platformRuntime: prototypePlatformReportSchema
     .optional()
     .describe(
-      "inspect: the runtime and its registered modules; status: the host mirror from the last show or inspect, updated by platform call events. Unknown details are omitted",
+      "inspect: the runtime and its registered modules, with the notifications inventory as modules.notifications.report (iOS only); status: the host mirror from the last show or inspect, updated by platform call events. Unknown details are omitted",
     ),
   platformStatus: z
     .object({

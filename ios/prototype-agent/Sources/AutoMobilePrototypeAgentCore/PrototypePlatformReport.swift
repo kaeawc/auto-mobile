@@ -27,12 +27,15 @@ struct PrototypePlatformReport: Codable, Equatable, Sendable {
         let mode: Mode?
         let reason: Reason?
         let inFlight: UInt?
+        /// The module's own report, such as the notifications inventory (#14277).
+        var report: JSONValue?
 
         var wireObject: JSONValue {
             var fields: [String: JSONValue] = ["availability": .string(availability.rawValue)]
             if let mode { fields["mode"] = .string(mode.rawValue) }
             if let reason { fields["reason"] = .string(reason.rawValue) }
             if let inFlight { fields["inFlight"] = .number(Double(inFlight)) }
+            if let report { fields["report"] = report }
             return .object(fields)
         }
     }
@@ -65,6 +68,15 @@ extension PrototypePlatformReportModeSource {
     var platformReportReason: PrototypePlatformReport.Reason? { platformReportMode == .fake ? .fakeMode : nil }
 }
 
+/// A first-party module that serves its own report as `modules.<name>.report`. Internal, so a custom
+/// module cannot emit one: the host accepts a report on the notifications module only (#14277).
+@MainActor
+protocol PrototypePlatformModuleReportSource {
+    var platformReport: JSONValue? { get }
+}
+
+extension PrototypeNotificationsModule: PrototypePlatformModuleReportSource {}
+
 extension PrototypeBiometricModule: PrototypePlatformReportModeSource {}
 extension PrototypeClipboardModule: PrototypePlatformReportModeSource {}
 extension PrototypeConnectivityModule: PrototypePlatformReportModeSource {}
@@ -90,20 +102,21 @@ extension PrototypePlatformRegistry {
             let source = module as? any PrototypePlatformReportModeSource
             let mode = source?.platformReportMode
             let count = inFlight[module.name, default: 0]
+            let report = (module as? any PrototypePlatformModuleReportSource)?.platformReport
             switch module.availability() {
             case .ready:
                 return PrototypePlatformReport.Module(
                     availability: mode == .simulated ? .degraded : .ready,
-                    mode: mode, reason: source?.platformReportReason, inFlight: count
+                    mode: mode, reason: source?.platformReportReason, inFlight: count, report: report
                 )
             case .needsPermission:
                 return PrototypePlatformReport.Module(
-                    availability: .unavailable, mode: mode, reason: .permissionDenied, inFlight: count
+                    availability: .unavailable, mode: mode, reason: .permissionDenied, inFlight: count, report: report
                 )
             case let .unavailable(reason):
                 return PrototypePlatformReport.Module(
                     availability: .unavailable, mode: mode,
-                    reason: .init(rawValue: reason), inFlight: count
+                    reason: .init(rawValue: reason), inFlight: count, report: report
                 )
             }
         }

@@ -1,3 +1,4 @@
+import { extname, isAbsolute } from "node:path";
 import { z } from "zod/v4";
 import type {
   PrototypePlatformOutcomeRequest,
@@ -25,6 +26,38 @@ export const prototypePlatformOutcomeSchema = z.union([
 export type PrototypePlatformOutcome =
   | { result: PrototypeJson }
   | Extract<z.output<typeof prototypePlatformOutcomeSchema>, { error: unknown }>;
+
+/**
+ * System picker and camera calls (#14197) whose result the device builds from host media files.
+ * A simulated result names those files; turning them into media items needs device media
+ * injection (#14192), which no runtime has yet, so a well-formed result is refused with that
+ * reason and a malformed one with its shape. Errors such as `cancelled` pass unchanged.
+ */
+const MEDIA_FILE_CALLS: Readonly<Record<string, { maxFiles: number }>> = {
+  "mediaLibrary.pick": { maxFiles: 64 },
+  "camera.capture": { maxFiles: 1 },
+};
+const MEDIA_FILE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".mp4", ".webm"];
+
+function mediaFilesResultIssue(call: string, result: unknown): string | undefined {
+  const rule = MEDIA_FILE_CALLS[call];
+  if (rule === undefined) {
+    return undefined;
+  }
+  const files = z
+    .strictObject({ files: z.array(z.string().max(4096)).min(1).max(rule.maxFiles) })
+    .safeParse(result);
+  const count = rule.maxFiles === 1 ? "exactly one" : `1 to ${rule.maxFiles}`;
+  if (
+    !files.success ||
+    !files.data.files.every(
+      (path) => isAbsolute(path) && MEDIA_FILE_EXTENSIONS.includes(extname(path).toLowerCase()),
+    )
+  ) {
+    return `A ${call} result is {files: [...]} with ${count} absolute path(s) to ${MEDIA_FILE_EXTENSIONS.join(", ")} files. To simulate a cancel, use {error: {code: "cancelled"}}.`;
+  }
+  return `A simulated ${call} result needs device media injection, which no connected runtime supports yet, so it cannot be queued. Simulate a cancel or failure with {error: {code: "cancelled"}} instead.`;
+}
 
 type OutcomeValidation =
   | { outcome: PrototypePlatformOutcome; issue?: never }
@@ -56,6 +89,10 @@ export function validatePrototypePlatformOutcome(
     const result = prototypeJsonSchema.safeParse(parsed.data.result);
     if (!result.success) {
       return { issue: ["outcome", "simulate result must be a JSON value"] };
+    }
+    const mediaIssue = mediaFilesResultIssue(call, result.data);
+    if (mediaIssue !== undefined) {
+      return { issue: ["outcome", mediaIssue] };
     }
     validated = { result: result.data };
   } else {

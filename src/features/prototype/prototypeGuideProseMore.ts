@@ -471,7 +471,10 @@ it advertises \`mediaLibrary\` without the capture capability.
   storage failures are \`platform_error\` (detail \`media_limit\` or \`io\`). Only one system-UI call can run
   per prototype at a time; a second fails with \`too_many_in_flight\`.
 - Current runtimes advertise neither module, so the host refuses such a spec before show.
-  \`platformMode\` and simulated outcomes through \`prototype simulate\` are not accepted yet.
+  \`platformMode\` is not accepted yet. \`prototype simulate\` with \`call\` and \`outcome\` queues an
+  outcome only on a runtime whose module supports simulation, which neither has yet; the host
+  already refuses a \`{result: {files}}\` outcome, because building media items from host files needs
+  device media injection.
 
 \`\`\`json
 {

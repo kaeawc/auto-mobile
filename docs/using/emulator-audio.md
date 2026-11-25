@@ -98,11 +98,16 @@ id after a server restart, is an error. If the emulator exited during injection,
 
 Records the device's audio output for `seconds` (at most 20) and reports:
 
-- `silent`: true when no 20 ms window reaches `silenceThresholdDbfs` (default -50).
+- `silent`: true when no 20 ms window reaches `silenceThresholdDbfs` (default -50). `null` when
+  the capture is incomplete and heard no sound: nothing was measured for the missing time.
 - `rmsDbfs`, `peakDbfs`: overall level; digital silence reports -120.
 - `activeRatio`: the share of windows with sound.
-- `timedOut`: true when the device produced less audio than asked for. A silent app gives
-  `silent: true` and `timedOut: true`, not an error.
+- `durationMs`, `requestedMs`: the audio captured and the length asked for.
+- `complete`: false when the device delivered less audio than asked for (`timedOut: true`). An
+  emulator app that plays nothing can send no audio at all, so an incomplete capture with
+  `silent: null` means either a silent app or a broken audio route. The message says how many
+  milliseconds arrived. Play known audio and retry to tell them apart. If captures stay short,
+  check the emulator's gRPC port.
 
 With `saveArtifact: true` the capture is also written as a WAV file, and `path` and `sizeBytes`
 are returned.

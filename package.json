@@ -143,7 +143,7 @@
     "@img/colour": "1.1.0",
     "@jimp/core": "1.6.1",
     "@jimp/diff": "1.6.1",
-    "@jimp/file-ops": "1.6.1",
+    "@jimp/file-ops": "1.7.0",
     "@jimp/js-bmp": "1.6.1",
     "@jimp/js-gif": "1.6.1",
     "@jimp/js-jpeg": "1.6.1",

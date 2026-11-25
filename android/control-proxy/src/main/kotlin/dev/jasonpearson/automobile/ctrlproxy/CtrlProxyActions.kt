@@ -221,6 +221,25 @@ interface CtrlProxyActions {
 
   suspend fun removePrototypeAsset(requestId: String?, id: String)
 
+  suspend fun beginPrototypeMedia(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    size: Long,
+    sha256: String,
+  )
+
+  suspend fun putPrototypeMediaChunk(
+    requestId: String?,
+    id: String,
+    offset: Long,
+    dataBase64: String,
+  )
+
+  suspend fun commitPrototypeMedia(requestId: String?, id: String)
+
+  suspend fun abortPrototypeMedia(requestId: String?, id: String)
+
   suspend fun listPreferenceFiles(requestId: String?, packageName: String)
 
   suspend fun getPreferences(requestId: String?, packageName: String, fileName: String)

@@ -39,6 +39,11 @@ import type { PrototypeChannelHost } from "../../src/features/prototype/prototyp
 import type { PrototypeRequestHost } from "../../src/features/prototype/prototypeRequestHandler";
 import type { PrototypeAssetUpload } from "../../src/features/prototype/prototypeAssets";
 import type { PrototypeAssetRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypes";
+import type { PrototypeMediaRequestOptions } from "../../src/features/observe/android/CtrlProxyPrototypeMedia";
+import type {
+  PrototypeMediaTransportMessage,
+  PrototypeMediaTransportResult,
+} from "../../src/features/prototype/prototypeMediaUpload";
 import type { AndroidScreenshotRequestOptions } from "../../src/features/observe/android/AndroidScreenshotRequester";
 import type {
   PrototypeAppearanceOverride,
@@ -431,6 +436,31 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     this.checkFailure("requestRemovePrototypeAsset");
     this.prototypeAssetHistory.push({ method: "remove", id, options });
     return this.prototypeAssetResult;
+  }
+
+  private prototypeMediaReply: (
+    message: PrototypeMediaTransportMessage,
+  ) => PrototypeMediaTransportResult = () => ({ success: true });
+  private readonly prototypeMediaHistory: PrototypeMediaTransportMessage[] = [];
+
+  /** Scripts the device's answer to each media upload message. */
+  setPrototypeMediaReply(
+    reply: (message: PrototypeMediaTransportMessage) => PrototypeMediaTransportResult,
+  ): void {
+    this.prototypeMediaReply = reply;
+  }
+
+  getPrototypeMediaHistory(): PrototypeMediaTransportMessage[] {
+    return [...this.prototypeMediaHistory];
+  }
+
+  async requestPrototypeMediaMessage(
+    message: PrototypeMediaTransportMessage,
+    _options?: PrototypeMediaRequestOptions,
+  ): Promise<PrototypeMediaTransportResult> {
+    this.checkFailure("requestPrototypeMediaMessage");
+    this.prototypeMediaHistory.push(message);
+    return this.prototypeMediaReply(message);
   }
 
   onPrototypeEvent(listener: (event: PrototypeEvent) => void): () => void {

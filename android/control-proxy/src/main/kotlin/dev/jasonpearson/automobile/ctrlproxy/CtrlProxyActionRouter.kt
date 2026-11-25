@@ -474,6 +474,41 @@ internal class CtrlProxyActionRouter(private val service: CtrlProxy) : CtrlProxy
     service.launchRequestScope(requestId) { service.prototypeAssetController.remove(requestId, id) }
   }
 
+  override suspend fun beginPrototypeMedia(
+    requestId: String?,
+    id: String,
+    mimeType: String,
+    size: Long,
+    sha256: String,
+  ) {
+    service.launchRequestScope(requestId) {
+      service.prototypeMediaUploadController.begin(requestId, id, mimeType, size, sha256)
+    }
+  }
+
+  override suspend fun putPrototypeMediaChunk(
+    requestId: String?,
+    id: String,
+    offset: Long,
+    dataBase64: String,
+  ) {
+    service.launchRequestScope(requestId) {
+      service.prototypeMediaUploadController.chunk(requestId, id, offset, dataBase64)
+    }
+  }
+
+  override suspend fun commitPrototypeMedia(requestId: String?, id: String) {
+    service.launchRequestScope(requestId) {
+      service.prototypeMediaUploadController.commit(requestId, id)
+    }
+  }
+
+  override suspend fun abortPrototypeMedia(requestId: String?, id: String) {
+    service.launchRequestScope(requestId) {
+      service.prototypeMediaUploadController.abort(requestId, id)
+    }
+  }
+
   override suspend fun listPreferenceFiles(requestId: String?, packageName: String) =
     service.storageController.handleListPreferenceFiles(requestId, packageName)
 

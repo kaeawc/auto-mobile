@@ -2,6 +2,7 @@ import { parsePrototypeBackdrop } from "../../prototype/prototypeBackdrop";
 import { prototypeDegradedEffectsField } from "../../prototype/prototypeDegradedEffects";
 import { parsePrototypeStacks } from "./CtrlProxyPrototypes";
 import { prototypePatchReplyFields } from "../../prototype/prototypePatchWire";
+import { isPrototypeMediaRejection } from "../../prototype/prototypeMediaAssets";
 import { logger } from "../../../utils/logger";
 import {
   CurrentFocusResult,
@@ -395,6 +396,7 @@ export class AndroidInboundResponseHandlers {
         ...(Number.isSafeInteger(message.cleared) && message.cleared! >= 0
           ? { cleared: message.cleared }
           : {}),
+        ...(isPrototypeMediaRejection(message.mediaCode) ? { mediaCode: message.mediaCode } : {}),
       })),
 
     highlight_response: (message) =>

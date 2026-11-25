@@ -4,6 +4,7 @@ import android.util.JsonReader
 import android.util.JsonToken
 import android.util.Log
 import dev.jasonpearson.automobile.ctrlproxy.prototype.PrototypeAssetLimits
+import dev.jasonpearson.automobile.protocol.PrototypeMediaLimits
 import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.io.InputStreamReader
@@ -50,6 +51,11 @@ class InboundFrameLimits internal constructor(private val maxBytesByType: Map<St
           "put_prototype_asset" to
             PrototypeAssetLimits().maxEncodedLength + ENVELOPE_ALLOWANCE_BYTES,
           "remove_prototype_asset" to ENVELOPE_ALLOWANCE_BYTES,
+          "put_prototype_asset_begin" to ENVELOPE_ALLOWANCE_BYTES,
+          "put_prototype_asset_chunk" to
+            PrototypeMediaLimits().maxEncodedChunkLength + ENVELOPE_ALLOWANCE_BYTES,
+          "put_prototype_asset_commit" to ENVELOPE_ALLOWANCE_BYTES,
+          "put_prototype_asset_abort" to ENVELOPE_ALLOWANCE_BYTES,
         ),
       )
   }

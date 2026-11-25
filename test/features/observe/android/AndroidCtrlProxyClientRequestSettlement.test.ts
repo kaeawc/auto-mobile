@@ -87,6 +87,7 @@ async function harness() {
     "advance_prototype_clock",
     "put_prototype_asset",
     "remove_prototype_asset",
+    "put_prototype_asset_begin",
   ]);
   client.ensureConnected = async () => true;
   client.testHooks.overrideConnectWebSocket(async () => true);
@@ -438,6 +439,20 @@ const methods: RequestMethod[] = [
     name: "requestRemovePrototypeAsset",
     invoke: (h, s) =>
       h.client.requestRemovePrototypeAsset("a", { timeoutMs: LONG_TIMEOUT_MS, abortSignal: s }),
+  },
+  {
+    name: "requestPrototypeMediaMessage",
+    invoke: (h, s) =>
+      h.client.requestPrototypeMediaMessage(
+        {
+          type: "put_prototype_asset_begin",
+          id: "a",
+          mimeType: "video/mp4",
+          size: 1,
+          sha256: "0".repeat(64),
+        },
+        { timeoutMs: LONG_TIMEOUT_MS, abortSignal: s },
+      ),
   },
   {
     name: "requestInsertTextState",

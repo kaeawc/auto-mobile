@@ -2,6 +2,10 @@ import type { ClearPrototypeStorageMessage } from "../../../prototype/prototypeS
 /** Prototype lifecycle requests, results and push-event contracts. */
 import type { PrototypePlatformOutcome } from "../../../prototype/prototypePlatformOutcomes";
 import type { PrototypeHiddenReason } from "../../../prototype/prototypeHidden";
+import type {
+  PrototypeMediaMimeType,
+  PrototypeMediaRejection,
+} from "../../../prototype/prototypeMediaAssets";
 import type { PrototypePatchOp } from "../../../prototype/prototypePatch";
 import type { PrototypePatchConflict } from "../../../prototype/prototypePatchWire";
 import type { PrototypeSpec, PrototypeJson, PrototypeData } from "../../../prototype/prototypeSpec";
@@ -179,6 +183,44 @@ export interface RemovePrototypeAssetMessage {
   requestId: string;
   id: string;
 }
+/**
+ * `@SerialName("put_prototype_asset_begin")` → `PutPrototypeAssetBegin`: starts a chunked media
+ * upload (#14254). Each media message is answered by one `prototype_result`; a refusal carries the
+ * device's rejection in `mediaCode`.
+ */
+export interface PutPrototypeAssetBeginMessage {
+  type: "put_prototype_asset_begin";
+  requestId: string;
+  id: string;
+  mimeType: PrototypeMediaMimeType;
+  size: number;
+  sha256: string;
+}
+/** `@SerialName("put_prototype_asset_chunk")` → `PutPrototypeAssetChunk`, offsets contiguous from 0. */
+export interface PutPrototypeAssetChunkMessage {
+  type: "put_prototype_asset_chunk";
+  requestId: string;
+  id: string;
+  offset: number;
+  dataBase64: string;
+}
+/** `@SerialName("put_prototype_asset_commit")` → `PutPrototypeAssetCommit`. */
+export interface PutPrototypeAssetCommitMessage {
+  type: "put_prototype_asset_commit";
+  requestId: string;
+  id: string;
+}
+/** `@SerialName("put_prototype_asset_abort")` → `PutPrototypeAssetAbort`. Idempotent. */
+export interface PutPrototypeAssetAbortMessage {
+  type: "put_prototype_asset_abort";
+  requestId: string;
+  id: string;
+}
+export type PrototypeMediaUploadMessage =
+  | PutPrototypeAssetBeginMessage
+  | PutPrototypeAssetChunkMessage
+  | PutPrototypeAssetCommitMessage
+  | PutPrototypeAssetAbortMessage;
 
 export interface QueuePrototypeCallOutcomeMessage extends PrototypePlatformOutcomeRequest {
   type: "queue_prototype_call_outcome";
@@ -250,6 +292,8 @@ export interface PrototypeResult {
    * Absent when every effect renders and on devices that predate it.
    */
   degradedEffects?: PrototypeDegradedEffect[];
+  /** Only a refused `put_prototype_asset_*` media message: the device's rejection code. */
+  mediaCode?: PrototypeMediaRejection;
 }
 
 /** One `style.effects` entry the device omitted or froze (#15129). */

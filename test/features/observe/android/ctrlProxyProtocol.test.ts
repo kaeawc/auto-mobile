@@ -421,6 +421,50 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       ),
       expected: '{"type":"remove_prototype_asset","requestId":"r7","id":"hero"}',
     },
+    {
+      builder: "putPrototypeAssetBegin",
+      name: "media begin (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.putPrototypeAssetBegin({
+          requestId: "b",
+          id: "clip",
+          mimeType: "video/mp4",
+          size: 3000000,
+          sha256: "a".repeat(64),
+        }),
+      ),
+      expected: `{"type":"put_prototype_asset_begin","requestId":"b","id":"clip","mimeType":"video/mp4","size":3000000,"sha256":"${"a".repeat(64)}"}`,
+    },
+    {
+      builder: "putPrototypeAssetChunk",
+      name: "media chunk (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.putPrototypeAssetChunk({
+          requestId: "c",
+          id: "clip",
+          offset: 1048576,
+          dataBase64: "AAAA",
+        }),
+      ),
+      expected:
+        '{"type":"put_prototype_asset_chunk","requestId":"c","id":"clip","offset":1048576,"dataBase64":"AAAA"}',
+    },
+    {
+      builder: "putPrototypeAssetCommit",
+      name: "media commit (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.putPrototypeAssetCommit({ requestId: "m", id: "clip" }),
+      ),
+      expected: '{"type":"put_prototype_asset_commit","requestId":"m","id":"clip"}',
+    },
+    {
+      builder: "putPrototypeAssetAbort",
+      name: "media abort (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.putPrototypeAssetAbort({ requestId: "a", id: "clip" }),
+      ),
+      expected: '{"type":"put_prototype_asset_abort","requestId":"a","id":"clip"}',
+    },
 
     {
       builder: "requestHierarchy",
@@ -1151,9 +1195,9 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
   // total builder count is pinned. Ship builder #45 without a row and this fails — not a silently
   // uncovered send site. `request_two_finger_swipe` has no builder here by design (it goes through
   // the shared sendCommand path, asserted in CtrlProxyGestures.test.ts), so it is not a builder key.
-  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 59", () => {
+  test("every ctrlProxyRequests builder has wire coverage and the count is pinned at 63", () => {
     const builderNames = Object.keys(ctrlProxyRequests);
-    expect(builderNames.length).toBe(59);
+    expect(builderNames.length).toBe(63);
     const covered = new Set(cases.map((row) => row.builder));
     expect<unknown>([...covered].sort()).toEqual([...builderNames].sort());
   });

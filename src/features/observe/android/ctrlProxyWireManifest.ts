@@ -470,6 +470,7 @@ export const CTRL_PROXY_RESPONSE_FIELDS: {
     fired: "optional",
     degradedEffects: "optional",
     platformRuntime: "optional",
+    mediaCode: "optional",
   },
   remove_preference_result: {
     packageName: "optional",

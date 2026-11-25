@@ -920,6 +920,11 @@ data class PrototypeResult(
   @EncodeDefault(EncodeDefault.Mode.NEVER) val status: JsonObject? = null,
   /** The successful show's runtime and module availability. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val platformRuntime: PrototypePlatformReport? = null,
+  /**
+   * Only a refused `put_prototype_asset_*` media request: the [PrototypeMediaRejection] code, so
+   * the host can tell a full store from a corrupt stream.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val mediaCode: String? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 /**

@@ -586,6 +586,50 @@ data class PutPrototypeAsset(
 data class RemovePrototypeAsset(override val requestId: String? = null, val id: String) :
   WebSocketRequest()
 
+/**
+ * Starts a chunked media upload (#14254): a video, audio or WebVTT asset of [size] bytes whose
+ * lowercase-hex digest is [sha256]. A new begin for an [id] restarts its upload. Each media request
+ * is answered by one `prototype_result`; a refusal carries the rejection in `mediaCode`.
+ */
+@Serializable
+@SerialName("put_prototype_asset_begin")
+data class PutPrototypeAssetBegin(
+  override val requestId: String? = null,
+  val id: String,
+  val mimeType: String,
+  val size: Long,
+  val sha256: String,
+) : WebSocketRequest()
+
+/**
+ * The next contiguous chunk of [id]'s upload, starting at [offset]. [toString] never renders the
+ * payload, so a stray log line cannot dump bytes.
+ */
+@Serializable
+@SerialName("put_prototype_asset_chunk")
+data class PutPrototypeAssetChunk(
+  override val requestId: String? = null,
+  val id: String,
+  val offset: Long,
+  val dataBase64: String,
+) : WebSocketRequest() {
+  override fun toString(): String =
+    "PutPrototypeAssetChunk(requestId=$requestId, id=$id, offset=$offset, " +
+      "dataBase64=<${dataBase64.length} chars>)"
+}
+
+/** Verifies [id]'s size, signature and sha256, then stores it, replacing any earlier asset. */
+@Serializable
+@SerialName("put_prototype_asset_commit")
+data class PutPrototypeAssetCommit(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
+
+/** Drops [id]'s in-flight upload and its partial file. Idempotent. */
+@Serializable
+@SerialName("put_prototype_asset_abort")
+data class PutPrototypeAssetAbort(override val requestId: String? = null, val id: String) :
+  WebSocketRequest()
+
 // =============================================================================
 // Storage Requests
 // =============================================================================

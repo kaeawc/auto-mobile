@@ -86,6 +86,10 @@ export class AndroidInboundMessageRouter {
           "dismiss_prototype",
           "put_prototype_asset",
           "remove_prototype_asset",
+          "put_prototype_asset_begin",
+          "put_prototype_asset_chunk",
+          "put_prototype_asset_commit",
+          "put_prototype_asset_abort",
         ].includes(rejectedCommand)
           ? deviceError
           : rewriteUnknownCommandError(deviceError, "android");

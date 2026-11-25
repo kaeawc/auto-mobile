@@ -72,7 +72,10 @@ internal fun CtrlProxy.createPrototypeController(): PrototypeController {
       },
     windowOnScreen = prototypeWindowProbe(),
     displays = prototypeDisplays,
-    clearAssets = { prototypeAssets.clear() },
+    clearAssets = {
+      prototypeAssets.clear()
+      prototypeMediaUploadController.clear()
+    },
     hasAsset = { prototypeAssets.lookup(it) != null },
     validateShaders = { validatePrototypeShaderUniforms(it, prototypeAssets::lookup) },
     images = prototypeImages,

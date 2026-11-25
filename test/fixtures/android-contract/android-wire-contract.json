@@ -492,6 +492,104 @@
       ]
     },
     {
+      "serialName": "put_prototype_asset_abort",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
+      "serialName": "put_prototype_asset_begin",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "mimeType",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "size",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "sha256",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
+      "serialName": "put_prototype_asset_chunk",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "offset",
+          "type": "long",
+          "nullable": false,
+          "hasDefault": false
+        },
+        {
+          "name": "dataBase64",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
+      "serialName": "put_prototype_asset_commit",
+      "fields": [
+        {
+          "name": "requestId",
+          "type": "string",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "id",
+          "type": "string",
+          "nullable": false,
+          "hasDefault": false
+        }
+      ]
+    },
+    {
       "serialName": "queue_prototype_call_outcome",
       "fields": [
         {
@@ -4039,6 +4137,12 @@
         {
           "name": "platformRuntime",
           "type": "object:dev.jasonpearson.automobile.protocol.PrototypePlatformReport",
+          "nullable": true,
+          "hasDefault": true
+        },
+        {
+          "name": "mediaCode",
+          "type": "string",
           "nullable": true,
           "hasDefault": true
         }

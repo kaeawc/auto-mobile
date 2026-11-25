@@ -34,7 +34,7 @@ the same way.
 
 With no match on screen, AutoMobile scrolls one past the edge into view, in up to 4 steps. It turns
 the crown for a system alert, such as the permission prompt's `Allow`. App content gets a short
-swipe, which may not scroll an app list (#19218). AutoMobile taps the visible part of a match when
+swipe, which may not scroll an app list. AutoMobile taps the visible part of a match when
 at least 8 points of it show each way. Otherwise the call fails with a hint to scroll.
 
 `tapAt` takes absolute coordinates in points from `observe`, within `screenSize`. A point outside

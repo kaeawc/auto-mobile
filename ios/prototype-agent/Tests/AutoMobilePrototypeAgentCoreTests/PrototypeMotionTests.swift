@@ -304,6 +304,26 @@ final class PrototypeMotionTests: XCTestCase {
         XCTAssertNil(PrototypeMotion(specMotion: nil, reduceMotion: true).pressScaleDuration)
     }
 
+    // MARK: Remote image crossfade (#18666)
+
+    func testRemoteImageCrossfadeHonorsSpecMotionRecordingAndReduceMotion() {
+        func duration(
+            _ crossfade: Bool?, spec: String? = nil, reduce: Bool = false, recording: PrototypeRecordingMode = .off
+        )
+            -> Double?
+        {
+            PrototypeMotion(specMotion: spec, reduceMotion: reduce, recording: recording)
+                .remoteImageCrossfadeDuration(crossfade: crossfade, reduceMotion: reduce)
+        }
+        XCTAssertEqual(duration(true), 0.2)
+        XCTAssertEqual(duration(true, spec: "reduced"), 0.2)
+        XCTAssertNil(duration(nil))
+        XCTAssertNil(duration(false))
+        XCTAssertNil(duration(true, spec: "none"))
+        XCTAssertNil(duration(true, recording: .on))
+        XCTAssertNil(duration(true, reduce: true))
+    }
+
     func testOnlyNodesThatDrawInPlaceTakeAStackSlot() throws {
         func node(_ json: String) throws -> PrototypeNode {
             try JSONDecoder().decode(PrototypeNode.self, from: Data(json.utf8))

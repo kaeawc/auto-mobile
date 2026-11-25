@@ -42,7 +42,9 @@
                     let image = try await model.remoteImages.load(url, delivery: delivery)
                     if let obsolete = delivery.obsoleteFailure() { throw obsolete }
                     try Task.checkCancellation()
-                    withAnimation(node.crossfade == true && !reduceMotion ? .easeInOut(duration: 0.2) : nil) {
+                    let fade = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                        .remoteImageCrossfadeDuration(crossfade: node.crossfade, reduceMotion: reduceMotion)
+                    withAnimation(fade.map { Animation.easeInOut(duration: $0) }) {
                         pixels = image
                         completedURL = url
                     }

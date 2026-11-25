@@ -464,6 +464,8 @@ export class DefaultExecutionTargetResolver implements ExecutionTargetResolver {
       // primitive itself refuses to mint a never-issued id.
       requireIssuedSession: true,
       signal,
+      // A read awaiting its session's recovery recovers it without claiming it (#19191).
+      ...(state.readAwaitsSessionRecovery ? { access: "read-only" as const } : {}),
     });
     assertSessionDeviceRouting(name, providedDeviceId, sessionUuid, {
       sessionDeviceId: context.deviceId,

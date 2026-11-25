@@ -87,10 +87,12 @@ describe("read naming a lost session (#19191)", () => {
   let manager: FakeDeviceManager;
   let ranOn: BootedDevice[];
 
-  async function loseEmulator(): Promise<void> {
+  let persistence: FakeDeviceSessionPersistence;
+
+  async function loseEmulator(row: Partial<DeviceSession> = {}): Promise<void> {
     timer = new FakeTimer();
-    const persistence = new FakeDeviceSessionPersistence();
-    persistence.seed({ ...lostRow });
+    persistence = new FakeDeviceSessionPersistence();
+    persistence.seed({ ...lostRow, ...row });
     sessions = new SessionManager(timer, persistence);
     sessions.stopCleanupTimer();
     const incidents = new InMemoryEmulatorLossIncidentStore(timer);
@@ -205,6 +207,23 @@ describe("read naming a lost session (#19191)", () => {
   );
 
   test.each(readShapes)(
+    "%s never extends an idle deadline shorter than the window, and is refused once it passes",
+    async (_shape, options) => {
+      // Idle deadline 90 s, inside the 180 s restart recovery window.
+      await loseEmulator({ expires_at_ms: 90_000, session_timeout_ms: 90_000 });
+      register(options);
+      timer.advanceTime(60_001);
+      expect(await read(120_000)).toBeInstanceOf(SessionRecoveryAssignmentError);
+      expect(await persistence.getSession(sessionUuid)).toMatchObject({ expires_at_ms: 90_000 });
+      timer.advanceTime(30_000);
+      const error = await read(200_000);
+      expect(error).toBeInstanceOf(TerminalSessionError);
+      expect(error).toMatchObject({ release: { releaseReason: "expired", terminal: true } });
+      expect(ranOn).toEqual([]);
+    },
+  );
+
+  test.each(readShapes)(
     "%s runs on the session's own device once it returns, then under the live session",
     async (_shape, options) => {
       await loseEmulator();
@@ -213,7 +232,11 @@ describe("read naming a lost session (#19191)", () => {
       await pool.addDevice(sessionDevice);
       readiness.setConnectedDevices([sessionDevice, otherDevice]);
       expect(await read(120_000)).toMatchObject({ success: true });
-      expect(sessions.getSession(sessionUuid)?.assignedDevice).toBe(sessionDevice.deviceId);
+      const recovered = sessions.getSession(sessionUuid);
+      expect(recovered?.assignedDevice).toBe(sessionDevice.deviceId);
+      // The read recovers the session without claiming it or restarting its idle window.
+      expect(recovered?.ownership).toBe("awaiting-owner");
+      expect(await persistence.getSession(sessionUuid)).toMatchObject({ expires_at_ms: 600_000 });
       // The healthy-session path: a read under the live session reads its device.
       expect(await read(120_000)).toMatchObject({ success: true });
       expect(ranOn.map((device) => device.deviceId)).toEqual([

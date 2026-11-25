@@ -2,7 +2,7 @@ import { rethrowDeviceTransportUnavailable } from "../utils/android-cmdline-tool
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 import { SessionManager } from "../daemon/sessionManager";
-import type { Session, SessionExecutionMetadata } from "../daemon/sessionManager";
+import type { Session, SessionAccess, SessionExecutionMetadata } from "../daemon/sessionManager";
 import { DevicePool } from "../daemon/devicePool";
 import {
   getDeviceReadinessProxyDriver,
@@ -78,11 +78,14 @@ export async function createToolExecutionContext(
     execution,
     admittedSession,
     requireIssuedSession = false,
+    access,
     signal,
   }: {
     sessionOptions?: SessionOptions;
     execution?: SessionExecutionMetadata;
     admittedSession?: Session;
+    /** A read recovering its session never extends or claims it (#19191); default acquire. */
+    access?: SessionAccess;
     // #6069: device-tool admission must not mint a session for a never-issued UUID.
     // Internal callers that intentionally mint derived sessions leave this false.
     requireIssuedSession?: boolean;
@@ -108,6 +111,7 @@ export async function createToolExecutionContext(
       requireIssuedSession,
       requestDeadlineMs: sessionOptions.requestDeadlineMs,
       signal,
+      ...(access ? { access } : {}),
     }));
 
   if (!sessionManager.isAdmittedForAutomation(session)) {

@@ -475,9 +475,8 @@ export class PersistedSessionAdmission {
    * row past its deadline gets the typed terminal refusal; a never-issued id gets `neverIssued`.
    * A read is not refused for an idle-expired row: it gets `neverIssued` too, which its caller
    * turns into a sessionless read, exactly as before the expired answer existed (#11361). A row
-   * whose restart recovery window ran out lost its device, so a read naming it gets the same
-   * terminal refusal as a control call rather than reading whichever device it could select
-   * (#19191).
+   * released by its device's loss, expired idle or out of recovery window, gets the same terminal
+   * refusal as a control call rather than reading whichever device it could select (#19191).
    */
   unadmittedSessionError(
     sessionId: string,
@@ -486,10 +485,10 @@ export class PersistedSessionAdmission {
     access?: SessionAccess,
   ): Error {
     const expired = persisted && this.expiredReleaseFromPersisted(sessionId, persisted);
-    if (
-      !expired ||
-      (access === "read-only" && expired.releaseReason !== "restart-recovery-timeout")
-    ) {
+    const lostDevice =
+      expired?.releaseReason === "restart-recovery-timeout" ||
+      (persisted !== undefined && isDeviceRestartReleasedRow(persisted));
+    if (!expired || (access === "read-only" && !lostDevice)) {
       return neverIssued;
     }
     return new TerminalSessionError(sessionId, expired);

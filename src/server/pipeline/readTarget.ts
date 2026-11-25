@@ -537,6 +537,21 @@ export async function admitReadSession(
 }
 
 /**
+ * True when a read names a released session whose device is in its restart recovery window
+ * (#19191): the emulator crashed or the daemon restarted while the session held it. Such a read
+ * resolves through the shared session path, which recovers the session's own device or refuses
+ * with the typed recovery error; a sessionless read could select a different device.
+ */
+export async function readAwaitsSessionRecovery(sessionUuid: string | undefined): Promise<boolean> {
+  const sessions = sessionUuid ? defaultDaemonContext.sessionManager() : undefined;
+  return Boolean(
+    sessionUuid &&
+    sessions &&
+    (await sessions.isReleasedSessionInRestartRecoveryWindow(sessionUuid)),
+  );
+}
+
+/**
  * The device of the session a read named but was too late to be admitted under (#11361): the
  * session is past its idle deadline and only earlier work still holds it. Undefined otherwise.
  */

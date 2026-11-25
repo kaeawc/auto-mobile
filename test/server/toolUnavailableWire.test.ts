@@ -6,7 +6,10 @@ import { featureFlagDisabledMessage } from "../../src/features/featureFlags/feat
 import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { DAEMON_TOOL_UNAVAILABLE_CODE, DAEMON_UNKNOWN_TOOL_CODE } from "../../src/daemon/types";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { isToolUnavailableWireError } from "../../src/daemon/toolUnavailableError";
+import {
+  isToolUnavailableWireError,
+  planOnlyCallGuidance,
+} from "../../src/daemon/toolUnavailableError";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import { isDebugModeEnabled, setDebugModeEnabled } from "../../src/utils/debug";
 
@@ -28,7 +31,8 @@ describe("gated tools carry a structured marker over the MCP wire (issue #10177)
       name: "__gate_embedded__",
       reason: "embedded SDK mode is disabled; start the daemon with --embedded-sdk",
     },
-    { name: "__gate_plan__", reason: "plan-only tool" },
+    // A direct call names the executePlan route instead of a bare gate (#19194).
+    { name: "__gate_plan__", reason: `plan-only tool: ${planOnlyCallGuidance("__gate_plan__")}` },
   ] as const;
 
   beforeAll(async () => {

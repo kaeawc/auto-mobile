@@ -13,9 +13,12 @@ import {
 } from "../../../utils/schemaHelpers";
 import { MAX_DEVICE_READY_TIMEOUT_MS } from "../../../utils/deviceTimeouts";
 
+/** Watch runtimes and device types are listed like every other simulator platform (#19186). */
+const listDeviceImagesPlatformSchema = z.enum(["android", "ios", "watchos", "tvos", "visionos"]);
+
 export const listDeviceImagesSchema = z
   .object({
-    platform: platformSchema,
+    platform: listDeviceImagesPlatformSchema,
     sessionUuid: z.string().optional().describe("Session used for inventory admission"),
     detail: z
       .enum(["compact", "full"])
@@ -84,7 +87,7 @@ export const listDeviceImagesOutputSchema = z
     count: z
       .number()
       .describe("Total configured images; equals images.length unless `truncated` is true"),
-    platform: platformSchema,
+    platform: listDeviceImagesPlatformSchema,
     configuredInventory: z.unknown(),
     capabilityProfiles: z
       .record(z.string(), capabilityInventorySchema)

@@ -1,6 +1,7 @@
 import { isExplicitPin, resolveAssetVersion, resolvePinnedVersion } from "../../constants/release";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
+import type { NonIosApplePlatform } from "../../models/Platform";
 import { probeCheckoutMcpServerVersion } from "../../utils/mcpVersion";
 import { SingleFlightInterval } from "../SingleFlightInterval";
 import { getCurrentBuildIdentity, type BuildIdentity } from "../wire/buildIdentity";
@@ -284,6 +285,13 @@ export class ProxyRuntime {
 
   /** Platform each acquired session runs on; absent when its result did not describe one. */
   sessionPlatforms = new Map<string, "android" | "ios">();
+
+  /**
+   * Platform each acquired watchOS, tvOS or visionOS session runs on (#19186). Kept apart from
+   * {@link sessionPlatforms}, whose Android/iOS selector routing must not change; it only names the
+   * tool that can acquire a replacement when such a session is lost.
+   */
+  sessionApplePlatforms = new Map<string, NonIosApplePlatform>();
 
   get stallHandovers(): Map<string, StallHandoverRecord> {
     return this.sessionState.stallHandovers;

@@ -9,6 +9,7 @@ import { parseCarPlayProjectionState } from "../../../src/utils/ios/carPlayProje
 import { FakeCarPlayProjectionProbe } from "../../fakes/FakeCarPlayProjectionProbe";
 import { FakeCarPlayScreenPowerer } from "../../fakes/FakeCarPlayScreenPowerer";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeCarPlayRuntimeReader } from "../../fakes/FakeCarPlayRuntimeReader";
 
 // Real projection probe captures from fresh iPhone 17 Pro simulators (#18728), as in
 // carPlayProjection.test.ts: iOS 26.5 after boot, and after carplay-power-helper power-on.
@@ -32,9 +33,10 @@ const udid = "SIM-UDID";
 function setup(probeState = car) {
   const powerer = new FakeCarPlayScreenPowerer(powered);
   const probe = new FakeCarPlayProjectionProbe(probeState);
+  const runtime = new FakeCarPlayRuntimeReader();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
-  return { powerer, probe, timer, deps: { powerer, probe, timer } };
+  return { powerer, probe, runtime, timer, deps: { powerer, probe, runtime, timer } };
 }
 
 describe("activateCarPlayDisplay", () => {
@@ -132,7 +134,7 @@ describe("activateCarPlayDisplay", () => {
   });
 
   test("a cancel during a wedged power-on returns at once", async () => {
-    const { powerer, probe } = setup();
+    const { powerer, probe, runtime } = setup();
     powerer.hangPowerOn = true;
     // A manual clock: nothing advances, so only the cancel can end the call.
     const timer = new FakeTimer();
@@ -140,10 +142,13 @@ describe("activateCarPlayDisplay", () => {
     const reason = new Error("device lost");
     const run = activateCarPlayDisplay(
       udid,
-      { powerer, probe, timer },
+      { powerer, probe, runtime, timer },
       { deadlineMs: 60_000, signal: controller.signal },
     );
-    await Promise.resolve();
+    // The runtime check settles first; let it reach the wedged power-on.
+    for (let turn = 0; turn < 50 && powerer.calls.length === 0; turn++) {
+      await Promise.resolve();
+    }
     expect(powerer.calls).toEqual([{ udid, action: "power-on" }]);
     controller.abort(reason);
     await expect(run).rejects.toBe(reason);
@@ -158,5 +163,17 @@ describe("activateCarPlayDisplay", () => {
       activateCarPlayDisplay(udid, deps, { deadlineMs: 60_000, signal: controller.signal }),
     ).rejects.toThrow();
     expect(powerer.calls).toEqual([]);
+  });
+});
+
+describe("activateCarPlayDisplay on an iOS 27 simulator (#19185)", () => {
+  test("refuses with unsupported-runtime before power-on or the probe", async () => {
+    const { powerer, probe, runtime, deps } = setup();
+    runtime.version = "27.2";
+    await expect(activateCarPlayDisplay(udid, deps, { deadlineMs: 60_000 })).rejects.toThrow(
+      "[unsupported-runtime] Headless CarPlay needs an iOS 26.x runtime (found 27.2)",
+    );
+    expect(powerer.calls).toEqual([]);
+    expect(probe.calls).toEqual([]);
   });
 });

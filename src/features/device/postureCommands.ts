@@ -27,6 +27,7 @@ import { displayInventoryOutcome } from "../../models/DeviceInfo";
 import { type PostureKeyguardDismisserFactory } from "./PostureKeyguardRestore";
 import { type AndroidHingeAngleConsole } from "./AndroidHingeAngleConsole";
 import { type IosRequestedHingeAngleStore } from "./DuoHingeLayout";
+import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 
 export const HINGE_ANGLE_MIN_DEGREES = 0;
 
@@ -333,6 +334,64 @@ export function validateSupportedPosture(
       `Posture '${requested}' is not supported by this device. Supported postures: ${supported.join(", ") || "none"}. Nothing was changed. ${states ? `Supported states: ${states.map((state) => `${state.name} (${state.identifier})`).join(", ") || "none"}. ` : ""}Select a device that reports display panels and the requested posture and retry.`,
     );
   }
+}
+
+/**
+ * Emulator API levels whose system_server dies when the rear-display device state is requested:
+ * android-37.0 google_apis declares REAR_DISPLAY_MODE in print-states, then the android.display
+ * thread throws `Key 3 not found in SparseIntArray` and the device soft-restarts (#19190).
+ */
+export const EMULATOR_REAR_DISPLAY_CRASH_API_LEVELS: ReadonlySet<number> = new Set([37]);
+
+/** Refuse rear_display before sending it to an emulator image known to crash on it. */
+export async function refuseKnownCrashingRearDisplay(
+  device: BootedDevice,
+  adb: ReturnType<AdbClientFactory["create"]>,
+  supported: Posture[],
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  if (!isEmulator(device)) {
+    return;
+  }
+  const apiLevel =
+    device.apiLevel ?? (await readAndroidDeviceApiLevel(adb, undefined, undefined, signal));
+  if (apiLevel === null || !EMULATOR_REAR_DISPLAY_CRASH_API_LEVELS.has(apiLevel)) {
+    return;
+  }
+  const others = supported.filter((posture) => posture !== "rear_display" && posture !== "unknown");
+  throw new ActionableError(
+    `Posture 'rear_display' is refused on API ${apiLevel} emulators: this system image declares the rear display state but its system process crashes and restarts when it is requested. Nothing was changed. Supported postures on this device: ${others.join(", ") || "none"}. Use a physical device or another emulator system image for rear_display.`,
+  );
+}
+
+/** The Android system process died during a posture change and the device is soft-restarting. */
+export class AndroidSystemServerRestartError extends ActionableError {}
+
+const SYSTEM_SERVER_DIED = /Broken pipe \(32\)|DeadObjectException/i;
+
+const SYSTEM_SERVICE_GONE = /Can't find service: (?:device_state|window)/i;
+
+/**
+ * Maps a posture-command failure caused by a system_server crash to a typed error, or undefined.
+ * A missing device_state/window service only counts when device_state answered earlier, since
+ * devices without the service report the same text.
+ */
+export function androidSystemServerRestartError(
+  error: unknown,
+  requested: RequestedPosture,
+  deviceStateWasAvailable: boolean,
+): AndroidSystemServerRestartError | undefined {
+  const message = errorMessage(error);
+  const match =
+    SYSTEM_SERVER_DIED.exec(message) ??
+    (deviceStateWasAvailable ? SYSTEM_SERVICE_GONE.exec(message) : null);
+  if (!match) {
+    return undefined;
+  }
+  return new AndroidSystemServerRestartError(
+    `The Android system process crashed while applying posture '${requested}' ('${match[0]}') and the device is restarting its system services. The posture was not applied. Wait until the device finishes booting (observe succeeds) before retrying${requested === "rear_display" ? ", and request another posture: this device cannot enter rear_display" : ""}.`,
+    { cause: error },
+  );
 }
 
 const POSTURE_REFUSED = "The posture did not change.";

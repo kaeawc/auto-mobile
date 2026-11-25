@@ -9,6 +9,10 @@ import {
   requireCarPlayProjection,
   type CarPlayProjectionProbe,
 } from "../utils/ios/carPlayProjection";
+import {
+  type CarPlayRuntimeReader,
+  DefaultCarPlayRuntimeReader,
+} from "../utils/ios/carPlayRuntime";
 import { createObserveResponse, type ObserveResponse } from "./observeResponse";
 import type { ObserveArgs } from "./observeTools";
 import {
@@ -20,10 +24,12 @@ import {
 
 export interface CarPlayObserveDependencies extends RetainedObservePngDependencies {
   projectionProbe?: CarPlayProjectionProbe;
+  runtime?: CarPlayRuntimeReader;
   simctl?: Pick<SimCtlClient, "enumerateScreens" | "screenshot">;
 }
 
 const defaultProjectionProbe = new DefaultCarPlayProjectionProbe();
+const defaultRuntimeReader = new DefaultCarPlayRuntimeReader();
 
 export async function observeCarPlay(
   device: BootedDevice,
@@ -43,7 +49,14 @@ export async function observeCarPlay(
     throw new ActionableError('display: "carplay" requires an iOS simulator.');
   }
   signal?.throwIfAborted();
-  await requireCarPlayProjection(deviceId, dependencies.projectionProbe ?? defaultProjectionProbe);
+  await requireCarPlayProjection(
+    deviceId,
+    {
+      probe: dependencies.projectionProbe ?? defaultProjectionProbe,
+      runtime: dependencies.runtime ?? defaultRuntimeReader,
+    },
+    { signal },
+  );
   signal?.throwIfAborted();
 
   const simctl = dependencies.simctl ?? new SimCtlClient(device);

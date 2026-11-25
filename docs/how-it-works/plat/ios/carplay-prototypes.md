@@ -27,7 +27,11 @@ actionable errors.
 - Both steps are required. CoreSimulator resets the plist to `{"stark":0}` on every boot, so run
   `power-on` after each boot. Running it again on a projecting screen is harmless.
 - `power-on` refuses iOS 27 and later runtimes with `unsupported-runtime`: Apple does not support
-  CarPlay on that simulator. `status` works on any runtime.
+  CarPlay on that simulator. `status` works on any runtime. The TypeScript side refuses them first:
+  `startDevice` `carPlay`, CarPlay `tapAt`, `pressButton` and `observe` read the runtime from
+  `simctl list devices` (`carPlayRuntime.ts`) and return the same `[unsupported-runtime]` error
+  before any helper path or the probe is checked (#19185). An unreadable runtime passes to the
+  helpers.
 - The TypeScript bridge is injectable and uses `AUTOMOBILE_CARPLAY_POWER_HELPER_PATH`. Its JSON
   lists every screen and a `carPlay` object for TVOut: `found`, nullable `screenID` and
   `powerState`.

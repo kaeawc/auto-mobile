@@ -73,6 +73,8 @@ import {
   observeAndroidPosture,
   readAndroidStates,
   readSupportedAndroidStates,
+  refuseKnownCrashingRearDisplay,
+  androidSystemServerRestartError,
 } from "./postureCommands";
 import { iosCtrlProxyClientFor } from "../observe/ios/iosCtrlProxyClientFor";
 import {
@@ -635,38 +637,54 @@ export class SetPosture {
       operation,
     );
     operation.assertCurrent();
+    if (requested === "rear_display" && states.some((state) => state.posture === requested)) {
+      const supported = inventoryPostures ?? states.map((state) => state.posture);
+      await refuseKnownCrashingRearDisplay(this.device, adb, [...new Set(supported)], signal);
+      operation.assertCurrent();
+    }
 
     const lockBefore = await readLockBeforePostureChange(adb, signal);
     operation.assertCurrent();
 
-    if (requested === "rear_display") {
-      await setPhysicalPosture(adb, requested, states, { supportsOpenedReset, operation });
-    } else if (emulator) {
-      notFoldable = await setEmulatorPosture(adb, requested, displayPreset, {
-        supportsRearDisplay:
-          states.some((state) => state.posture === "rear_display") ||
-          Boolean(inventoryPostures?.includes("rear_display")),
-        operation,
-      });
-    } else {
-      await setPhysicalPosture(adb, requested, states, { supportsOpenedReset, operation });
-    }
+    try {
+      if (requested === "rear_display") {
+        await setPhysicalPosture(adb, requested, states, { supportsOpenedReset, operation });
+      } else if (emulator) {
+        notFoldable = await setEmulatorPosture(adb, requested, displayPreset, {
+          supportsRearDisplay:
+            states.some((state) => state.posture === "rear_display") ||
+            Boolean(inventoryPostures?.includes("rear_display")),
+          operation,
+        });
+      } else {
+        await setPhysicalPosture(adb, requested, states, { supportsOpenedReset, operation });
+      }
 
-    operation.assertCurrent();
-    await observeAndroidPosture(
-      adb,
-      requested,
-      { states, notFoldable },
-      {
-        timer: this.timer,
-        observe: () => {
-          operation.assertCurrent();
-          ObservedAndroidDisplayCache.clear(this.device.deviceId);
-          return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+      operation.assertCurrent();
+      await observeAndroidPosture(
+        adb,
+        requested,
+        { states, notFoldable },
+        {
+          timer: this.timer,
+          observe: () => {
+            operation.assertCurrent();
+            ObservedAndroidDisplayCache.clear(this.device.deviceId);
+            return this.observeFactory(this.device).execute({ freshness: "fresh", signal });
+          },
+          operation,
         },
-        operation,
-      },
-    );
+      );
+    } catch (error) {
+      // A system_server crash surfaces as a broken pipe or a missing service on the next command.
+      throw (
+        androidSystemServerRestartError(
+          error,
+          requested,
+          states.length > 0 || inventoryPostures !== undefined,
+        ) ?? error
+      );
+    }
     operation.assertCurrent();
 
     throwIfAborted(signal);

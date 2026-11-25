@@ -9,6 +9,7 @@ import {
 import { parseCarPlayProjectionState } from "../../../src/utils/ios/carPlayProjection";
 import { FakeCarPlayInputSender } from "../../fakes/FakeCarPlayInputSender";
 import { FakeCarPlayProjectionProbe } from "../../fakes/FakeCarPlayProjectionProbe";
+import { FakeCarPlayRuntimeReader } from "../../fakes/FakeCarPlayRuntimeReader";
 
 // The helper's `input` JSON contract (CarPlayInputSent in ios/carplay-power): a usage press carries
 // usagePage and usage, a knob rotation scrollDelta. Not yet captured on a simulator (#19059).
@@ -101,7 +102,7 @@ describe("CarPlay head-unit input", () => {
     const result = await sendCarPlayInput(
       "udid",
       { name: "knob-ccw", count: 2 },
-      { probe, sender },
+      { probe, runtime: new FakeCarPlayRuntimeReader(), sender },
       signal,
     );
 
@@ -115,7 +116,11 @@ describe("CarPlay head-unit input", () => {
     const probe = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(untaggedJson));
     const sender = new FakeCarPlayInputSender();
 
-    const result = sendCarPlayInput("udid", { name: "back", count: 1 }, { probe, sender });
+    const result = sendCarPlayInput(
+      "udid",
+      { name: "back", count: 1 },
+      { probe, runtime: new FakeCarPlayRuntimeReader(), sender },
+    );
     await expect(result).rejects.toThrow("not projecting (Untagged[2]). No input was sent.");
     expect(sender.calls).toEqual([]);
   });

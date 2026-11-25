@@ -7,6 +7,7 @@ import {
   sendCarPlayInput,
 } from "../../utils/ios/carPlayInput";
 import { DefaultCarPlayProjectionProbe } from "../../utils/ios/carPlayProjection";
+import { DefaultCarPlayRuntimeReader } from "../../utils/ios/carPlayRuntime";
 import {
   type CarPlayTapDependencies,
   DefaultCarPlayTapper,
@@ -22,6 +23,7 @@ export type CarPlayTapFactory = () => CarPlayTapDependencies;
 
 export const defaultCarPlayTapFactory: CarPlayTapFactory = () => ({
   probe: new DefaultCarPlayProjectionProbe(),
+  runtime: new DefaultCarPlayRuntimeReader(),
   tapper: new DefaultCarPlayTapper(),
 });
 
@@ -93,6 +95,7 @@ export type CarPlayInputFactory = () => CarPlayInputDependencies;
 
 export const defaultCarPlayInputFactory: CarPlayInputFactory = () => ({
   probe: new DefaultCarPlayProjectionProbe(),
+  runtime: new DefaultCarPlayRuntimeReader(),
   sender: new DefaultCarPlayInputSender(),
 });
 

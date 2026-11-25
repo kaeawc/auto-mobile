@@ -11,6 +11,7 @@ import {
   type CarPlayDisplayDependencies,
 } from "../utils/ios/carPlayDisplay";
 import { DefaultCarPlayProjectionProbe } from "../utils/ios/carPlayProjection";
+import { DefaultCarPlayRuntimeReader } from "../utils/ios/carPlayRuntime";
 import { DefaultCarPlayScreenPowerer } from "../utils/ios/carPlayScreenPower";
 import {
   createStructuredToolResponse,
@@ -29,6 +30,7 @@ function defaultCarPlayDisplayDependencies(): StartDeviceCarPlayDependencies {
   return {
     powerer: new DefaultCarPlayScreenPowerer(),
     probe: new DefaultCarPlayProjectionProbe(),
+    runtime: new DefaultCarPlayRuntimeReader(),
     timer: deps.timer,
     holdAcquiringSession: deps.holdAcquiringSession,
   };

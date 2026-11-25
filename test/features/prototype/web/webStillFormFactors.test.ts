@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import type { WebChild, WebElement } from "../../../../src/features/prototype/web/webNodes";
 import { renderPrototypeStill } from "../../../../src/features/prototype/web/webStill";
 
+/** A node's text, its strings in tree order: a button's label sits in a span (#16611). */
+const textOf = (node: WebChild): string =>
+  typeof node === "string" ? node : node.children.map(textOf).join("");
+
 const spec = {
   id: "focus",
   window: { placement: { type: "fullscreen" } },
@@ -31,7 +35,7 @@ describe("still on watch, TV and car frames (#16446)", () => {
       expect(element.attrs["data-orientation"]).toBe("landscape");
       const width = parseFloat(screen(element).style.width!);
       expect(width).toBeGreaterThan(parseFloat(screen(element).style.height!));
-      expect(ringed(element).map((node) => node.children)).toEqual([["Play"]]);
+      expect(ringed(element).map(textOf)).toEqual(["Play"]);
     }
   });
 
@@ -123,7 +127,7 @@ describe("still on watch, TV and car frames (#16446)", () => {
     const { element } = renderPrototypeStill(spec, { frame: "car-1024p-landscape" });
     expect(element.attrs["data-orientation"]).toBe("landscape");
     const buttons = find(element, (node) => node.attrs["data-node"] === "button");
-    expect(buttons.map((node) => node.children)).toEqual([["Play"], ["Later"]]);
+    expect(buttons.map(textOf)).toEqual(["Play", "Later"]);
     expect(buttons.every((node) => node.style.display !== "none")).toBe(true);
   });
 

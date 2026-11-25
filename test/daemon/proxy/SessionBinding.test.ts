@@ -177,6 +177,28 @@ describe("SessionBinding", () => {
     },
   );
 
+  test.each(["watchos", "tvos", "visionos"] as const)(
+    "a %s acquisition released before it binds still records its Apple platform (#19211)",
+    async (platform) => {
+      const h = harness();
+      h.port.releaseReason = "device-killed";
+      await expect(
+        h.binding.bindResultMintedDeviceSession("startDevice", acquisition("minted", platform), 0),
+      ).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
+      expect(h.deps.sessionApplePlatforms.get("minted")).toBe(platform);
+      expect(h.state.boundSessionUuid).toBeUndefined();
+    },
+  );
+
+  test("an Android acquisition released before it binds records no Apple platform (#19211)", async () => {
+    const h = harness();
+    h.port.releaseReason = "device-killed";
+    await expect(
+      h.binding.bindResultMintedDeviceSession("getAndroid", acquisition(), 0),
+    ).rejects.toBeInstanceOf(DaemonBoundSessionExpiredError);
+    expect(h.deps.sessionApplePlatforms.size).toBe(0);
+  });
+
   test("an Android acquisition records no Apple platform (#19186)", async () => {
     const h = harness();
     h.state.boundSessionUuid = "minted";

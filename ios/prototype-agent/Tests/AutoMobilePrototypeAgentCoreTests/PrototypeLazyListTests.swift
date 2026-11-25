@@ -380,10 +380,12 @@ final class PrototypeLazyListTests: XCTestCase {
         let list = try spec("list")
         let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(node: list.root, data: list.data, index: 0))
         let texts = PrototypeStrictBindings.array(row.json.objectFields?["children"])
-            .map { $0.objectFields?["text"]?.stringValue }
+            .map { $0.objectFields?["text"]?.stringValue.map(PrototypeTextShield.unshield) }
         XCTAssertEqual(texts, expected)
+        // Drawn text: expanded values keep the inserted-text shield until they are drawn (#18628).
         let eager = try spec("column")
-        XCTAssertEqual(eager.root.children?.first?.children?.map(\.text), expected)
+        let eagerTexts = eager.root.children?.first?.children?.map { $0.text.map(PrototypeTextShield.unshield) }
+        XCTAssertEqual(eagerTexts, expected)
     }
 
     func testPlatformTextSurvivesTheFullBuildPathIntoLazyRows() throws {

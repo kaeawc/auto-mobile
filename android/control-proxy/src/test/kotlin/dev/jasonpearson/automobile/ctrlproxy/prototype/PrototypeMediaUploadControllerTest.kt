@@ -50,7 +50,9 @@ class PrototypeMediaUploadControllerTest {
   private val mp4 = byteArrayOf(0, 0, 0, 0x18) + "ftypisom".toByteArray() + ByteArray(40) { 7 }
 
   private fun sha256(bytes: ByteArray): String =
-    MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") {
+      (it.toInt() and 0xff).toString(16).padStart(2, '0')
+    }
 
   private fun encoded(bytes: ByteArray): String = Base64.getEncoder().encodeToString(bytes)
 

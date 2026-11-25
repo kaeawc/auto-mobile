@@ -310,35 +310,34 @@ class CtrlProxyMessageHandler(
           request.dataBase64,
         )
       is RemovePrototypeAsset -> actions.removePrototypeAsset(request.requestId, request.id)
-      is PutPrototypeAssetBegin,
-      is PutPrototypeAssetChunk,
-      is PutPrototypeAssetCommit,
-      is PutPrototypeAssetAbort -> handlePrototypeMedia(request)
-      else -> error("Unexpected prototype request")
+      else -> PrototypeMediaRequests().handleMedia(request)
     }
     return null
   }
 
-  private suspend fun handlePrototypeMedia(request: WebSocketRequest) {
-    when (request) {
-      is PutPrototypeAssetBegin ->
-        actions.beginPrototypeMedia(
-          request.requestId,
-          request.id,
-          request.mimeType,
-          request.size,
-          request.sha256,
-        )
-      is PutPrototypeAssetChunk ->
-        actions.putPrototypeMediaChunk(
-          request.requestId,
-          request.id,
-          request.offset,
-          request.dataBase64,
-        )
-      is PutPrototypeAssetCommit -> actions.commitPrototypeMedia(request.requestId, request.id)
-      is PutPrototypeAssetAbort -> actions.abortPrototypeMedia(request.requestId, request.id)
-      else -> error("Unexpected prototype media request")
+  /** The chunked media upload requests (#14254); any other request here is a routing bug. */
+  private inner class PrototypeMediaRequests {
+    suspend fun handleMedia(request: WebSocketRequest) {
+      when (request) {
+        is PutPrototypeAssetBegin ->
+          actions.beginPrototypeMedia(
+            request.requestId,
+            request.id,
+            request.mimeType,
+            request.size,
+            request.sha256,
+          )
+        is PutPrototypeAssetChunk ->
+          actions.putPrototypeMediaChunk(
+            request.requestId,
+            request.id,
+            request.offset,
+            request.dataBase64,
+          )
+        is PutPrototypeAssetCommit -> actions.commitPrototypeMedia(request.requestId, request.id)
+        is PutPrototypeAssetAbort -> actions.abortPrototypeMedia(request.requestId, request.id)
+        else -> error("Unexpected prototype request")
+      }
     }
   }
 

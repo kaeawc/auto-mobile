@@ -1420,8 +1420,8 @@ describe("iOS two-stage unlock", () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     const lock = new FakeIosLockProbe();
-    // initial, afterWake, afterSwipe, afterSwipe (fallback), 10 settle reads, afterWake (second wake)
-    lock.states = [...Array<DeviceLockState>(14).fill(LOCKED_SWIPE), UNLOCKED];
+    // initial, afterWake, afterSwipe, afterSwipe (fallback), 9 settle reads, afterWake (second wake)
+    lock.states = [...Array<DeviceLockState>(13).fill(LOCKED_SWIPE), UNLOCKED];
     const actions: IosUnlockActions = {
       async pressHome() {
         return { success: true };
@@ -1439,7 +1439,7 @@ describe("iOS two-stage unlock", () => {
     expect(result.warning).toBe(
       "unlocked by a second wake after the lock-screen swipe had no effect",
     );
-    expect(lock.reads).toBe(15);
+    expect(lock.reads).toBe(14);
   });
 
   test("a lock state that lags the fallback swipe is waited for, with no second wake (#19167)", async () => {

@@ -258,7 +258,37 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
         this.timer.sleep(Math.min(IOS_UNLOCK_POLL_INTERVAL_MS, deadline - this.timer.now())),
         signal,
       );
-      const unlocked = await awaitWhileRequestIsLive(readUnlocked({ phase: "afterSwipe" }), signal);
+      // Bound the read by the settle window and the overall budget; never start one past either.
+      const readBudget = Math.min(deadline - this.timer.now(), remainingMs());
+      if (readBudget <= 0) {
+        return false;
+      }
+      const probeAbort = new AbortController();
+      let unlocked: boolean | undefined;
+      try {
+        unlocked = await raceWithDeadline(
+          () =>
+            readUnlocked({
+              phase: "afterSwipe",
+              signal: signal ? AbortSignal.any([signal, probeAbort.signal]) : probeAbort.signal,
+            }),
+          {
+            timer: this.timer,
+            signal,
+            timeoutMs: readBudget,
+            label: "iOS post-swipe lock-state read",
+            onTimeout: () => probeAbort.abort(),
+          },
+        );
+      } catch (error) {
+        throwIfAborted(signal);
+        logger.warn(
+          `[IosLockScreenUnlocker] post-swipe lock-state read failed: ${errorMessage(error)}`,
+          error,
+        );
+        return false;
+      }
+      throwIfAborted(signal);
       if (unlocked === true) {
         return true;
       }

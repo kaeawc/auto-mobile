@@ -223,7 +223,8 @@ export class WakeAndUnlock {
                 const lock = await this.readIosLockState(deadline, probeSignal);
                 // A timed-out pre-swipe read must not overwrite a later stage's state.
                 throwIfAborted(probeSignal);
-                if (options?.phase !== "afterWake" || lock?.locked === false) {
+                // An unprobed (undefined) read must never replace a real reading.
+                if (lock && (options?.phase !== "afterWake" || !lock.locked)) {
                   stageLock = lock;
                 }
                 return lock ? !lock.locked : undefined;

@@ -507,8 +507,8 @@ describe("two-stage swipe budgets", () => {
     });
     return { result, calls: actions.calls, phases, timer };
   }
-  // 2_500 ms settle window / 250 ms interval: ten lock-state re-reads before a second wake.
-  const SETTLE_READS = Array<string>(10).fill("read");
+  // 2_500 ms settle window / 250 ms interval: nine lock-state re-reads (none starts at the deadline) before a second wake.
+  const SETTLE_READS = Array<string>(9).fill("read");
 
   test("a fast swipe the lock state confirms needs no fallback or second wake", async () => {
     const { result, calls } = await unlockWithReads([false, true]);
@@ -605,6 +605,43 @@ describe("two-stage swipe budgets", () => {
       error:
         "the lock-screen swipe reported success but did not dismiss the lock screen, and no budget remained for a second wake",
     });
+  });
+
+  test("no lock-state read starts once the overall budget is spent", async () => {
+    // Budget 1_500 ms: the last sleep lands on the deadline; a read there would be unprobed.
+    const { calls, timer } = await unlockWithReads([false, false, false], () => false, 1_500);
+    expect(calls.filter((call) => call === "read")).toHaveLength(3 + 5);
+    expect(timer.now()).toBe(1_500);
+  });
+
+  test("a read started near the settle deadline is cut off at the deadline", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const actions = new FakeIosActions();
+    let afterSwipeReads = 0;
+    let lastSignal: AbortSignal | undefined;
+    const result = await new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
+      remainingMs: () => 20_000 - timer.now(),
+      readUnlocked: async (options) => {
+        if (options?.phase !== "afterSwipe") {
+          return false;
+        }
+        afterSwipeReads++;
+        if (afterSwipeReads <= 2) {
+          return false;
+        }
+        if (afterSwipeReads === 2 + 9) {
+          // Ninth settle read (250 ms left in the window): would otherwise run for a minute.
+          lastSignal = options.signal;
+          await timer.sleep(60_000);
+          return true;
+        }
+        return false;
+      },
+    });
+    expect(lastSignal?.aborted).toBe(true);
+    expect(timer.now()).toBeLessThan(10_000);
+    expect(result).not.toMatchObject({ warning: expect.stringContaining("fallback") });
   });
 
   test("an unknown lock state after the fallback swipe defers to the caller's probe", async () => {

@@ -747,6 +747,20 @@ for (const engine of ENGINES) {
                 },
               ],
             },
+            // A repeated row measures its instances as one row: the first ratio takes what the
+            // first text leaves, and the second instance gets no width (#16711).
+            {
+              type: "column",
+              style: { width: { dp: 200 } },
+              children: [
+                {
+                  type: "row",
+                  testTag: "repeat-row",
+                  repeat: { items: [{ n: 1 }, { n: 2 }] },
+                  children: [text("repeat-text", "a"), box("repeat-ratio", { aspectRatio: 4 })],
+                },
+              ],
+            },
             // No spacing follows the grower once it took the width (#16711).
             {
               type: "row",
@@ -799,6 +813,21 @@ for (const engine of ENGINES) {
         expect(width("bounded-capped")).toBeCloseTo(50, 0);
         expect(width("gap-taker")).toBeCloseTo(200 - width("gap-start") - 10, 0);
         expect(width("gap-end")).toBeCloseTo(0, 0);
+
+        // testTags repeat, so the widths map keeps the second instance's; read both in order.
+        const repeated = await page.$$eval(
+          '[data-testid="repeat-ratio"], [data-testid="repeat-text"]',
+          (nodes) =>
+            nodes.map((node) => [
+              node.getAttribute("data-testid"),
+              node.getBoundingClientRect().width,
+            ]),
+        );
+        const [firstText, firstRatio, secondText, secondRatio] = repeated.map(([, w]) => Number(w));
+        expect(width("repeat-row")).toBeCloseTo(200, 0);
+        expect(firstRatio).toBeCloseTo(200 - firstText!, 0);
+        expect(secondText).toBeCloseTo(0, 0);
+        expect(secondRatio).toBeCloseTo(0, 0);
       } finally {
         await page.close();
       }

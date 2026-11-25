@@ -26,12 +26,19 @@ struct PrototypeListRepeat: Decodable {
 private enum RowShield {
     static let marker = "\u{E000}"
 
+    /// Recursive, so the raw rows a nested `repeat` reads from the item stay literal too (#18665).
     static func shield(_ value: JSONValue) -> JSONValue {
-        guard case let .string(text) = value else { return value }
-        return .string(
-            text.replacingOccurrences(of: "{data:", with: "{\(marker)data:")
-                .replacingOccurrences(of: "{platform:", with: "{\(marker)platform:")
-        )
+        switch value {
+        case let .string(text): .string(shieldText(text))
+        case let .array(items): .array(items.map(shield))
+        case let .object(fields): .object(fields.mapValues(shield))
+        default: value
+        }
+    }
+
+    private static func shieldText(_ text: String) -> String {
+        text.replacingOccurrences(of: "{data:", with: "{\(marker)data:")
+            .replacingOccurrences(of: "{platform:", with: "{\(marker)platform:")
     }
 
     static func unshield(_ value: JSONValue) -> JSONValue {
@@ -79,7 +86,8 @@ enum PrototypeLazyList {
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
         let projected = fields.mapValues(RowShield.shield)
         let instance = PrototypeRepeatInstance(
-            alias: spec.as, item: projected, index: index, sourceItem: items[index].objectFields,
+            alias: spec.as, item: projected, index: index,
+            sourceItem: items[index].objectFields?.mapValues(RowShield.shield),
             identity: fields[spec.key]?.displayString
         )
         // Row tokens bind first, so `{data:/rows/{index}/name}` is a complete pointer before it resolves.

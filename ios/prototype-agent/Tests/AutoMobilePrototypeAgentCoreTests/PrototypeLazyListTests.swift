@@ -366,6 +366,26 @@ final class PrototypeLazyListTests: XCTestCase {
         XCTAssertEqual(try rowText(json, index: 1), "{platform:/name}")
     }
 
+    func testNestedRowValuesLookingLikeTokensStayLiteralInLazyAndEagerRows() throws {
+        func spec(_ type: String) throws -> PrototypeSpec {
+            try JSONDecoder().decode(PrototypeSpec.self, from: Data(#"""
+            {"id":"nested","window":{"placement":{"type":"fullscreen"}},"data":{"other":"Expanded","orders":[
+              {"id":"a","lines":[{"sku":"{data:/other}"},{"sku":"{platform:/name}"}]}]},
+             "root":{"type":"\#(type)","repeat":{"items":{"path":"/orders"},"as":"order","key":"id"},"children":[
+              {"type":"column","repeat":{"items":{"field":"lines"},"as":"line"},
+               "children":[{"type":"text","text":"{line.sku}"}]}]}}
+            """#.utf8))
+        }
+        let expected: [String?] = ["{data:/other}", "{platform:/name}"]
+        let list = try spec("list")
+        let row = try XCTUnwrap(PrototypeLazyList.resolvedRow(node: list.root, data: list.data, index: 0))
+        let texts = PrototypeStrictBindings.array(row.json.objectFields?["children"])
+            .map { $0.objectFields?["text"]?.stringValue }
+        XCTAssertEqual(texts, expected)
+        let eager = try spec("column")
+        XCTAssertEqual(eager.root.children?.first?.children?.map(\.text), expected)
+    }
+
     func testPlatformTextSurvivesTheFullBuildPathIntoLazyRows() throws {
         let json = lazySpec(
             text: "Device {platform:/device/widthClass} {row.id}",

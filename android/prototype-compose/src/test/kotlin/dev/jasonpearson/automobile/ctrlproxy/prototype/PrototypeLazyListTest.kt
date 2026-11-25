@@ -256,6 +256,33 @@ class PrototypeLazyListTest {
   }
 
   @Test
+  fun `nested row values that look like data tokens stay literal in lazy and eager rows`() {
+    val base =
+      dataList(
+        "unused",
+        """{"rows":[{"id":"a","cells":[{"sku":"{data:/other}"},{"sku":"PEN"}]}],"other":"Expanded"}""",
+      )
+    val template =
+      PrototypeColumnNode(
+        repeat = PrototypeRepeat(emptyList(), "cell", itemsField = "cells"),
+        children = listOf(PrototypeTextNode(text = "{cell.sku}")),
+      )
+    val expected = listOf("{data:/other}", "PEN")
+    val lazy = base.copy(root = (base.root as PrototypeListNode).copy(children = listOf(template)))
+    val model = checkNotNull(mapPrototypeSpec(lazy).root.list)
+    assertEquals(expected, model.render(model.rows.single(), 0).children.map { it.text })
+    val eager =
+      base.copy(
+        root =
+          PrototypeColumnNode(
+            repeat = PrototypeRepeat(emptyList(), "row", "/rows", "id"),
+            children = listOf(template),
+          ),
+      )
+    assertEquals(expected, mapPrototypeSpec(eager).root.children.single().children.map { it.text })
+  }
+
+  @Test
   fun `empty lists retain their header and footer and have no rows`() {
     val model = mapPrototypeSpec(spec(0)).root
     assertTrue(checkNotNull(model.list).rows.isEmpty())

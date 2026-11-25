@@ -21,7 +21,12 @@ import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 import { resolveIosHomeBackend } from "../../utils/ios-cmdline-tools/IosHomeBackend";
 import { isNavigationPressButton, resolveAndroidKeyCode } from "./pressButtonPolicy";
-import { indeterminatePressResult, rejectStepsOnPlainButton } from "./pressButtonResults";
+import {
+  indeterminatePressResult,
+  IOS_OPTIONAL_HARDWARE_BUTTONS,
+  iosPressFailureResult,
+  rejectStepsOnPlainButton,
+} from "./pressButtonResults";
 import type { IosSimulatorRawInput } from "../../utils/ios/simHid/IosSimulatorRawInput";
 import { heldRawInput, resolveIosRawInput, routeSimulatorPowerPress } from "./simHidRouting";
 import { holdDurationOf, prepareAndroidKeyevent, rejectUnsupportedHold } from "./androidKeyHold";
@@ -43,7 +48,6 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { HomeScreen } from "./HomeScreen";
 import {
-  iosPreLockForeground,
   recordIosAppBeforePowerPress,
   type IosPreLockForegroundRegistry,
 } from "./IosForegroundRestore";
@@ -61,12 +65,6 @@ import {
   acceptHomeAlreadyOnLauncher,
   type PressButtonDisplayResolver,
 } from "./pressButtonDisplay";
-
-/** iOS hardware buttons that only some devices have, pressed via XCUIDevice.Button (#14100). */
-const IOS_OPTIONAL_HARDWARE_BUTTONS: ReadonlySet<string> = new Set(["action", "camera"]);
-
-/** Wording GesturePerformer.GestureError.notSupported puts on the wire. */
-const IOS_RUNNER_NOT_SUPPORTED_PREFIX = "Feature not supported";
 
 export function unsupportedIosButtonResult(button: string, error: string): PressButtonResult {
   return unsupportedButtonResult(button, error);
@@ -132,7 +130,7 @@ export class PressButton extends BaseVisualChange {
   private readonly simctl: Pick<SimCtl, "executeCommandArgs">;
   private readonly holdRequest?: DispatchedRequestHold;
   private readonly displayResolver?: PressButtonDisplayResolver;
-  private readonly iosPreLockForeground: IosPreLockForegroundRegistry;
+  private readonly iosPreLockForeground?: IosPreLockForegroundRegistry;
 
   constructor(
     device: BootedDevice,
@@ -152,7 +150,7 @@ export class PressButton extends BaseVisualChange {
     this.deviceTraits = collaborators.deviceTraits;
     this.templateBackTapClient = collaborators.templateBackTapClient;
     this.iosRawInput = resolveIosRawInput(device, collaborators.iosRawInput);
-    this.iosPreLockForeground = collaborators.iosPreLockForeground ?? iosPreLockForeground;
+    this.iosPreLockForeground = collaborators.iosPreLockForeground;
   }
 
   private iosLockStateInvalidator?: IosLockStateInvalidator;
@@ -876,7 +874,7 @@ export class PressButton extends BaseVisualChange {
       onRecentAppsRoute?.((result as { recentAppsRoute?: string }).recentAppsRoute);
       return result.success
         ? { success: true, button, keyCode: -1 }
-        : iosPressFailureResult(button, normalizedButton, result);
+        : iosPressFailureResult(button, normalizedButton, result, PressButton.IOS_HARDWARE_BUTTONS);
     }
 
     if (normalizedButton === "menu") {
@@ -998,48 +996,4 @@ export class PressButton extends BaseVisualChange {
         return { success: false, error: `Unsupported iOS button: ${button}` };
     }
   }
-}
-
-/** Map a failed iOS runner press to a typed result: unsupported, indeterminate, or failed. */
-function iosPressFailureResult(
-  button: string,
-  normalizedButton: string,
-  result: { error?: string; dispatched?: boolean; acknowledged?: boolean },
-): PressButtonResult {
-  if (
-    IOS_OPTIONAL_HARDWARE_BUTTONS.has(normalizedButton) &&
-    result.error?.startsWith(IOS_RUNNER_NOT_SUPPORTED_PREFIX)
-  ) {
-    return unsupportedIosButtonResult(
-      button,
-      `${result.error}. The ${normalizedButton} button needs a device that has it (hasHardwareButton) and a CtrlProxy runner built with Xcode 16.3 or later.`,
-    );
-  }
-  if (normalizedButton !== "home" && result.dispatched && result.acknowledged === false) {
-    return {
-      success: false,
-      button,
-      keyCode: -1,
-      code: "indeterminate_outcome",
-      retryable: false,
-      error: `Button press outcome is indeterminate: the request was dispatched but no result was confirmed (${result.error ?? "unknown error"}). The press may have been applied. Do not retry automatically. Observe before retrying.`,
-    };
-  }
-  return {
-    success: false,
-    button,
-    keyCode: -1,
-    code: "press_failed",
-    retryable: false,
-    // HOME stays a plain failure here, but callers that must not replay it (systemTray's
-    // Notification Center close) need to tell a sent-but-unanswered press from a refusal (#14387).
-    ...(normalizedButton === "home" && result.dispatched !== undefined
-      ? { dispatched: result.dispatched, acknowledged: result.acknowledged }
-      : {}),
-    error:
-      result.error ??
-      (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)
-        ? `iOS hardware button "${button}" is not supported on this device`
-        : `Failed to press iOS ${normalizedButton} button`),
-  };
 }

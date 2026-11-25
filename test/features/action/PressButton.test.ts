@@ -1122,6 +1122,8 @@ describe("iOS Simulator power press records the app in front for wakeAndUnlock (
     screen.setObserveResult(() =>
       buildObserveResult({
         updatedAt: timer.now(),
+        screenSize: { width: 402, height: 874 },
+        systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
         activeWindow: { appId, activityName: "", layoutSeqSum: 0 },
         deviceLock: { locked, keyguardShowing: locked },
       }),

@@ -664,7 +664,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
       return { resources };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
+        throw sessionOwnershipLostError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
         throw noActiveDeviceSessionError(error);
@@ -688,7 +688,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
       return { resourceTemplates };
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
+        throw sessionOwnershipLostError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
         throw noActiveDeviceSessionError(error);
@@ -733,7 +733,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
     } catch (error) {
       ctx.mcpReq.signal.throwIfAborted();
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
+        throw sessionOwnershipLostError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
         throw noActiveDeviceSessionError(error);
@@ -951,7 +951,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
       return { tools } as ListToolsResult;
     } catch (error) {
       if (error instanceof DaemonBoundSessionExpiredError) {
-        throw sessionOwnershipLostError(error);
+        throw sessionOwnershipLostError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
         throw noActiveDeviceSessionError(error);

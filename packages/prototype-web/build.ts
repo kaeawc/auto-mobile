@@ -2,6 +2,10 @@
 // <automobile-prototype> element over it into dist/element.js, for the browser (#16453, #16454). Run from this directory: `bun run build`. Nothing is installed here; the
 // bundle inlines everything it reaches, so the package has no dependencies.
 //
+// `--outdir <dir>` writes the two library entries there instead of dist/, and `--library` skips
+// the page module below: the release stages the package in a temporary copy this way, so packing
+// it never touches the checkout (#16455).
+//
 // It also writes the page entry's build to src/features/prototype/web/prototypeWebPageBundle.generated.ts
 // (#16528), the one script the server's prototype web page inlines. That file is committed, and
 // prototypeWebPageBundle.test.ts fails when it differs from a fresh build. `bun build.ts --check`
@@ -96,9 +100,9 @@ export async function buildPrototypeWebPageBundleModule(): Promise<string> {
 }
 
 if (import.meta.main) {
-  const pageModule = await buildPrototypeWebPageBundleModule();
   const pagePath = here(`../../${prototypeWebPageBundlePath}`);
   if (process.argv.includes("--check")) {
+    const pageModule = await buildPrototypeWebPageBundleModule();
     if (readFileSync(pagePath, "utf8").replace(/\r\n/g, "\n") !== pageModule) {
       console.error(
         `${prototypeWebPageBundlePath} is stale; regenerate: cd packages/prototype-web && bun run build`,
@@ -106,14 +110,21 @@ if (import.meta.main) {
       process.exitCode = 1;
     }
   } else {
+    const outdirAt = process.argv.indexOf("--outdir");
+    const outdir = outdirAt === -1 ? here("./dist") : resolve(process.argv[outdirAt + 1] ?? "");
     for (const entry of ["index", "element"] as const) {
-      const code = await buildPrototypeWebLibrary(here("./dist"), entry);
+      const code = await buildPrototypeWebLibrary(outdir, entry);
       assertPrototypeWebExportBudget(entry, Buffer.byteLength(code));
-      console.log(`prototype-web: dist/${entry}.js, ${Buffer.byteLength(code)} bytes minified`);
+      console.log(
+        `prototype-web: ${outdir}/${entry}.js, ${Buffer.byteLength(code)} bytes minified`,
+      );
     }
-    writeFileSync(pagePath, pageModule);
-    console.log(
-      `prototype-web: ${prototypeWebPageBundlePath}, ${Buffer.byteLength(pageModule)} bytes`,
-    );
+    if (!process.argv.includes("--library")) {
+      const pageModule = await buildPrototypeWebPageBundleModule();
+      writeFileSync(pagePath, pageModule);
+      console.log(
+        `prototype-web: ${prototypeWebPageBundlePath}, ${Buffer.byteLength(pageModule)} bytes`,
+      );
+    }
   }
 }

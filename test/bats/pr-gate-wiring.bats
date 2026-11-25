@@ -247,7 +247,8 @@ load yq-helpers
   ' "$WF"
   [ "$status" -eq 0 ]
   local path
-  for path in "scripts/**" "test/bats/**" ".github/**" "package.json" "bun.lock" "skills/**" ".agents/**" "oxlint-plugins/**"; do
+  # packages/prototype-web/** feeds the release stage dry run (#16455).
+  for path in "scripts/**" "test/bats/**" ".github/**" "package.json" "bun.lock" "skills/**" ".agents/**" "oxlint-plugins/**" "packages/prototype-web/**"; do
     [[ $'\n'"$output"$'\n' == *$'\n'"$path"$'\n'* ]]
   done
   # A TypeScript-only change must not trigger the suite.

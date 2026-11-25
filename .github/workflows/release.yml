@@ -669,6 +669,26 @@ jobs:
             --private-key "$MCP_DNS_PRIVATE_KEY"
           ./mcp-publisher publish
 
+      # The browser embed library, at the main package's version (#16455). npm
+      # trusted publishing cannot create a package, so its first publish is a
+      # manual owner step; set the PROTOTYPE_WEB_PUBLISH repository variable to
+      # true once the package exists and trusts this workflow.
+      - name: Publish prototype-web to npm
+        if: ${{ vars.PROTOTYPE_WEB_PUBLISH == 'true' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Assign first, then test — see the npm step for why.
+          state=$(scripts/release/already-published.sh npm-prototype-web "$VERSION")
+          if [ "$state" = published ]; then
+            echo "npm already has @kaeawc/auto-mobile-prototype-web@$VERSION; skipping publish"
+            exit 0
+          fi
+          stage="$RUNNER_TEMP/prototype-web"
+          scripts/release/stage-prototype-web.sh "$VERSION" "$stage"
+          npm publish --provenance --access public "$stage"
+
       # Homebrew publishing moved to its own terminal `publish-homebrew` job
       # (needs: verify-and-release). A tap failure there fails the workflow
       # visibly WITHOUT failing verify-and-release, so the Conveyor desktop jobs

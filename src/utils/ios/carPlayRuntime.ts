@@ -1,7 +1,6 @@
 import { ActionableError } from "../../models/ActionableError";
 import { errorMessage } from "../describeUnknownError";
-import { execFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
-import { runExecSeam } from "../ExecSeam";
+import { SimCtlClient } from "../ios-cmdline-tools/SimCtlClient";
 import {
   iosVersionFromSimctlListDevices,
   parseIosMajorVersion,
@@ -18,15 +17,18 @@ export interface CarPlayRuntimeReader {
 }
 
 export class DefaultCarPlayRuntimeReader implements CarPlayRuntimeReader {
-  constructor(private readonly exec: ExecFileAsync = execFileAsync) {}
+  /** Built on first use, so importing a CarPlay entry point creates no simctl client. */
+  constructor(
+    private readonly simctl: () => Pick<SimCtlClient, "executeCommandArgs"> = () =>
+      new SimCtlClient(),
+  ) {}
 
   async runtimeVersion(udid: string, signal?: AbortSignal): Promise<string | undefined> {
-    const args = ["simctl", "list", "devices", udid, "--json"];
     try {
-      const result = await runExecSeam(
-        (options) => this.exec("xcrun", args, options),
-        { timeoutMs: SIMCTL_LIST_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024, signal },
-        { command: "xcrun", args },
+      const result = await this.simctl().executeCommandArgs(
+        ["list", "--json", "devices", udid],
+        SIMCTL_LIST_TIMEOUT_MS,
+        signal,
       );
       return iosVersionFromSimctlListDevices(result.stdout, udid);
     } catch (error) {

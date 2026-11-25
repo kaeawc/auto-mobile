@@ -18,6 +18,6 @@ export async function captureCarPlayScreen(
   },
   signal?: AbortSignal,
 ): Promise<Buffer> {
-  const state = await requireCarPlayProjection(udid, deps);
+  const state = await requireCarPlayProjection(udid, deps, { signal });
   return deps.screenshot(udid, carPlayCaptureDisplay(state), signal);
 }

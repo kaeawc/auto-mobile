@@ -48,6 +48,7 @@ describe("CarPlay capture", () => {
     ).toBe(image);
     expect(screenshot).toHaveBeenCalledTimes(1);
     expect(screenshot).toHaveBeenCalledWith("udid", "2", signal);
+    expect(probe.options).toEqual([{ signal }]);
   });
 
   test.each([

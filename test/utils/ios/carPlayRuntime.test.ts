@@ -23,35 +23,47 @@ describe("requireCarPlayRuntime", () => {
 
   test("lets iOS 26.x and an unknown runtime through", async () => {
     for (const version of ["26.5", "26.0", undefined]) {
-      await expect(
-        requireCarPlayRuntime(udid, new FakeCarPlayRuntimeReader(version)),
-      ).resolves.toBeUndefined();
+      const reader = new FakeCarPlayRuntimeReader();
+      // Assigned after construction: passing undefined would take the constructor default.
+      reader.version = version;
+      await expect(requireCarPlayRuntime(udid, reader)).resolves.toBeUndefined();
+      expect(reader.calls).toEqual([udid]);
     }
   });
 });
 
 describe("DefaultCarPlayRuntimeReader", () => {
-  test("reads the runtime of the one simulator from simctl list devices", async () => {
+  function simctlReturning(run: () => Promise<string>) {
     const calls: unknown[] = [];
-    const reader = new DefaultCarPlayRuntimeReader(async (file, args, options) => {
-      calls.push({ file, args, options });
-      return {
-        stdout: Buffer.from(listing("com.apple.CoreSimulator.SimRuntime.iOS-27-2")),
-        stderr: "",
-      };
-    });
-    expect(await reader.runtimeVersion(udid)).toBe("27.2");
-    expect(calls).toEqual([
-      {
-        file: "xcrun",
-        args: ["simctl", "list", "devices", udid, "--json"],
-        options: { timeout: 10000, maxBuffer: 4 * 1024 * 1024 },
+    const simctl = {
+      async executeCommandArgs(args: string[], timeoutMs?: number, signal?: AbortSignal) {
+        calls.push({ args, timeoutMs, signal });
+        const stdout = await run();
+        return {
+          stdout,
+          stderr: "",
+          toString: () => stdout,
+          trim: () => stdout.trim(),
+          includes: (text: string) => stdout.includes(text),
+        };
       },
+    };
+    return { calls, reader: new DefaultCarPlayRuntimeReader(() => simctl) };
+  }
+
+  test("reads the runtime of the one simulator through SimCtlClient", async () => {
+    const { calls, reader } = simctlReturning(async () =>
+      listing("com.apple.CoreSimulator.SimRuntime.iOS-27-2"),
+    );
+    const signal = new AbortController().signal;
+    expect(await reader.runtimeVersion(udid, signal)).toBe("27.2");
+    expect(calls).toEqual([
+      { args: ["list", "--json", "devices", udid], timeoutMs: 10000, signal },
     ]);
   });
 
   test("reports an unknown runtime when simctl fails", async () => {
-    const reader = new DefaultCarPlayRuntimeReader(async () => {
+    const { reader } = simctlReturning(async () => {
       throw new Error("xcrun: not found");
     });
     expect(await reader.runtimeVersion(udid)).toBeUndefined();
@@ -60,7 +72,7 @@ describe("DefaultCarPlayRuntimeReader", () => {
   test("rethrows a cancellation instead of reporting an unknown runtime", async () => {
     const controller = new AbortController();
     const reason = new Error("cancelled");
-    const reader = new DefaultCarPlayRuntimeReader(async () => {
+    const { reader } = simctlReturning(async () => {
       controller.abort(reason);
       throw new Error("killed");
     });

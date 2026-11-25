@@ -10,9 +10,20 @@ setup() {
   printf 'docs/changelog.md\n' >"$WORK/.gitignore"
   printf 'This is seamless and genuine.\n' >"$WORK/docs/changelog.md"
   printf '# Index\n' >"$WORK/docs/index.md"
+  CHANGELOG="$REPO_ROOT/docs/changelog.md"
+  CHANGELOG_BACKUP="$WORK/changelog.backup"
+  CHANGELOG_INSTALLED=0
 }
 
 teardown() {
+  # Restore a developer's generated changelog even when the test fails (#18662).
+  if [ "$CHANGELOG_INSTALLED" -eq 1 ]; then
+    if [ -e "$CHANGELOG_BACKUP" ]; then
+      mv -f "$CHANGELOG_BACKUP" "$CHANGELOG"
+    else
+      rm -f "$CHANGELOG"
+    fi
+  fi
   rm -rf "$WORK"
 }
 
@@ -27,12 +38,13 @@ teardown() {
 
 @test "banned-phrase check passes when the only offending docs file is ignored" {
   cd "$REPO_ROOT"
-  local ignored=0
-  if [ ! -e docs/changelog.md ]; then
-    printf 'This is seamless and genuine.\n' >docs/changelog.md
-    ignored=1
+  # Always install the offending content, so a clean existing changelog cannot mask a
+  # banned-phrase check that stops dropping ignored files (#18662).
+  if [ -e "$CHANGELOG" ]; then
+    cp -p "$CHANGELOG" "$CHANGELOG_BACKUP"
   fi
+  CHANGELOG_INSTALLED=1
+  printf 'This is seamless and genuine.\n' >"$CHANGELOG"
   run bun scripts/docs/check-banned-phrases.ts
-  if [ "$ignored" -eq 1 ]; then rm -f docs/changelog.md; fi
   [ "$status" -eq 0 ]
 }

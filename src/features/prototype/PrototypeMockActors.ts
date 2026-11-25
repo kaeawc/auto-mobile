@@ -15,7 +15,8 @@ import type { Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
 import { MAX_PROTOTYPE_CHANNEL_FRAME_BYTES } from "./prototypeChannelLimits";
 import { bindMockValue, matchMockPath, type MockBindingContext } from "./prototypeMockBinding";
-import type { MockActor, MockActorStep } from "./prototypeMockSchema";
+import { mockPathLengthMeters, mockPathPosition, type MockPathPoint } from "./prototypeMockPaths";
+import type { MockActor, MockActorAdvance, MockActorStep } from "./prototypeMockSchema";
 import type { PrototypeRequestJson } from "./prototypeRequestProtocol";
 
 export type MockActorTimer = Pick<Timer, "setTimeout" | "clearTimeout" | "now" | "monotonicNow">;
@@ -57,6 +58,12 @@ export const MAX_MOCK_ACTOR_PENDING = 256;
 
 const NO_CONTEXT: MockBindingContext = { params: {}, query: {}, body: undefined };
 
+/** How far an `advance` step has moved along its path; `done` once it wrote the last point. */
+interface AdvanceProgress {
+  meters: number;
+  done: boolean;
+}
+
 export class PrototypeMockActors {
   private readonly pending = new Set<PendingStep>();
   private disposed = false;
@@ -65,11 +72,14 @@ export class PrototypeMockActors {
   /** The due time of the step running now; later steps of its run count from it. */
   private firingAt: number | undefined;
   private applied = 0;
+  /** Per `advance` step: progress survives between runs and resets with a new backend. */
+  private readonly progress = new Map<MockActorAdvance, AdvanceProgress>();
 
   constructor(
     private readonly actors: readonly MockActor[],
     private readonly timer: MockActorTimer,
     private readonly effects: MockActorEffects,
+    private readonly paths: Readonly<Record<string, readonly MockPathPoint[]>> = {},
   ) {}
 
   /** Starts every `every` actor; its run k begins at `afterMs + k * every`. */
@@ -242,7 +252,10 @@ export class PrototypeMockActors {
   }
 
   private applyStep(step: MockActorStep, context: MockBindingContext): void {
-    const effect = toEffect(step, context);
+    const effect =
+      step.advance === undefined
+        ? toEffect(step, context)
+        : this.advanceEffect(step.advance, context);
     if (effect === undefined) {
       return;
     }
@@ -258,6 +271,36 @@ export class PrototypeMockActors {
       logger.warn(
         `[PrototypeMock] actor ${write.method} ${write.collection}${write.id === undefined ? "" : `/${write.id}`} answered ${status}.`,
       );
+    }
+  }
+
+  /** The next position along the path, or nothing once the step has reached its end. */
+  private advanceEffect(
+    advance: MockActorAdvance,
+    context: MockBindingContext,
+  ): MockActorEffect | undefined {
+    const points = this.paths[advance.path];
+    const progress = this.progress.get(advance) ?? { meters: 0, done: false };
+    if (points === undefined || progress.done) {
+      return undefined;
+    }
+    const length = mockPathLengthMeters(points);
+    const meters = Math.min(length, progress.meters + advance.metersPerTick);
+    this.progress.set(advance, { meters, done: meters >= length });
+    const value = mockPathPosition(points, meters);
+    try {
+      if (advance.room !== undefined) {
+        return toPublish(advance.room, { ...value }, context);
+      }
+      const id = bindMockValue(advance.id!, context);
+      return {
+        kind: "write",
+        write: { method: "PATCH", collection: advance.update!, id: String(id), body: { ...value } },
+      };
+    } catch (error) {
+      // A binding past the size cap skips this step only; the backend keeps answering requests.
+      logger.warn(`[PrototypeMock] actor advance skipped: ${errorMessage(error)}`, error);
+      return undefined;
     }
   }
 }

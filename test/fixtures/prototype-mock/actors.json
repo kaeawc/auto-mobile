@@ -320,6 +320,100 @@
           }
         }
       ]
+    },
+    {
+      "name": "an every actor advances a driver along a path into its item and holds at the end",
+      "definition": {
+        "collections": { "drivers": [{ "id": "d1", "name": "Sam" }] },
+        "paths": {
+          "driverPath": [
+            { "lat": 0, "lng": 0 },
+            { "lat": 0, "lng": 0.001 },
+            { "lat": 0.001, "lng": 0.001 }
+          ]
+        },
+        "actors": [
+          {
+            "every": 1000,
+            "maxRuns": 10,
+            "do": [
+              {
+                "advance": {
+                  "path": "driverPath",
+                  "metersPerTick": 50,
+                  "update": "drivers",
+                  "id": "d1"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        { "advanceMs": 999 },
+        { "expect": { "drivers": [{ "id": "d1", "name": "Sam" }] } },
+        { "advanceMs": 1 },
+        {
+          "expect": {
+            "drivers": [{ "id": "d1", "name": "Sam", "lat": 0, "lng": 0.00045, "heading": 90 }]
+          }
+        },
+        { "simulateMs": 2000, "applied": 2 },
+        {
+          "expect": {
+            "drivers": [{ "id": "d1", "name": "Sam", "lat": 0.000349, "lng": 0.001, "heading": 0 }]
+          }
+        },
+        { "simulateMs": 3000, "applied": 2 },
+        {
+          "expect": {
+            "drivers": [{ "id": "d1", "name": "Sam", "lat": 0.001, "lng": 0.001, "heading": 0 }]
+          }
+        },
+        { "simulateMs": 5000, "applied": 0 },
+        {
+          "expect": {
+            "drivers": [{ "id": "d1", "name": "Sam", "lat": 0.001, "lng": 0.001, "heading": 0 }]
+          }
+        }
+      ]
+    },
+    {
+      "name": "a triggered advance publishes each position to the trip's room until the end of the path",
+      "definition": {
+        "rooms": [{ "path": "/track/:id" }],
+        "paths": {
+          "trip": [
+            { "lat": 10, "lng": 20 },
+            { "lat": 10.02, "lng": 20 }
+          ]
+        },
+        "routes": [{ "method": "POST", "path": "/trips/:id/tick", "status": 202 }],
+        "actors": [
+          {
+            "on": { "route": "POST /trips/:id/tick" },
+            "do": [
+              { "advance": { "path": "trip", "metersPerTick": 1000, "room": "/track/{params.id}" } }
+            ]
+          }
+        ]
+      },
+      "steps": [
+        { "join": "/track/t1" },
+        { "request": { "method": "POST", "path": "/trips/t1/tick" }, "status": 202 },
+        { "request": { "method": "POST", "path": "/trips/t1/tick" }, "status": 202 },
+        { "request": { "method": "POST", "path": "/trips/t1/tick" }, "status": 202 },
+        { "request": { "method": "POST", "path": "/trips/t1/tick" }, "status": 202 },
+        {
+          "frames": {
+            "/track/t1": [
+              { "lat": 10.008993, "lng": 20, "heading": 0 },
+              { "lat": 10.017986, "lng": 20, "heading": 0 },
+              { "lat": 10.02, "lng": 20, "heading": 0 }
+            ]
+          }
+        }
+      ]
     }
   ]
 }

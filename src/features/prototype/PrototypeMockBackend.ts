@@ -95,10 +95,15 @@ export class PrototypeMockBackend {
       record: (room, from, data) => this.append({ seq: 0, room, from, data }),
       recordConnection: (room, event) => this.append({ seq: 0, room, event }),
     });
-    this.actors = new PrototypeMockActors(definition.actors ?? [], deps.timer, {
-      write: (write) => this.applyActorWrite(write),
-      publish: (room, frame) => this.rooms.publish(room, frame, "publish"),
-    });
+    this.actors = new PrototypeMockActors(
+      definition.actors ?? [],
+      deps.timer,
+      {
+        write: (write) => this.applyActorWrite(write),
+        publish: (room, frame) => this.rooms.publish(room, frame, "publish"),
+      },
+      definition.paths,
+    );
     this.actors.start();
   }
 

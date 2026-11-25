@@ -39,6 +39,37 @@ describe("CachedAndroidXrDetector", () => {
     expect(probes(adb)).toBe(2);
   });
 
+  test("a new device incarnation on a reused serial is probed fresh within the TTL (#19187)", async () => {
+    const timer = new FakeTimer();
+    let incarnation: string | undefined = "1";
+    const detector = new CachedAndroidXrDetector(timer, XR_DEVICE_CACHE_TTL_MS, () => incarnation);
+    const automotive = adbAnswering("false\n");
+    expect(await detector.isAndroidXr({ adb: automotive, device: headset })).toBe(false);
+
+    // killDevice, then an XR headset boots on the same serial with a new pool incarnation.
+    timer.advanceTime(2 * 60_000);
+    incarnation = "2";
+    const xr = adbAnswering("true\n");
+    expect(await detector.isAndroidXr({ adb: xr, device: headset })).toBe(true);
+    expect(probes(xr)).toBe(1);
+    expect(await detector.isAndroidXr({ adb: xr, device: headset })).toBe(true);
+    expect(probes(xr)).toBe(1);
+  });
+
+  test("an incarnation that becomes known invalidates an answer cached without one", async () => {
+    const pool: { incarnation?: string } = {};
+    const detector = new CachedAndroidXrDetector(
+      new FakeTimer(),
+      XR_DEVICE_CACHE_TTL_MS,
+      () => pool.incarnation,
+    );
+    expect(await detector.isAndroidXr({ adb: adbAnswering("false\n"), device: headset })).toBe(
+      false,
+    );
+    pool.incarnation = "3";
+    expect(await detector.isAndroidXr({ adb: adbAnswering("true\n"), device: headset })).toBe(true);
+  });
+
   test("the feature wins over a provisional xr form factor that disagrees", async () => {
     const detector = new CachedAndroidXrDetector(new FakeTimer());
     expect(

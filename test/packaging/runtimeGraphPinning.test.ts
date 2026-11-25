@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { findBundledOwnerMismatches } from "../../scripts/ci/assert-installed-runtime-graph";
 import { isExactVersion } from "../../scripts/release/lib/runtime-pins";
@@ -57,8 +57,21 @@ describe("runtime dependency graph is pinned (#5421)", () => {
   test("Jimp and the server share the exact zod package with the v4 subpath", () => {
     expect(pkg.dependencies.zod).toBe("4.6.7");
     expect(pkg.devDependencies.zod).toBeUndefined();
-    // @jimp/plugin-* declare zod ^3.23.8; the override keeps them on the one patched 4.x copy (#16102).
-    expect(pkg.overrides.zod).toBe(pkg.dependencies.zod);
+    // npm ignores a published package's `overrides`, so consumers get one zod only when
+    // every Jimp package's own declared range accepts the pin (#16102).
+    expect(pkg.overrides.zod).toBeUndefined();
+    const jimpDir = path.join(repoRoot, "node_modules/@jimp");
+    const zodRanges = readdirSync(jimpDir).flatMap((name) => {
+      const manifest = JSON.parse(
+        readFileSync(path.join(jimpDir, name, "package.json"), "utf8"),
+      ) as { dependencies?: Record<string, string> };
+      const range = manifest.dependencies?.zod;
+      return range === undefined ? [] : [{ name, range }];
+    });
+    expect(zodRanges.length).toBeGreaterThan(0);
+    expect(
+      zodRanges.filter(({ range }) => !Bun.semver.satisfies(pkg.dependencies.zod, range)),
+    ).toEqual([]);
   });
 
   test("the runtime roots the artifact imports are present in dependencies", () => {

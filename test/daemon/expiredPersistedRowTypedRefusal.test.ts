@@ -124,8 +124,16 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
       // Row hygiene is unchanged: the answer writes no terminal reason to the row.
       expect((await repo.getSession(SESSION))?.release_reason ?? undefined).toBe(reason);
 
-      // A read is never refused: it gets the answer its caller turns into a sessionless read.
-      expect(await refusal(manager, "read-only")).toBeInstanceOf(UnissuedSessionError);
+      if (reason?.startsWith("device-restart:")) {
+        // A row its device's loss released refuses a read like a control call (#19191).
+        expect(await refusal(manager, "read-only")).toMatchObject({
+          release: { releaseReason: "expired", terminal: true },
+        });
+      } else {
+        // Any other read is not refused: it gets the answer its caller turns into a
+        // sessionless read.
+        expect(await refusal(manager, "read-only")).toBeInstanceOf(UnissuedSessionError);
+      }
     });
   }
 
@@ -322,7 +330,12 @@ describe("a session whose row expired while the daemon was down (#11361)", () =>
           releaseReason: "restart-recovery-timeout",
           terminal: true,
         });
-        expect(await refusal(manager, "read-only")).toBeInstanceOf(UnissuedSessionError);
+        // A read naming the lost device's session is refused like a control call (#19191).
+        const readRefusal = await refusal(manager, "read-only");
+        expect(readRefusal).toBeInstanceOf(TerminalSessionError);
+        expect(readRefusal).toMatchObject({
+          release: { releaseReason: "restart-recovery-timeout", terminal: true },
+        });
         for (const method of ["daemon/heartbeat", "daemon/sessionInfo"]) {
           expect(await wireAnswer(manager, method)).toEqual({
             success: false,

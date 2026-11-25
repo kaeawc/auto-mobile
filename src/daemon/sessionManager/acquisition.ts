@@ -29,7 +29,7 @@ import { UnissuedSessionError } from "./UnissuedSessionError";
 export interface SessionAcquisitionHost {
   reclaimAndRefreshExistingSession(existing: Session): Promise<void>;
   readonly sessions: Pick<Map<string, Session>, "has">;
-  readonly restartRecoveryActivityAt: Pick<Map<string, number>, "has">;
+  readonly restartRecoveryActivityAt: Pick<Map<string, number>, "has" | "set">;
   recordRestartRecoveryActivity(sessionId: string): void;
   readonly sessionSlots: Pick<
     SessionLifecycleSlots,
@@ -182,6 +182,7 @@ export class SessionAcquisition {
     const assignment = this.createUnseenSession(sessionId, devicePool, platform, {
       requireIssuedSession,
       shared,
+      access,
     }).finally(() => {
       shared.recoveryWait.resolve(undefined);
       if (this.host.sessionSlots.getAssignment(sessionId) === assignment) {
@@ -381,6 +382,19 @@ export class SessionAcquisition {
     return persisted;
   }
 
+  /**
+   * A control call starting a device-restart recovery restarts its idle window. A read does not
+   * (#19191): it only marks the recovery as tracked, at an instant that extends nothing, so a
+   * control call that later joins or fails with it is still credited as use (#11281).
+   */
+  private trackRestartRecoveryCaller(sessionId: string, access: SessionAccess): void {
+    if (access !== "read-only") {
+      this.host.recordRestartRecoveryActivity(sessionId);
+    } else if (!this.host.restartRecoveryActivityAt.has(sessionId)) {
+      this.host.restartRecoveryActivityAt.set(sessionId, Number.NEGATIVE_INFINITY);
+    }
+  }
+
   private async createUnseenSession(
     sessionId: string,
     devicePool: SessionDeviceAssigner | undefined,
@@ -388,7 +402,8 @@ export class SessionAcquisition {
     {
       requireIssuedSession,
       shared,
-    }: { requireIssuedSession: boolean; shared: SharedSessionAssignment },
+      access,
+    }: { requireIssuedSession: boolean; shared: SharedSessionAssignment; access: SessionAccess },
   ): Promise<Session> {
     let persisted = await this.host.readPersistedSession(sessionId);
     await this.host.refusePlanLabelSessionOutsideItsRun(sessionId, persisted);
@@ -430,11 +445,13 @@ export class SessionAcquisition {
     }
 
     if (persisted && isDeviceRestartReleasedRow(persisted)) {
-      this.host.recordRestartRecoveryActivity(sessionId);
+      this.trackRestartRecoveryCaller(sessionId, access);
     }
+    // A read that recovers a session is not its owner returning (#19191): it does not claim the
+    // session, which waits for its owner like a rehydration.
     return await this.host.recoverPersistedSession(sessionId, devicePool, platform, {
       listed: persisted,
-      initialOwnership: "owned",
+      initialOwnership: access === "read-only" ? "awaiting-owner" : "owned",
       shared,
     });
   }

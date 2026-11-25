@@ -88,8 +88,13 @@ done
 # The signature has to go first because it takes the header room the section needs.
 RUNNER_EXECUTABLE="${RUNNER_APP}/CtrlProxyUITests-Runner"
 if [[ -f "${RUNNER_EXECUTABLE}" ]]; then
+    BUN_BIN="${BUN:-bun}"
+    if ! command -v "${BUN_BIN}" >/dev/null 2>&1; then
+        echo "error: ${BUN_BIN} not found; bun is required to embed the runner's simulated entitlements. Install bun or set BUN to its path." >&2
+        exit 1
+    fi
     codesign --remove-signature "${RUNNER_EXECUTABLE}" >/dev/null
-    "${BUN:-bun}" "${SCRIPT_DIR}/embedSimulatedEntitlements.ts" "${RUNNER_EXECUTABLE}"
+    "${BUN_BIN}" "${SCRIPT_DIR}/embedSimulatedEntitlements.ts" "${RUNNER_EXECUTABLE}"
 fi
 
 # The simulator accepts an ad-hoc signature, while a stale signature rejects

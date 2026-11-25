@@ -104,6 +104,37 @@ describe("prototype placeholder lint (#15444)", () => {
     ).toEqual([]);
   });
 
+  test("a component prop in chip.label and badge.text is found at the authored path", () => {
+    const card = spec(
+      { type: "column", children: [{ type: "use", component: "tag", props: { name: "A" } }] },
+      {
+        components: {
+          tag: {
+            root: {
+              type: "row",
+              children: [
+                { type: "text", text: "{props.name}" },
+                { type: "button", label: "{props.name}" },
+                { type: "chip", label: "{props.name}" },
+                { type: "badge", text: "#{props.name}" },
+              ],
+            },
+          },
+        },
+      },
+    );
+    const output = prototypePlaceholderOutput(card).placeholderFindings ?? [];
+    expect(output.map(({ path, placeholder }) => `${path} ${placeholder}`)).toEqual([
+      "root.children[0] (use tag) → components.tag.root.children[2].label {props.name}",
+      "root.children[0] (use tag) → components.tag.root.children[3].text {props.name}",
+    ]);
+    expect(output[0]!.detail).toStartWith("chip.label does not bind component props");
+  });
+
+  test("{props.x} outside a component is literal text", () => {
+    expect(prototypePlaceholderOutput(spec({ type: "chip", label: "{props.name}" }))).toEqual({});
+  });
+
   test("a spec without placeholders returns no findings and an empty output", () => {
     const clean = spec({ type: "column", children: [{ type: "chip", label: "Plain" }] });
     expect(lintPrototypePlaceholders(clean)).toEqual({ findings: [], total: 0 });

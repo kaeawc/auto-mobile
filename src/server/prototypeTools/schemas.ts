@@ -158,7 +158,7 @@ const assetsInput = z
           .min(1)
           .optional()
           .describe(
-            "Absolute path the daemon can read: PNG/JPEG/WebP, a TTF/OTF font (2 MiB), or Android-only AGSL .agsl source (16 KiB; AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 and prototype_custom_shaders_v1 required)",
+            "Absolute path the daemon can read: PNG/JPEG/WebP, a TTF/OTF font (2 MiB), Android-only AGSL .agsl source (16 KiB; AUTOMOBILE_PROTOTYPE_CUSTOM_SHADERS=1 and prototype_custom_shaders_v1 required), or, for show on Android only, a .mp4/.webm/.m4a/.mp3/.ogg/.vtt media file streamed in chunks (64 MiB; captions 256 KiB)",
           ),
         observation: z
           .string()

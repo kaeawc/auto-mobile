@@ -25,6 +25,11 @@ import { logger } from "../../utils/logger";
 import { markIndeterminate } from "../prototypeShownOutcome";
 import { prototypeSchema } from "./schemas";
 import type { AssetReaders, AssetStage, PrototypeTarget } from "./types";
+import {
+  prototypeMediaRefusal,
+  splitPrototypeMediaSources,
+  withPrototypeMediaUploads,
+} from "./mediaAssets";
 
 // Validation has already succeeded. Forward authored specs unchanged; omitted
 // defaults (including opacity=100) remain the wire contract's defaults.
@@ -83,8 +88,19 @@ export async function stageAssets(
       ...(problem ? { failure: { success: false, error: problem } } : {}),
     };
   }
+  // Video, audio and caption files stream through the chunked media upload, after the images.
+  const { media, other } = splitPrototypeMediaSources(args.assets);
+  const mediaRefusal = prototypeMediaRefusal(
+    media,
+    args.action,
+    target.android,
+    target.ios !== undefined,
+  );
+  if (mediaRefusal) {
+    return { uploaded: [], prepared: [], failure: { success: false, error: mediaRefusal } };
+  }
   const prepared = await preparePrototypeAssets(
-    args.assets,
+    other,
     readers.assetFileReader,
     readers.observationScreenshotReader,
     readers.env,
@@ -108,17 +124,14 @@ export async function stageAssets(
     prepared.assets,
     { signal, action: args.action === "save" ? "save" : "show", env: readers.env },
   );
+  const streamed = await withPrototypeMediaUploads(target.android, media, outcome, {
+    signal,
+    opener: readers.mediaFileOpener,
+  });
   return {
-    uploaded: outcome.uploaded,
+    uploaded: streamed.uploaded,
     prepared: prepared.assets,
-    ...(outcome.success
-      ? {}
-      : {
-          failure: {
-            success: false,
-            error: outcome.error,
-          },
-        }),
+    ...(streamed.error === undefined ? {} : { failure: { success: false, error: streamed.error } }),
   };
 }
 

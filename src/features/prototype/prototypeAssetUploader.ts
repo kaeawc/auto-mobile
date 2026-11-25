@@ -1,6 +1,7 @@
 import { PROTOTYPE_SHADER_MIME_TYPE } from "./prototypeShaderSource";
 import { prototypeShadersEnabled, PROTOTYPE_SHADERS_OPT_IN_ERROR } from "./prototypeShaders";
 import { boundedPrototypeError } from "./prototypeErrors";
+import { prototypeMediaMimeTypeForPath } from "./prototypeMediaUpload";
 import { extname, isAbsolute } from "node:path";
 import * as nodeFs from "node:fs/promises";
 import type { PrototypeAssetResult } from "../observe/android/ctrlProxyProtocol";
@@ -99,6 +100,10 @@ async function readFileSource(
 ): Promise<PrototypeAssetUpload | string> {
   if (!isAbsolute(source.path)) {
     return "path must be absolute; the daemon does not resolve relative paths";
+  }
+  if (prototypeMediaMimeTypeForPath(source.path) !== null) {
+    // Media streams through the chunked upload, which only a show on Android CtrlProxy reaches.
+    return "is a video, audio or caption file; media assets can only be sent with show to an Android device for now";
   }
   try {
     const stat = await reader.stat(source.path);

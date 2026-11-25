@@ -259,7 +259,7 @@ Use `prototype` with `dismiss` to close the overlay.
 
 ### Tools a TV refuses
 
-`rotate` and `recentApps` fail at once on a TV and change nothing.
+`rotate`, `recentApps` and `glassesInput` fail at once on a TV and change nothing.
 
 ## Out of scope
 

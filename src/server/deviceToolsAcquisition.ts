@@ -68,9 +68,11 @@ import {
 } from "../features/deviceLifecycle/deviceLifecycleCore";
 import {
   type AcquisitionDeviceLeft,
+  type CreatedDeviceRollbackOutcome,
   acquisitionDeviceLeft,
   acquisitionNextStep,
   annotateAcquisitionFailure,
+  createdDeviceRollbackDeviceLeft,
 } from "../features/deviceLifecycle/boot/acquisitionFailureDeviceState";
 import {
   hasDefinedRequirement,
@@ -506,13 +508,21 @@ async function assertAndroidCtrlProxyApkOverrideBeforeBoot(
 /**
  * Stops the cold boot a failed preparation still owns (unless the failure is retryable) and
  * reports what that left of the device, so the caller knows the emulator was shut down rather
- * than lost (#19124).
+ * than lost (#19124). A createIfMissing rollback already stopped and deleted the device it
+ * created and cleared `boot`, so its outcome is what gets reported (#18823).
  */
 function cancelUnownedBootAfterFailure(
-  state: { boot: DeviceBootResult | undefined; coldBootSettlements: Promise<void>[] },
+  state: {
+    boot: DeviceBootResult | undefined;
+    coldBootSettlements: Promise<void>[];
+    createdDeviceRollback?: CreatedDeviceRollbackOutcome;
+  },
   error: unknown,
   signal: AbortSignal | undefined,
 ): AcquisitionDeviceLeft | undefined {
+  if (!state.boot && state.createdDeviceRollback) {
+    return createdDeviceRollbackDeviceLeft(state.createdDeviceRollback);
+  }
   const settlement = cancelUnownedColdBootUnlessRetryable(state.boot, error, signal);
   if (settlement) {
     state.coldBootSettlements.push(settlement);
@@ -525,9 +535,13 @@ function preparationFailure(
   error: unknown,
   platform: StartDeviceArgs["platform"],
   budgets: DevicePreparationBudgets,
-  outcome: { deviceLeft: AcquisitionDeviceLeft | undefined; signal: AbortSignal | undefined },
+  outcome: {
+    deviceLeft: AcquisitionDeviceLeft | undefined;
+    signal: AbortSignal | undefined;
+    createdDeviceRolledBack: boolean;
+  },
 ): Error {
-  const { deviceLeft, signal } = outcome;
+  const { deviceLeft, signal, createdDeviceRolledBack } = outcome;
   const failure =
     error instanceof ActionableError || error instanceof TerminalSessionError
       ? error
@@ -541,7 +555,7 @@ function preparationFailure(
     : annotateAcquisitionFailure(
         failure,
         deviceLeft,
-        acquisitionNextStep(budgets.operationName, budgets.androidAvdName),
+        acquisitionNextStep(budgets.operationName, budgets.androidAvdName, createdDeviceRolledBack),
       );
 }
 
@@ -573,6 +587,7 @@ async function prepareDevice(
     // lifecycle lease is released only once all of them have settled.
     coldBootSettlements: Promise<void>[];
     bindingSettlements: Promise<unknown>[];
+    createdDeviceRollback?: CreatedDeviceRollbackOutcome;
   } = {
     boot: undefined,
     ownershipTransferred: false,
@@ -654,6 +669,7 @@ async function prepareDevice(
     throw preparationFailure(error, args.platform, budgets, {
       deviceLeft,
       signal: coordinatedSignal,
+      createdDeviceRolledBack: !state.boot && state.createdDeviceRollback !== undefined,
     });
   } finally {
     const cleanup = async () => {

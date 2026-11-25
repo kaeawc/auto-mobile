@@ -20,6 +20,13 @@ import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { DeviceTransportOfflineError } from "../../src/models/DeviceTransportOfflineError";
 import { asMcpConnection } from "../helpers/mcpConnection";
+import { acquisitionFailureDeviceLeft } from "../../src/features/deviceLifecycle/boot/acquisitionFailureDeviceState";
+import { shapeToolCallError } from "../../src/daemon/shapeToolCallError";
+import { errorMessage } from "../../src/utils/describeUnknownError";
+import {
+  type CreatedDeviceRollback,
+  rollbackCreatedDeviceAfterBoot,
+} from "../../src/server/deviceToolsBootPreparation";
 import {
   currentAutolockMcpSessionId,
   runWithToolSelectionContext,
@@ -474,3 +481,91 @@ test("a failure before any device was booted keeps its message (#19124)", async 
   await expect(handlers.getAndroidHandler({ avdName: "Pixel_A" })).rejects.toBe(failure);
   expect(failure.message).toBe("no boot yet");
 });
+
+test("a failed acquisition's device state reaches the tool error as a typed field (#18823)", async () => {
+  const timer = new FakeTimer();
+  setDeviceToolsDependencies({ timer });
+  const child = new FakeChildProcess(timer);
+  const handlers = createAcquisitionHandlers({
+    bootAndPrepareDevice: async (_args, _budgets, _deps, { options: context }) => {
+      context.state.boot = {
+        device: coldBootedPixel,
+        source: "cold-boot",
+        provisioned: false,
+        processHandle: child,
+      };
+      throw new ActionableError("readiness failed");
+    },
+  });
+  const rejected = await handlers
+    .getAndroidHandler({ avdName: "Pixel_A" })
+    .catch((error: unknown) => error);
+  expect(acquisitionFailureDeviceLeft(rejected)).toBe("shutdown");
+  expect(rejected).toHaveProperty("deviceLeft", "shutdown");
+  const wire = shapeToolCallError(rejected, { toolName: "getAndroid", source: "MCP" });
+  expect(JSON.parse(wire.content[0].text)).toEqual({
+    success: false,
+    error: errorMessage(rejected),
+    deviceLeft: "shutdown",
+  });
+});
+
+for (const cleanupStatus of ["succeeded", "failed"] as const) {
+  test(`a createIfMissing rollback reports the created device, cleanup ${cleanupStatus} (#18823)`, async () => {
+    const timer = new FakeTimer();
+    setDeviceToolsDependencies({ timer });
+    const child = new FakeChildProcess(timer);
+    const createdImage: DeviceInfo = {
+      platform: "android",
+      name: "Pixel_A",
+      source: "local",
+      isRunning: false,
+    };
+    const failure = new ActionableError("CtrlProxy readiness failed");
+    const rolledBack: string[] = [];
+    const rollbackCreatedDevice: CreatedDeviceRollback = async (device) => {
+      rolledBack.push(device.name);
+      return {
+        status: cleanupStatus,
+        target: { platform: "android", isVirtual: true, stableId: device.name },
+      };
+    };
+    const handlers = createAcquisitionHandlers({
+      // Mirrors createBootAndPrepareDevice: a post-boot failure rolls the created device back.
+      bootAndPrepareDevice: async (_args, _budgets, _deps, { options: context }) => {
+        context.state.boot = {
+          device: coldBootedPixel,
+          source: "cold-boot",
+          provisioned: true,
+          sourceImage: createdImage,
+          processHandle: child,
+        };
+        await rollbackCreatedDeviceAfterBoot({ ...context, rollbackCreatedDevice }, failure);
+        throw failure;
+      },
+    });
+    const rejected = await handlers
+      .prepareDevice(
+        { platform: "android", avdName: "Pixel_A", createIfMissing: true },
+        {
+          bootTimeoutMs: 10_000,
+          automationReadyTimeoutMs: 10_000,
+          automationDeadlineMs: 20_000,
+          operationName: "startDevice",
+          androidAvdName: "Pixel_A",
+        },
+      )
+      .catch((error: unknown) => error);
+    if (!(rejected instanceof ActionableError)) {
+      throw new Error("expected an ActionableError");
+    }
+    const deviceLeft = cleanupStatus === "succeeded" ? "deleted" : "unknown";
+    expect(rolledBack).toEqual(["Pixel_A"]);
+    expect(child.killed).toBe(true);
+    expect(rejected.cause).toBe(failure);
+    expect(acquisitionFailureDeviceLeft(rejected)).toBe(deviceLeft);
+    expect(rejected.message).toContain(`CtrlProxy readiness failed. deviceLeft: ${deviceLeft}`);
+    expect(rejected.message).toContain("Next step: retry startDevice with createIfMissing: true.");
+    expect(rejected.message).not.toContain('avdName ("Pixel_A")');
+  });
+}

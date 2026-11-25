@@ -17,7 +17,12 @@ import { resolveDirectSessionDevice } from "../../../utils/directSessionDeviceRe
 import type { McpServerOptions } from "../../index";
 import type { SessionToolBinding } from "../../SessionToolBinding";
 import { ToolRegistry } from "../../toolRegistry";
-import { ToolUnavailableError, UnknownToolError } from "../../../daemon/toolUnavailableError";
+import {
+  ToolUnavailableError,
+  UnknownToolError,
+  planOnlyCallGuidance,
+} from "../../../daemon/toolUnavailableError";
+import { PLAN_ONLY_GATE_REASON } from "../../toolRegistryTypes";
 import {
   assertUserConfigurableToolNames,
   requestedToolNamesFromSetToolEnabledArgs,
@@ -62,7 +67,9 @@ export function resolveTool(name: string, toolParams: Record<string, unknown>): 
     if (registeredTool) {
       throw new ToolUnavailableError(
         name,
-        ToolRegistry.getToolAvailabilityGateReasons(registeredTool),
+        ToolRegistry.getToolAvailabilityGateReasons(registeredTool).map((reason) =>
+          reason === PLAN_ONLY_GATE_REASON ? `${reason}: ${planOnlyCallGuidance(name)}` : reason,
+        ),
       );
     }
     throw new UnknownToolError(name, getRemovedToolHint(name));

@@ -167,7 +167,7 @@ export class TapPointPlanner {
       platform,
     );
     const ime = elements && getImeOccluderForElement(elements, element);
-    return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize) : ime;
+    return ime && platform === "ios" ? getIosImeOccluder(ime, screenSize, hierarchy.insets) : ime;
   }
 
   /** Judge a tap on one of AutoMobile's own prototype controls against the system bars (#10086, #16175). */

@@ -949,7 +949,8 @@ export class ScrollUntilVisible {
     };
     const { left, top, right, bottom } = visible;
     // A partial match is found when the exposed portion has a dispatchable tap point.
-    const imeBounds = ime && getIosImeOccluder(ime, screen).bounds;
+    const insets = observation.insets ?? hierarchy.insets;
+    const imeBounds = ime && getIosImeOccluder(ime, screen, insets).bounds;
     const center = this.deps.geometry.getElementCenter({ bounds: visible });
     const candidates = imeBounds
       ? [tapPointOutsideIme([left, top, right, bottom], imeBounds), center]

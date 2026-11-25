@@ -345,7 +345,8 @@ export class Keyboard {
       }
       const elements = new DefaultObserveElementCollector(this.parser).collect(hierarchy, "ios");
       const ime = elements && getImeOccluder(elements);
-      return !!ime && getVisibleIosImeBounds(ime, { width: width!, height: height! }) !== undefined;
+      const screen = { width: width!, height: height! };
+      return !!ime && getVisibleIosImeBounds(ime, screen, hierarchy.insets) !== undefined;
     } catch (error) {
       throwIfAborted(signal);
       logger.warn("iOS keyboard visibility hierarchy read failed; using runner state", error);

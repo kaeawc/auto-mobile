@@ -2191,6 +2191,27 @@ describe("prototype web still parity (#16382)", () => {
     expect(JSON.stringify(bar.style)).not.toContain("--safe-top");
   });
 
+  test("a card's container follows its variant, as CardDefaults gives it (#16611)", () => {
+    const fill = (variant?: string) =>
+      byTag(
+        renderPrototypeStill({
+          ...bare,
+          theme: { mode: "dark", colors: { seed: "#6750A4" } },
+          root: {
+            type: "column",
+            children: [
+              { type: "card", testTag: "card", ...(variant ? { variant } : {}), children: [] },
+            ],
+          },
+        }),
+        "card",
+      )[0]!.style["background-color"];
+    // Elevated is surfaceContainerLow, outlined is surface, filled is surfaceContainerHighest.
+    const [elevated, outlined, filled] = [fill("elevated"), fill("outlined"), fill()];
+    expect(new Set([elevated, outlined, filled]).size).toBe(3);
+    expect(fill("filled")).toBe(filled);
+  });
+
   test("a card hugs its content unless its width is fill, as on the devices", () => {
     const cardOf = (style?: Record<string, unknown>) =>
       byTag(

@@ -1,10 +1,12 @@
 import type { Platform } from "../models";
+import { NON_IOS_APPLE_PLATFORM_LABELS, type NonIosApplePlatform } from "../models/Platform";
 import type { AppleDeviceRuntime, AppleDeviceType } from "../utils/ios-cmdline-tools/SimCtlSupport";
 import {
   deviceTypeRuntimeBounds,
   evaluateDeviceTypeOnRuntime,
   evaluateRuntimeCompatibility,
 } from "../utils/ios-cmdline-tools/runtimeCompatibility";
+import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 
 interface ProvisioningRuntime {
@@ -67,6 +69,73 @@ export interface ProvisioningCatalog {
   deviceTypes: ProvisioningDeviceType[];
   systemImages: ProvisioningSystemImage[];
   profiles: ProvisioningProfile[];
+}
+
+/** Whether a platform's provisioning catalog was read; a failed read says why. */
+export interface ProvisioningCatalogObservation {
+  catalogComplete: boolean;
+  error?: {
+    code: "unavailable" | "failed" | "timeout" | "superseded";
+    message: string;
+    retryable?: boolean;
+    retryAfterMs?: number;
+    missing?: Array<"catalog" | "configuredInventory">;
+  };
+}
+
+/** `label` is the platform as messages name it ("Android", "iOS", "watchOS", ...). */
+export function failedCatalogObservation(
+  label: string,
+  error: unknown,
+): ProvisioningCatalogObservation {
+  return {
+    catalogComplete: false,
+    error: {
+      code: "failed",
+      message: `${label} provisioning catalog failed: ${errorMessage(error)}`,
+    },
+  };
+}
+
+export function emptyProvisioningCatalog(): ProvisioningCatalog {
+  return {
+    runtimes: [],
+    deviceTypes: [],
+    systemImages: [],
+    profiles: [],
+  };
+}
+
+/** The simctl catalog read of one non-iOS Apple platform's simulator inventory. */
+export interface AppleSimulatorCatalogSource {
+  readCatalog(
+    signal?: AbortSignal,
+  ): Promise<{ runtimes: AppleDeviceRuntime[]; deviceTypes: AppleDeviceType[] }>;
+}
+
+/**
+ * A non-iOS Apple platform's runtimes and device types as provisioning catalog entries. A failed
+ * read is logged and returns an empty catalog with a failed observation, so a listing that carries
+ * the catalog still answers: the images resource, and `listDeviceImages` for watchOS (#19186).
+ */
+export async function readAppleSimulatorProvisioningCatalog(
+  platform: NonIosApplePlatform,
+  read: () => ReturnType<AppleSimulatorCatalogSource["readCatalog"]>,
+): Promise<{ catalog: ProvisioningCatalog; observation: ProvisioningCatalogObservation }> {
+  const label = NON_IOS_APPLE_PLATFORM_LABELS[platform];
+  try {
+    const { runtimes, deviceTypes } = await read();
+    return {
+      catalog: buildSimulatorProvisioningCatalogEntries(platform, runtimes, deviceTypes),
+      observation: { catalogComplete: true },
+    };
+  } catch (error) {
+    logger.warn(`Failed to build ${label} provisioning catalog: ${errorMessage(error)}`, error);
+    return {
+      catalog: emptyProvisioningCatalog(),
+      observation: failedCatalogObservation(label, error),
+    };
+  }
 }
 
 export function buildSimulatorProvisioningCatalogEntries(

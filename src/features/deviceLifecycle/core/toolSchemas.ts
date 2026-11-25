@@ -80,6 +80,56 @@ const listDeviceImagesEntrySchema = configuredImageSchema.extend({
     .describe("Key into `capabilityProfiles`; the image's capabilities, plus `host.capabilities`"),
 });
 
+/** Each call builds its own instance: a schema reused across fields is emitted as a `$ref`. */
+const catalogAvailabilitySchema = () =>
+  z.object({ available: z.boolean(), reason: z.string().optional() });
+
+/** watchOS: what `provisionDevice` can create, as `automobile:devices/images/watchos` lists it. */
+const watchProvisioningCatalogSchema = z
+  .object({
+    runtimes: z.array(
+      z.object({
+        platform: z.literal("watchos"),
+        id: z.string(),
+        name: z.string(),
+        version: z.string().optional(),
+        availability: catalogAvailabilitySchema(),
+      }),
+    ),
+    deviceTypes: z.array(
+      z.object({
+        platform: z.literal("watchos"),
+        id: z.string(),
+        name: z.string(),
+        family: z.string().optional(),
+        availability: catalogAvailabilitySchema(),
+        runtimeCompatibility: z
+          .union([
+            z.object({
+              knowledge: z.literal("known"),
+              minRuntimeVersion: z.string(),
+              maxRuntimeVersion: z.string().nullable(),
+              compatibleRuntimeIds: z.array(z.string()),
+            }),
+            z.object({ knowledge: z.literal("unknown"), reason: z.string() }),
+          ])
+          .optional(),
+      }),
+    ),
+  })
+  .optional()
+  .describe(
+    "watchOS only: installed watchOS runtimes and Apple Watch device types; absent when the catalog read failed (see catalogObservation)",
+  );
+
+const catalogObservationSchema = z
+  .object({
+    catalogComplete: z.boolean(),
+    error: z.object({ code: z.string(), message: z.string() }).passthrough().optional(),
+  })
+  .optional()
+  .describe("watchOS only: whether provisioningCatalog was read");
+
 export const listDeviceImagesOutputSchema = z
   .object({
     message: z.string(),
@@ -89,6 +139,8 @@ export const listDeviceImagesOutputSchema = z
       .describe("Total configured images; equals images.length unless `truncated` is true"),
     platform: listDeviceImagesPlatformSchema,
     configuredInventory: z.unknown(),
+    provisioningCatalog: watchProvisioningCatalogSchema,
+    catalogObservation: catalogObservationSchema,
     capabilityProfiles: z
       .record(z.string(), capabilityInventorySchema)
       .optional()

@@ -19,6 +19,7 @@ import type { EmulatorProcessStopper } from "../utils/android-cmdline-tools/Emul
 import { DEFAULT_DEVICE_READY_TIMEOUT_MS } from "../utils/deviceTimeouts";
 import type { DiscoverySource } from "../utils/discoverySource";
 import type { SimulatorPair } from "../utils/ios-cmdline-tools/SimulatorPairs";
+import type { WatchSimulatorCatalog } from "../utils/ios-cmdline-tools/WatchSimulatorInventory";
 import type { HostChildProcess as ChildProcess } from "../utils/HostCommandExecutor";
 import { SimctlUnavailableError, type SimCtl } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { logger } from "../utils/logger";
@@ -266,6 +267,11 @@ export interface PlatformDeviceManager {
   resolveKillDeviceTarget?(device: BootedDevice, signal?: AbortSignal): Promise<BootedDevice>;
   /** Watch–iPhone simulator pairs over the same simctl; absent when no real simctl backs it. */
   listSimulatorPairs?(signal?: AbortSignal): Promise<SimulatorPair[]>;
+  /**
+   * Installed watchOS runtimes and Apple Watch device types over the same simctl (#19186); throws
+   * when this manager has no watch catalog source.
+   */
+  readWatchSimulatorCatalog?(signal?: AbortSignal): Promise<WatchSimulatorCatalog>;
 
   /**
    * List all available device images for a specific platform

@@ -305,7 +305,7 @@ export const setAppPermissionsResultSchema = z
     success: z.boolean(),
     appId: z.string(),
     deviceId: z.string(),
-    platform: z.enum(["android", "ios", "tvos"]),
+    platform: z.enum(["android", "ios", "tvos", "visionos"]),
     action: z.enum(["grant", "revoke", "reset"]),
     changedCount: z.number().int().nonnegative(),
     failedCount: z.number().int().nonnegative(),
@@ -329,7 +329,7 @@ export const setAppPermissionsResultSchema = z
     appTerminated: z
       .literal(true)
       .optional()
-      .describe("tvOS: the change terminated the app; relaunch it with launchApp"),
+      .describe("tvOS and visionOS: the change terminated the app; relaunch it with launchApp"),
     diagnostics: z
       .array(
         z

@@ -88,6 +88,8 @@ export const APPLE_PLATFORM_SUPPORTED_TOOLS: Readonly<
     "swipeOn",
     "pressButton",
     "homeScreen",
+    // simctl privacy, as on an Apple TV simulator (#19186).
+    "setAppPermissions",
     "listDevices",
     "listDeviceImages",
     "provisionDevice",

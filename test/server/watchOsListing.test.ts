@@ -15,7 +15,17 @@ import {
   listDevicesOutputSchema,
   listDevicesSchema,
 } from "../../src/features/deviceLifecycle/core/toolSchemas";
-import { FakeWatchSimctl } from "../fakes/FakeWatchSimctl";
+import {
+  FakeWatchSimctl,
+  WATCH_DEVICE_TYPE,
+  WATCH_RUNTIME as WATCH_CATALOG_RUNTIME,
+  WATCH_RUNTIME_ID,
+} from "../fakes/FakeWatchSimctl";
+import { createDeviceImageResourcesHandler } from "../../src/server/deviceImageResources";
+import type {
+  AppleDeviceRuntime,
+  AppleDeviceType,
+} from "../../src/utils/ios-cmdline-tools/SimCtlSupport";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
 import { FakeAvdManager } from "../fakes/FakeAvdManager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -27,6 +37,20 @@ import type { IosPhysicalDeviceLister } from "../../src/utils/ios-cmdline-tools/
 // The captured `simctl list -j` (watchOS 26.5 runtime, Apple Watch Series 11 46mm) from #17320's host.
 const WATCH_RUNTIME = "com.apple.CoreSimulator.SimRuntime.watchOS-26-5";
 const WATCH_UDID = "34028208-ECD5-4ADC-BFA5-55E6D00AC532";
+
+/** Catalog entries the watch catalog must leave out. */
+const IOS_RUNTIME: AppleDeviceRuntime = {
+  ...WATCH_CATALOG_RUNTIME,
+  identifier: "com.apple.CoreSimulator.SimRuntime.iOS-18-6",
+  version: "18.6",
+  name: "iOS 18.6",
+};
+const IPHONE_DEVICE_TYPE: AppleDeviceType = {
+  ...WATCH_DEVICE_TYPE,
+  productFamily: "iPhone",
+  identifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-16",
+  name: "iPhone 16",
+};
 
 /**
  * A physical-iOS source that never runs devicectl. Without it the manager falls back to the shared
@@ -110,6 +134,101 @@ describe("watchOS listDeviceImages (#19186)", () => {
     expect(result).toMatchObject({ platform: "watchos", configuredInventory: { complete: true } });
     expect(result.count).toBeGreaterThan(0);
     expect(listDeviceImagesOutputSchema.safeParse(result).success).toBe(true);
+  });
+
+  /** A host whose simctl catalog holds an iOS runtime and model next to the watch ones. */
+  function catalogHost() {
+    const f = host();
+    f.simctl.runtimes = [IOS_RUNTIME, WATCH_CATALOG_RUNTIME];
+    f.simctl.deviceTypes = [IPHONE_DEVICE_TYPE, WATCH_DEVICE_TYPE];
+    return f;
+  }
+
+  test("lists watchOS runtimes and Apple Watch device types as the provisioning catalog", async () => {
+    const { handlers } = catalogHost();
+    const result = toolJson(await handlers.listDeviceImagesHandler({ platform: "watchos" }));
+    expect(result).toMatchObject({
+      catalogObservation: { catalogComplete: true },
+      provisioningCatalog: {
+        runtimes: [
+          {
+            platform: "watchos",
+            id: WATCH_RUNTIME_ID,
+            name: "watchOS 11.0",
+            version: "11.0",
+            availability: { available: true },
+          },
+        ],
+        deviceTypes: [
+          {
+            platform: "watchos",
+            id: WATCH_DEVICE_TYPE.identifier,
+            name: WATCH_DEVICE_TYPE.name,
+            family: "Apple Watch",
+            availability: { available: true },
+            runtimeCompatibility: { knowledge: "known", compatibleRuntimeIds: [WATCH_RUNTIME_ID] },
+          },
+        ],
+      },
+    });
+    expect(listDeviceImagesOutputSchema.safeParse(result).success).toBe(true);
+  });
+
+  test("the catalog matches the automobile:devices/images/watchos resource", async () => {
+    const { simctl, handlers } = catalogHost();
+    const result = toolJson(await handlers.listDeviceImagesHandler({ platform: "watchos" }));
+    const resource = await createDeviceImageResourcesHandler({
+      deviceManager: new FakeDeviceUtils(),
+      avdManager: new FakeAvdManager(),
+      watchInventory: new WatchSimulatorInventory(simctl, "arm64"),
+    }).getDeviceImagesForPlatforms(["watchos"]);
+    expect(result.provisioningCatalog).toEqual({
+      runtimes: resource.provisioningCatalog.runtimes,
+      deviceTypes: resource.provisioningCatalog.deviceTypes,
+    });
+  });
+
+  test("a failed catalog read is reported and the listing still succeeds", async () => {
+    const { simctl, handlers } = catalogHost();
+    simctl.catalogError = new Error("malformed simctl runtimes JSON");
+    const result = toolJson(await handlers.listDeviceImagesHandler({ platform: "watchos" }));
+    expect(result).toMatchObject({ configuredInventory: { complete: true } });
+    expect(result.count).toBeGreaterThan(0);
+    expect(result).not.toHaveProperty("provisioningCatalog");
+    expect(result.catalogObservation).toEqual({
+      catalogComplete: false,
+      error: {
+        code: "failed",
+        message: "watchOS provisioning catalog failed: malformed simctl runtimes JSON",
+      },
+    });
+    expect(listDeviceImagesOutputSchema.safeParse(result).success).toBe(true);
+  });
+
+  test("a watch listing with no catalog source reports the catalog unavailable", async () => {
+    const f = catalogHost();
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient(),
+      fakeDeviceManagerSimctl(),
+      createFakeAndroidEmulator(),
+      { physicalIosDevices: fakePhysicalIos() },
+    ).withWatchSimulators({ listWatchSimulators: async () => [] });
+    setDeviceToolsDependencies({ deviceManagerFactory: () => manager });
+    const result = toolJson(await f.handlers.listDeviceImagesHandler({ platform: "watchos" }));
+    expect(result).not.toHaveProperty("provisioningCatalog");
+    expect(result.catalogObservation).toMatchObject({
+      catalogComplete: false,
+      error: { code: "failed" },
+    });
+    expect(listDeviceImagesOutputSchema.safeParse(result).success).toBe(true);
+  });
+
+  test("other platforms carry no watch catalog", async () => {
+    const { handlers } = catalogHost();
+    setDeviceToolsDependencies({ deviceManagerFactory: () => new FakeDeviceUtils() });
+    const result = toolJson(await handlers.listDeviceImagesHandler({ platform: "tvos" }));
+    expect(result).not.toHaveProperty("provisioningCatalog");
+    expect(result).not.toHaveProperty("catalogObservation");
   });
 });
 

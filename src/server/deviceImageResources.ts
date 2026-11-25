@@ -36,7 +36,12 @@ import {
 import { describeDevice as describeImageDevice } from "../utils/deviceDescriptionProjection";
 import {
   buildSimulatorProvisioningCatalogEntries,
+  emptyProvisioningCatalog,
+  failedCatalogObservation,
+  readAppleSimulatorProvisioningCatalog,
+  type AppleSimulatorCatalogSource,
   type ProvisioningCatalog,
+  type ProvisioningCatalogObservation,
 } from "./simulatorProvisioningCatalog";
 import {
   createConfiguredInventoryContract,
@@ -132,17 +137,6 @@ registerAndroidInventoryCatalogInvalidator(() => {
     }
   }
 });
-
-interface ProvisioningCatalogObservation {
-  catalogComplete: boolean;
-  error?: {
-    code: "unavailable" | "failed" | "timeout" | "superseded";
-    message: string;
-    retryable?: boolean;
-    retryAfterMs?: number;
-    missing?: Array<"catalog" | "configuredInventory">;
-  };
-}
 
 interface PlatformResourceResult {
   platform: Platform;
@@ -491,7 +485,7 @@ function unavailableAppleSimulatorResult(platform: NonIosApplePlatform): Platfor
 async function buildAppleSimulatorResourceResult(
   platform: "watchos" | "tvos" | "visionos",
   list: (() => ReturnType<WatchSimulatorInventory["listWatchSimulators"]>) | undefined,
-  inventory: Pick<WatchSimulatorInventory, "readCatalog"> | undefined,
+  inventory: AppleSimulatorCatalogSource | undefined,
 ): Promise<PlatformResourceResult> {
   const label = platform === "watchos" ? "watchOS" : platform === "visionos" ? "visionOS" : "tvOS";
   if (!list || !inventory) {
@@ -524,22 +518,7 @@ async function buildAppleSimulatorResourceResult(
         };
       },
     ),
-    inventory.readCatalog().then(
-      ({ runtimes, deviceTypes }) => ({
-        catalog: buildSimulatorProvisioningCatalogEntries(platform, runtimes, deviceTypes),
-        observation: { catalogComplete: true },
-      }),
-      (error: unknown) => {
-        logger.warn(
-          `[DeviceImageResources] Failed to build ${label} provisioning catalog: ${errorMessage(error)}`,
-          error,
-        );
-        return {
-          catalog: emptyProvisioningCatalog(),
-          observation: failedCatalogObservation(label, error),
-        };
-      },
-    ),
+    readAppleSimulatorProvisioningCatalog(platform, () => inventory.readCatalog()),
   ]);
   return {
     platform,
@@ -819,28 +798,6 @@ async function buildIosProvisioningCatalog(
       observation: failedCatalogObservation("iOS", error),
     };
   }
-}
-
-function failedCatalogObservation(
-  platform: "Android" | "iOS" | "watchOS" | "tvOS" | "visionOS",
-  error: unknown,
-): ProvisioningCatalogObservation {
-  return {
-    catalogComplete: false,
-    error: {
-      code: "failed",
-      message: `${platform} provisioning catalog failed: ${errorMessage(error)}`,
-    },
-  };
-}
-
-function emptyProvisioningCatalog(): ProvisioningCatalog {
-  return {
-    runtimes: [],
-    deviceTypes: [],
-    systemImages: [],
-    profiles: [],
-  };
 }
 
 function combineProvisioningCatalogs(

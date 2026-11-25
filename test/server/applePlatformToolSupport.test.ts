@@ -115,6 +115,7 @@ describe("assertToolSupportsDevicePlatform", () => {
         "pressButton",
         "homeScreen",
         "getLogs",
+        "setAppPermissions",
       ].sort(),
     );
     for (const tool of [

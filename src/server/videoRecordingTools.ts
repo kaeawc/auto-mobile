@@ -9,6 +9,7 @@ import {
   getStartupOrphanCaptures,
   heldVideoRecordingOwner,
   listActiveVideoRecordings,
+  lookupLatestVideoRecording,
   rollbackVideoRecordingStart,
   startVideoRecording,
   stopVideoRecording,
@@ -36,6 +37,7 @@ import {
   type VideoRecordingArgs,
   type VideoRecordingToolDependencies,
 } from "./videoRecordingToolContext";
+import { describeNoActiveVideoRecording } from "./videoStopNoActiveRecording";
 import { stopRecordingById, stopResultEntry, tryStopStartupOrphan } from "./videoRecordingStopById";
 export {
   setSegmentedSessionTimer,
@@ -489,6 +491,23 @@ async function stopStartupOrphansForDevice(
   return { results, failures };
 }
 
+async function noActiveRecordingMessage(
+  target: BootedDevice,
+  args: VideoRecordingArgs,
+): Promise<string> {
+  try {
+    const { recording } = await lookupLatestVideoRecording({
+      deviceId: target.deviceId,
+      ownerSessionUuid: args.sessionUuid,
+    });
+    return describeNoActiveVideoRecording(recording ?? undefined);
+  } catch (error) {
+    // The lookup only enriches the refusal; the plain message is still correct.
+    logger.debug(`[VideoRecording] Finished-recording lookup failed: ${errorMessage(error)}`);
+    return describeNoActiveVideoRecording(undefined);
+  }
+}
+
 async function stopResolvedDeviceRecordings(
   ctx: RecordingToolContext,
   device: BootedDevice,
@@ -534,7 +553,7 @@ async function stopResolvedDeviceRecordings(
         failures.push({
           deviceId: target.deviceId,
           platform: target.platform,
-          error: "No active video recording found for device.",
+          error: await noActiveRecordingMessage(target, args),
         });
         continue;
       }

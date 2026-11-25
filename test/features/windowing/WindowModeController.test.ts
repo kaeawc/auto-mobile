@@ -234,6 +234,40 @@ describe("split screen", () => {
     expect(result.restore).toEqual({ mode: "fullscreen" });
   });
 
+  test("API 34: leaves freeform before splitting (#19194)", async () => {
+    device.addTask(OTHER, "fullscreen", FULL_SCREEN);
+    device.addTask(APP, "freeform", FREEFORM_BOUNDS);
+    honorWindowingModeLaunch({ "1": { mode: "fullscreen", bounds: FULL_SCREEN } });
+    device.on(/WMShell splitscreen moveToSideStage/, () => {
+      // The WM Shell refuses to split a freeform window.
+      if (device.task(APP)?.windowingMode === "freeform") {
+        return;
+      }
+      device.setWindow(OTHER, "multi-window", BOTTOM_HALF);
+      device.setWindow(APP, "multi-window", TOP_HALF);
+    });
+
+    const result = await controller.setMode({ appId: APP, mode: { splitScreen: { with: OTHER } } });
+
+    expect(result.matched).toBe(true);
+    expect(result.current?.windowingMode).toBe("multi-window");
+    expect(result.attempts[0]).toMatchObject({ outcome: "reached" });
+    expect(result.attempts[0]?.command).toContain(`${APP}/.MainActivity' --windowingMode 1`);
+    expect(result.previous?.windowingMode).toBe("freeform");
+  });
+
+  test("API 34: names freeform when the app cannot leave it", async () => {
+    device.addTask(OTHER, "fullscreen", FULL_SCREEN);
+    device.addTask(APP, "freeform", FREEFORM_BOUNDS);
+
+    const result = await controller.setMode({ appId: APP, mode: { splitScreen: { with: OTHER } } });
+
+    expect(result.matched).toBe(false);
+    expect(result.reason).toContain(
+      `${APP} is in a freeform window and did not return to fullscreen`,
+    );
+  });
+
   test("API 34: switches sides when the app landed on the wrong one", async () => {
     device.addTask(OTHER, "fullscreen", FULL_SCREEN);
     device.addTask(APP, "fullscreen", FULL_SCREEN);

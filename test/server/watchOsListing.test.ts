@@ -10,6 +10,8 @@ import {
   setDeviceToolsDependencies,
 } from "../../src/server/deviceTools";
 import {
+  listDeviceImagesOutputSchema,
+  listDeviceImagesSchema,
   listDevicesOutputSchema,
   listDevicesSchema,
 } from "../../src/features/deviceLifecycle/core/toolSchemas";
@@ -94,6 +96,20 @@ describe("watchOS listDevices (#17320)", () => {
       count: 0,
       discovery: { complete: false, failedPlatforms: ["watchos"] },
     });
+  });
+});
+
+describe("watchOS listDeviceImages (#19186)", () => {
+  test("the listDeviceImages schema accepts platform watchos", () => {
+    expect(listDeviceImagesSchema.safeParse({ platform: "watchos" }).success).toBe(true);
+  });
+
+  test("lists configured Apple Watch simulators under watchos", async () => {
+    const { handlers } = host();
+    const result = toolJson(await handlers.listDeviceImagesHandler({ platform: "watchos" }));
+    expect(result).toMatchObject({ platform: "watchos", configuredInventory: { complete: true } });
+    expect(result.count).toBeGreaterThan(0);
+    expect(listDeviceImagesOutputSchema.safeParse(result).success).toBe(true);
   });
 });
 

@@ -326,6 +326,10 @@ export const setAppPermissionsResultSchema = z
     ),
     error: z.string().optional(),
     warnings: z.array(z.string()).optional(),
+    appTerminated: z
+      .literal(true)
+      .optional()
+      .describe("tvOS: the change terminated the app; relaunch it with launchApp"),
     diagnostics: z
       .array(
         z

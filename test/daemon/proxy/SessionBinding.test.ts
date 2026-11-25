@@ -94,6 +94,7 @@ function harness() {
     port,
     ownedDeviceSessions: new Set(),
     sessionPlatforms: new Map(),
+    sessionApplePlatforms: new Map(),
     sessionDeviceIds: new Map(),
     sessionBrokerSessions: new Map(),
     plainRestartSessionLosses: new Map(),
@@ -103,11 +104,11 @@ function harness() {
   return { timer, state, port, deps, controls, binding: new SessionBinding(deps) };
 }
 
-function acquisition(uuid = "minted") {
+function acquisition(uuid = "minted", platform = "android") {
   return {
     content: [],
     structuredContent: {
-      platform: "android",
+      platform,
       runtime: { deviceId: "device", session: { sessionUuid: uuid } },
     },
   };
@@ -159,6 +160,28 @@ describe("SessionBinding", () => {
     expect(h.deps.sessionDeviceIds.size).toBe(0);
     expect(h.deps.ownedDeviceSessions.size).toBe(0);
     expect(h.state.boundSessionUuidAt).toBe(11);
+  });
+
+  test.each(["watchos", "tvos", "visionos"] as const)(
+    "a %s acquisition records its Apple platform apart from Android/iOS routing (#19186)",
+    async (platform) => {
+      const h = harness();
+      h.state.boundSessionUuid = "minted";
+      await h.binding.bindResultMintedDeviceSession(
+        "startDevice",
+        acquisition("minted", platform),
+        0,
+      );
+      expect(h.deps.sessionApplePlatforms.get("minted")).toBe(platform);
+      expect(h.deps.sessionPlatforms.has("minted")).toBe(false);
+    },
+  );
+
+  test("an Android acquisition records no Apple platform (#19186)", async () => {
+    const h = harness();
+    h.state.boundSessionUuid = "minted";
+    await h.binding.bindResultMintedDeviceSession("getAndroid", acquisition(), 0);
+    expect(h.deps.sessionApplePlatforms.size).toBe(0);
   });
 
   test.each([false, true])(

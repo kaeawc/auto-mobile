@@ -53,18 +53,7 @@ internal object PrototypeStorageValidation {
     for ((action, path) in context.actions) {
       val type = (action["type"] as? JsonPrimitive)?.content
       if (type != "request" && type !in PrototypeDataRules.dataActionTypes) continue
-      val candidates = buildList {
-        (action["where"] as? JsonObject)?.get("equals")?.let { add(it to "$path.where.equals") }
-        if (type != "request") {
-          action["value"]?.let { add(it to "$path.value") }
-          // `{object}` members (#18826) read state, directly or through `{derived}`, like a value.
-          val members = (action["value"] as? JsonObject)?.get("object") as? JsonObject
-          for ((name, member) in members.orEmpty().toSortedMap()) {
-            add(member to PrototypeValidationPaths.keyPath("$path.value.object", name))
-          }
-        }
-      }
-      for ((binding, at) in candidates) {
+      for ((binding, at) in keyedBindingCandidates(action, path, writesValue = type != "request")) {
         // Reuse the existing template-aware secure guard, including the request opt-in.
         val probe = buildJsonObject {
           put("type", "request")
@@ -82,6 +71,22 @@ internal object PrototypeStorageValidation {
       }
     }
     return null
+  }
+
+  /** The bindings a keyed write or request reads, each with its spec path. */
+  private fun keyedBindingCandidates(
+    action: JsonObject,
+    path: String,
+    writesValue: Boolean,
+  ): List<Pair<JsonElement, String>> = buildList {
+    (action["where"] as? JsonObject)?.get("equals")?.let { add(it to "$path.where.equals") }
+    if (!writesValue) return@buildList
+    action["value"]?.let { add(it to "$path.value") }
+    // `{object}` members (#18826) read state, directly or through `{derived}`, like a value.
+    val members = (action["value"] as? JsonObject)?.get("object") as? JsonObject
+    for ((name, member) in members.orEmpty().toSortedMap()) {
+      add(member to PrototypeValidationPaths.keyPath("$path.value.object", name))
+    }
   }
 
   private fun byteLimitError(bytes: Int, enforceBytes: Boolean): PrototypeSpecError? =

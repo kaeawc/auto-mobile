@@ -9,6 +9,7 @@ import {
   rowContentHeight,
   rowFillAxes,
   rowMeasured,
+  rowRepeatMeasured,
   rowSequentialChildren,
   scrollChildPatch,
 } from "../../../../src/features/prototype/web/webRowAspect";
@@ -485,7 +486,7 @@ test("a container that authors a dp width or maxWidth bounds its children's widt
   });
 });
 
-test("a repeated row does not fill width, as its children are never measured (#16694)", () => {
+test("a repeated row fills width from its instances, and only from them (#16694, #16711)", () => {
   const prepare = (entry: unknown) => record(entry);
   const row = {
     type: "row",
@@ -493,8 +494,54 @@ test("a repeated row does not fill width, as its children are never measured (#1
   };
   expect(rowFillAxes(row, "root", prepare)).toEqual(["width"]);
   const repeated = { ...row, repeat: { items: [{}, {}] } };
+  // One prepare per instance measures the expanded row; a single prepare leaves it out.
+  expect(rowFillAxes(repeated, "root", [prepare, prepare])).toEqual(["width"]);
   expect(rowFillAxes(repeated, "root", prepare)).toEqual([]);
   expect(rowMeasured(repeated, "root", prepare)).toBe(repeated);
+  // An instance whose ratio is hidden does not fill.
+  expect(rowFillAxes(repeated, "root", [() => undefined, () => undefined])).toEqual([]);
+});
+
+test("a repeated row measures every instance's children in order, as one row (#16711)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const repeated = {
+    type: "row",
+    style: { spacing: 4 },
+    repeat: { items: [{}, {}] },
+    children: [
+      { type: "text", text: "a" },
+      { type: "box", style: { aspectRatio: 2 } },
+    ],
+  };
+  const { node, instances } = rowRepeatMeasured(repeated, "root", [prepare, prepare]);
+  expect(node).toBe(repeated);
+  expect(instances).toHaveLength(2);
+  // The first instance's text keeps its width and its ratio takes what is left...
+  expect(instances[0]![0]).toBe(repeated.children[0]);
+  expect(styleOf(instances[0]![1])?.[ROW_MEASURE_KEY]).toEqual({ take: true });
+  // ...so the second instance's text and ratio are measured against no width, gap dropped.
+  expect(styleOf(instances[1]![0])?.[ROW_MEASURE_KEY]).toEqual({ zero: true, dropGap: 4 });
+  expect(styleOf(instances[1]![1])?.[ROW_MEASURE_KEY]).toEqual({ zero: true, dropGap: 4 });
+});
+
+test("a repeated row around a capped ratio is bounded to its parent's width (#16711)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const repeated = {
+    type: "row",
+    repeat: { items: [{}, {}] },
+    children: [{ type: "box", style: { aspectRatio: 1, maxWidth: 40 } }],
+  };
+  const { node, instances } = rowRepeatMeasured(repeated, "root", [prepare, prepare]);
+  expect(record(node.style)?.[ROW_BOUND_KEY]).toBe(true);
+  expect(styleOf(instances[0]![0])?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: CAPPED_SHRINK,
+    basis: 40,
+  });
+  expect(styleOf(instances[1]![0])?.[ROW_MEASURE_KEY]).toEqual({
+    shrink: LATER_SHRINK,
+    later: true,
+    basis: 40,
+  });
 });
 
 test("under an unbounded width with no definite height a row neither takes nor fills the width (#16718)", () => {

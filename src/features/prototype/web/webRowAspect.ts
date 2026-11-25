@@ -184,27 +184,31 @@ const rowBounds = (bounds: number | RowBounds) =>
 
 /**
  * The axes a row grows on to its parent: width when its unsized aspect-ratio child takes all the
- * remaining width, since a wrap-sized Compose Row then reaches its max width. A repeated row is
- * left out, as rowMeasured leaves it: its children never get the take and zero hints the fill
- * assumes. Under an unbounded width (a horizontal scroll) there is no max width to reach, unless
- * the row's own dp `width` or `maxWidth` restores one, as rowMeasured's children scope sees it.
+ * remaining width, since a wrap-sized Compose Row then reaches its max width. A repeated row reads
+ * every instance's children, one `prepare` per instance, as rowRepeatMeasured measures them
+ * (#16711); given a single `prepare` it is left out, since its children are not measured then.
+ * Under an unbounded width (a horizontal scroll) there is no max width to reach, unless the row's
+ * own dp `width` or `maxWidth` restores one, as rowMeasured's children scope sees it.
  */
 export function rowFillAxes(
   node: Raw,
   path: string,
-  prepare: PrepareChild,
+  prepare: PrepareChild | readonly PrepareChild[],
   bounds: number | RowBounds = Infinity,
 ): "width"[] {
   const { height: inherited = Infinity, unboundedWidth } = rowBounds(bounds);
+  const prepares = typeof prepare === "function" ? [prepare] : prepare;
+  const children = Array.isArray(node.children) ? node.children : [];
   const fills =
     node.type === "row" &&
-    node.repeat === undefined &&
+    (node.repeat === undefined || typeof prepare !== "function") &&
     (unboundedWidth !== true || boundsOwnWidth(node.style)) &&
-    Array.isArray(node.children) &&
-    node.children.some((entry, index) =>
-      isUnsizedAspectRatio(
-        inFlow(prepare)(entry, childPath(path, index)),
-        rowContentHeight(record(node.style), inherited),
+    prepares.some((instance) =>
+      children.some((entry, index) =>
+        isUnsizedAspectRatio(
+          inFlow(instance)(entry, childPath(path, index)),
+          rowContentHeight(record(node.style), inherited),
+        ),
       ),
     );
   return fills ? ["width"] : [];
@@ -245,6 +249,41 @@ export function rowMeasured(
   const bounded = styled.some((child) => aspectRatioCap(child, height) !== undefined);
   const style = bounded ? { ...record(node.style), [ROW_BOUND_KEY]: true } : node.style;
   return { ...node, children, ...(style === undefined ? {} : { style }) };
+}
+
+/**
+ * A repeated row as Compose measures it once PrototypeRepeat has expanded it (#16711): every
+ * instance's children in order, as one row (see rowSequentialChildren), then split back per
+ * instance, and the row bounded around a capped ratio as rowMeasured bounds one. `prepares`
+ * resolves each instance's children in that instance's scope.
+ */
+export function rowRepeatMeasured(
+  node: Raw,
+  path: string,
+  prepares: readonly PrepareChild[],
+  bounds: number | RowBounds = Infinity,
+): { readonly node: Raw; readonly instances: readonly (readonly unknown[])[] } {
+  const template = Array.isArray(node.children) ? node.children : [];
+  const { height: inherited = Infinity, unboundedWidth } = rowBounds(bounds);
+  const styled = prepares.flatMap((prepare) =>
+    template.map((entry, index) => inFlow(prepare)(entry, childPath(path, index))),
+  );
+  const measureHeight = rowMeasureHeight(record(node.style), inherited);
+  const spacing = record(node.style)?.spacing;
+  const measured = rowSequentialChildren(
+    prepares.flatMap(() => template),
+    (_entry, index) => styled[index],
+    measureHeight,
+    { unboundedWidth, spacing: typeof spacing === "number" ? spacing : 0 },
+  );
+  const instances = prepares.map((_prepare, index) =>
+    measured.slice(index * template.length, (index + 1) * template.length),
+  );
+  const bounded = styled.some((child) => aspectRatioCap(child, measureHeight.height) !== undefined);
+  return {
+    node: bounded ? { ...node, style: { ...record(node.style), [ROW_BOUND_KEY]: true } } : node,
+    instances,
+  };
 }
 
 function withStyle(entry: unknown, patch: Raw): unknown {

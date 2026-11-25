@@ -1276,25 +1276,27 @@ describe("prototype web still (#16346)", () => {
     expect(ratios.map((ratio) => ratio.style["flex-basis"])).toEqual(["40px", "40px"]);
   });
 
-  test("a repeated row around an unsized aspect ratio does not fill its parent (#16694)", () => {
-    const row = byTag(
-      renderPrototypeStill({
-        ...reference,
-        root: {
-          type: "column",
-          children: [
-            {
-              type: "row",
-              testTag: "line",
-              repeat: { items: [{ id: 1 }] },
-              children: [{ type: "box", style: { aspectRatio: 2 } }],
-            },
-          ],
-        },
-      }),
-      "line",
-    )[0]!;
-    expect(row.style).not.toHaveProperty("width");
+  test("a repeated row measures its instances as one row and fills its parent (#16694, #16711)", () => {
+    const still = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "column",
+        children: [
+          {
+            type: "row",
+            testTag: "line",
+            repeat: { items: [{ id: 1 }, { id: 2 }] },
+            children: [{ type: "box", testTag: "ratio", style: { aspectRatio: 2 } }],
+          },
+        ],
+      },
+    });
+    // The first instance's ratio takes the remaining width, so the row reaches its max width.
+    expect(byTag(still, "line")[0]!.style.width).toBe("100%");
+    const ratios = byTag(still, "ratio");
+    expect(ratios[0]!.style.flex).toBe("1 1 0");
+    expect(ratios[1]!.style).not.toHaveProperty("flex");
+    expect(ratios[1]!.style["max-width"]).toBe("0px");
   });
 
   test("the height pass's layer types are the ones renderWebNode hoists (#16720)", () => {

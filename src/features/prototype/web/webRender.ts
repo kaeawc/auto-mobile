@@ -85,7 +85,14 @@ import {
   prototypeIconVariant,
   type PrototypeIconGlyphSource,
 } from "./webIconGlyphs";
-import { contentHeightBound, rowFillAxes, rowMeasured, scrollChildPatch } from "./webRowAspect";
+import { fieldChrome, splitParentFacing } from "./webFieldChrome";
+import {
+  contentHeightBound,
+  rowFillAxes,
+  rowMeasured,
+  rowRepeatMeasured,
+  scrollChildPatch,
+} from "./webRowAspect";
 import { repeatInstanceChildren, withColumnHeights } from "./webIncomingHeight";
 
 /** A node the web renderer drew as a labelled placeholder instead of its real content. */
@@ -401,7 +408,8 @@ function lineFillAxes(
     return [];
   }
   const list: unknown[] = sized.children;
-  const own = rowFillAxes(raw, path, prepareIn(scope), scope);
+  // One prepare per row: a repeated row measures its instances' children as one row (#16711).
+  const own = rowFillAxes(raw, path, rows.map(prepareIn), scope);
   // Children see the bound this container passes them, as rendering gives it (see `line`, `box`).
   const bound = BOUNDING_CONTAINERS.has(String(raw.type))
     ? contentHeightBound(raw.style, scope.heightBound)
@@ -439,10 +447,34 @@ const line =
       style: containerChildStyle(scope, node, axis),
       heightBound: contentHeightBound(node.style, scope.heightBound),
     });
-    const rowed = rowMeasured(node, path, prepareIn(inner), { ...scope, style: inner.style });
+    const bounds = { ...scope, style: inner.style };
+    // A repeated row measures its instances' children as one row, as Compose does once
+    // PrototypeRepeat has expanded them (#16711).
+    const repeated =
+      axis === "row" && node.repeat !== undefined
+        ? rowRepeatMeasured(node, path, rowScopes(node, inner).map(prepareIn), bounds)
+        : undefined;
+    const rowed = repeated?.node ?? rowMeasured(node, path, prepareIn(inner), bounds);
     const { attrs, style } = base(rowed, scope, lineCss(axis, rowed.style));
-    return el("div", { attrs, style }, children(rowed, inner, path));
+    const kids = repeated
+      ? instanceChildren(rowed, inner, path, repeated.instances)
+      : children(rowed, inner, path);
+    return el("div", { attrs, style }, kids);
   };
+
+/** A repeated row's measured instances, each drawn in its own repeat scope. */
+function instanceChildren(
+  node: Raw,
+  scope: WebRenderScope,
+  path: string,
+  instances: readonly (readonly unknown[])[],
+): WebChild[] {
+  return rowScopes(node, scope).flatMap((instance, index) =>
+    (instances[index] ?? []).flatMap((entry, at) =>
+      renderOrSkip(entry, instance, `${path}.children[${at}]`),
+    ),
+  );
+}
 
 const box: NodeRenderer = (raw, scope, path) => {
   // A wrap-sized box grows around a filling child, as a Compose Box does.
@@ -663,30 +695,6 @@ function floatingLabel(node: Raw, empty: boolean, scope: WebRenderScope): WebEle
   ];
 }
 
-/** CSS a parent's layout reads from its child: size, flex share, cross-axis alignment, grid cell. */
-const PARENT_FACING = new Set([
-  "width",
-  "height",
-  "flex",
-  "flex-shrink",
-  "align-self",
-  "grid-area",
-  "min-width",
-  "max-width",
-  "margin",
-]);
-
-function splitParentFacing(
-  style: Record<string, string>,
-): [Record<string, string>, Record<string, string>] {
-  const outer: Record<string, string> = {};
-  const inner: Record<string, string> = {};
-  for (const [key, value] of Object.entries(style)) {
-    (PARENT_FACING.has(key) ? outer : inner)[key] = value;
-  }
-  return [outer, inner];
-}
-
 /** As on the devices: a decidable error shows errorText, else the supporting text. */
 function fieldCaption(node: Raw, error: boolean, scope: WebRenderScope): WebElement[] {
   const caption = error ? (node.errorText ?? node.supportingText) : node.supportingText;
@@ -749,24 +757,6 @@ const textField: NodeRenderer = (node, scope, path) => {
         ...caption,
       ]);
 };
-
-/**
- * Material text-field chrome. `filled` (the native default) is a tinted container with a bottom
- * indicator; `outlined` is a full outline. Either turns to the error colour on a decidable error.
- */
-function fieldChrome(node: Raw, error: boolean, scope: WebRenderScope): Record<string, string> {
-  if (node.variant === "outlined") {
-    const outline = cssColor(error ? "error" : "outline", scope.style) ?? "currentColor";
-    return { [BORDER_RADIUS]: "4px", border: `1px solid ${outline}` };
-  }
-  const indicator = cssColor(error ? "error" : "onSurfaceVariant", scope.style) ?? "currentColor";
-  const container = cssColor("surfaceContainerHighest", scope.style);
-  return {
-    [BORDER_RADIUS]: "4px 4px 0 0",
-    "border-bottom": `1px solid ${indicator}`,
-    ...(container ? { [BACKGROUND_COLOR]: container } : {}),
-  };
-}
 
 /** Whether a toggle's state key, with repeat placeholders bound first, holds `true`. */
 function isOn(stateKey: unknown, scope: WebRenderScope): boolean {

@@ -97,24 +97,25 @@ export async function refuseRotateOnFixedOrientationDevice(
   }: RotateXrOptions = {},
   signal?: AbortSignal,
 ): Promise<void> {
-  const xr = await xrDetector.isAndroidXr({ device, adb, signal });
-  signal?.throwIfAborted();
-  if (xr) {
-    throw androidXrRotateUnsupportedError(device.deviceId);
-  }
-  const watch = await wearOsDetector.isWearOs({ device, adb, signal });
-  signal?.throwIfAborted();
-  if (watch) {
-    throw wearOsRotateUnsupportedError(device.deviceId);
-  }
-  const tv = await tvDetector.isAndroidTv({ device, adb, signal });
-  signal?.throwIfAborted();
-  if (tv) {
-    throw androidTvRotateUnsupportedError(device.deviceId);
-  }
-  const automotive = await automotiveDetector.isAndroidAutomotive({ device, adb, signal });
-  signal?.throwIfAborted();
-  if (automotive) {
-    throw androidAutomotiveRotateUnsupportedError(device.deviceId);
+  const evidence = { device, adb, signal };
+  // Asked in order, one at a time: a refusal stops before the later predicates probe the device.
+  const checks: ReadonlyArray<{
+    matches: () => Promise<boolean>;
+    refusal: (deviceId: string) => RotateUnsupportedError;
+  }> = [
+    { matches: () => xrDetector.isAndroidXr(evidence), refusal: androidXrRotateUnsupportedError },
+    { matches: () => wearOsDetector.isWearOs(evidence), refusal: wearOsRotateUnsupportedError },
+    { matches: () => tvDetector.isAndroidTv(evidence), refusal: androidTvRotateUnsupportedError },
+    {
+      matches: () => automotiveDetector.isAndroidAutomotive(evidence),
+      refusal: androidAutomotiveRotateUnsupportedError,
+    },
+  ];
+  for (const { matches, refusal } of checks) {
+    const matched = await matches();
+    signal?.throwIfAborted();
+    if (matched) {
+      throw refusal(device.deviceId);
+    }
   }
 }

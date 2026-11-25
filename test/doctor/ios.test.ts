@@ -1516,6 +1516,15 @@ describe("checkIosCtrlProxyRunner", () => {
     const names = results.map((check) => check.name);
     expect(names).toContain("iOS CtrlProxy Runner");
   });
+
+  test("runIosChecks reports expired disposable apps only with a registry lister (#14184)", async () => {
+    const names = async (dependencies: IosDoctorDependencies) =>
+      (await runIosChecks({}, dependencies)).map((check) => check.name);
+    expect(await names(baseDependencies)).not.toContain("Expired Disposable Apps (iOS)");
+    expect(
+      await names({ ...baseDependencies, disposableApps: { list: async () => [] } }),
+    ).toContain("Expired Disposable Apps (iOS)");
+  });
 });
 
 describe("checkIosObserveRoundTrip", () => {

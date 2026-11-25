@@ -23,6 +23,7 @@ import {
 } from "../../features/networkFilter/NetworkFilterInstaller";
 import { DOCTOR_EXEC_TIMEOUT_MS } from "../../utils/diagnosticTimeouts";
 import { sortedReaddir } from "../../utils/io";
+import { defaultDisposableAppLister, type DisposableAppLister } from "./disposableApps";
 import {
   createIosSimFleetDoctorDependencies,
   type IosSimFleetDoctorDependencies,
@@ -70,6 +71,11 @@ export interface IosDoctorDependencies {
    * build their own dependencies skip the check rather than probing the real host.
    */
   simFleet?: IosSimFleetDoctorDependencies;
+  /**
+   * Disposable prototype app registry (#14184). Optional so suites that build their own
+   * dependencies skip the expired-app check rather than reading the real registry.
+   */
+  disposableApps?: DisposableAppLister;
 }
 
 export function createIosDoctorDependencies(
@@ -96,5 +102,6 @@ export function createIosDoctorDependencies(
     observeRoundTripInspector: createIosObserveRoundTripInspector(() => new SimCtlClient(), logger),
     networkFilterInspector: new NetworkFilterStatusInspector(),
     simFleet: createIosSimFleetDoctorDependencies(),
+    disposableApps: defaultDisposableAppLister(),
   };
 }

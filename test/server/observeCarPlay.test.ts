@@ -9,6 +9,7 @@ import { observeToolResultSchema } from "../../src/server/toolOutputSchemas";
 import { CountingIdGenerator } from "../../src/utils/CountingIdGenerator";
 import { parseSimulatorScreens } from "../../src/utils/ios-cmdline-tools/SimulatorDisplays";
 import type { CarPlayProjectionState } from "../../src/utils/ios/carPlayProjection";
+import { FakeCarPlayRuntimeReader } from "../fakes/FakeCarPlayRuntimeReader";
 import { FakeScreenshotFileWriter } from "../fakes/FakeScreenshotFileWriter";
 import { FakeScreenshotPathProtection } from "../fakes/FakeScreenshotPathProtection";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -36,14 +37,21 @@ const projecting: CarPlayProjectionState = {
 };
 
 function arrange(
-  options: { state?: CarPlayProjectionState; missingScreen?: boolean; png?: Buffer } = {},
+  options: {
+    state?: CarPlayProjectionState;
+    missingScreen?: boolean;
+    png?: Buffer;
+    runtime?: string;
+  } = {},
 ) {
   const calls: string[] = [];
   const timer = new FakeTimer();
   timer.setCurrentTime(now);
   const writer = new FakeScreenshotFileWriter();
   const protection = new FakeScreenshotPathProtection(timer);
+  const runtime = new FakeCarPlayRuntimeReader(options.runtime);
   const dependencies: CarPlayObserveDependencies = {
+    runtime,
     projectionProbe: {
       async probe(deviceId) {
         calls.push(`probe ${deviceId}`);
@@ -69,7 +77,7 @@ function arrange(
   };
   const observe = (args: ObserveArgs = {}) =>
     observeCarPlay(simulator, { ...args, display: "carplay" }, undefined, dependencies);
-  return { observe, calls, writer, protection, timer };
+  return { observe, calls, runtime, writer, protection, timer };
 }
 
 describe("observe on an iOS simulator's CarPlay screen", () => {
@@ -115,6 +123,16 @@ describe("observe on an iOS simulator's CarPlay screen", () => {
       "CarPlay screen CarPlay is attached but not projecting (AirPlay[4]). Capture was skipped because the frame would be black. Run carplay-power-helper power-on (ios/carplay-power) after every boot of an iOS 26.x simulator, then retry; the iOS 27 Simulator does not support CarPlay.",
     );
     expect(calls).toEqual([`probe ${simulator.deviceId}`]);
+    expect(writer.written).toEqual([]);
+  });
+
+  test("refuses an iOS 27 simulator with unsupported-runtime before probing (#19185)", async () => {
+    const { observe, calls, runtime, writer } = arrange({ runtime: "27.2" });
+    await expect(observe()).rejects.toThrow(
+      "[unsupported-runtime] Headless CarPlay needs an iOS 26.x runtime (found 27.2)",
+    );
+    expect(runtime.calls).toEqual([simulator.deviceId]);
+    expect(calls).toEqual([]);
     expect(writer.written).toEqual([]);
   });
 

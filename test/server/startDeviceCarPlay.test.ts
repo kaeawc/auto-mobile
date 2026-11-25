@@ -7,6 +7,7 @@ import { createStructuredToolResponse, getStructuredPayload } from "../../src/ut
 import { FakeCarPlayProjectionProbe } from "../fakes/FakeCarPlayProjectionProbe";
 import { FakeCarPlayScreenPowerer } from "../fakes/FakeCarPlayScreenPowerer";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeCarPlayRuntimeReader } from "../fakes/FakeCarPlayRuntimeReader";
 
 // Captured on a fresh iOS 26.5 iPhone 17 Pro simulator after power-on (#18728).
 const car = parseCarPlayProjectionState(
@@ -27,6 +28,7 @@ const bounds = { signal: undefined, totalDeadlineMs: 60_000 };
 function fakes() {
   const powerer = new FakeCarPlayScreenPowerer(powered);
   const probe = new FakeCarPlayProjectionProbe(car);
+  const runtime = new FakeCarPlayRuntimeReader();
   const timer = new FakeTimer();
   timer.enableAutoAdvance();
   const sessionWork = new AbortController();
@@ -44,9 +46,10 @@ function fakes() {
   return {
     powerer,
     probe,
+    runtime,
     holds,
     sessionWork,
-    deps: () => ({ powerer, probe, timer, holdAcquiringSession }),
+    deps: () => ({ powerer, probe, runtime, timer, holdAcquiringSession }),
   };
 }
 
@@ -55,6 +58,19 @@ describe("startDevice carPlay", () => {
     const { powerer, deps } = fakes();
     expect(await withRequestedCarPlay(undefined, ready, bounds, deps)).toBe(ready);
     expect(powerer.calls).toEqual([]);
+  });
+
+  test("an iOS 27 simulator gets unsupported-runtime before the helpers run (#19185)", async () => {
+    const { powerer, probe, runtime, deps } = fakes();
+    runtime.version = "27.2";
+    powerer.error = new ActionableError("power helper missing");
+    const result = withRequestedCarPlay({}, ready, bounds, deps);
+    await expect(result).rejects.toThrow(
+      /^\[unsupported-runtime\] Headless CarPlay needs an iOS 26\.x runtime \(found 27\.2\)/,
+    );
+    expect(runtime.calls).toEqual(["SIM-UDID"]);
+    expect(powerer.calls).toEqual([]);
+    expect(probe.calls).toEqual([]);
   });
 
   test("powers on the ready simulator and reports the car display", async () => {
@@ -93,6 +109,10 @@ describe("startDevice carPlay", () => {
     const { holds, powerer, probe, sessionWork, deps } = fakes();
     powerer.hangPowerOn = true;
     const run = withRequestedCarPlay({}, ready, bounds, deps);
+    // The runtime check settles first; let it reach the wedged power-on.
+    for (let turn = 0; turn < 50 && powerer.calls.length === 0; turn++) {
+      await Promise.resolve();
+    }
     expect(powerer.calls).toHaveLength(1);
     sessionWork.abort(new Error("device lost"));
     await expect(run).rejects.toThrow(

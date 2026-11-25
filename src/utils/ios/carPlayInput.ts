@@ -6,6 +6,7 @@ import {
   type CarPlayProjectionProbe,
   requireCarPlayProjection,
 } from "./carPlayProjection";
+import type { CarPlayRuntimeReader } from "./carPlayRuntime";
 import { runCarPlayPowerHelper } from "./carPlayScreenPower";
 
 /** carplay-power-helper `input` names (#19059), in the helper's order. */
@@ -89,6 +90,7 @@ export class DefaultCarPlayInputSender implements CarPlayInputSender {
 
 export interface CarPlayInputDependencies {
   probe: CarPlayProjectionProbe;
+  runtime: CarPlayRuntimeReader;
   sender: CarPlayInputSender;
 }
 
@@ -103,7 +105,7 @@ export async function sendCarPlayInput(
   deps: CarPlayInputDependencies,
   signal?: AbortSignal,
 ): Promise<{ display: CarPlayProjectingState; sent: CarPlayInputResult["sent"] }> {
-  const display = await requireCarPlayProjection(udid, deps.probe, {
+  const display = await requireCarPlayProjection(udid, deps, {
     signal,
     skipped: "No input was sent.",
   });

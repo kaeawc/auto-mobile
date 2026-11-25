@@ -28,7 +28,8 @@ import { IosPhysicalPermissions, type IosPhysicalPrivacyClient } from "./IosPhys
 import { CtrlProxyIosPhysicalPrivacyClient } from "./CtrlProxyIosPhysicalPrivacyClient";
 import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
-import { TvosPermissions } from "../tvos/TvosPermissions";
+import { TvosPermissions, type SimctlPrivacyPlatform } from "../tvos/TvosPermissions";
+import { PLATFORM_LABELS } from "../../models/Platform";
 import { outputReportsMissingPackage } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { shellQuote } from "../../utils/shellQuote";
 import { tccServiceForPermission } from "../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
@@ -131,7 +132,7 @@ export interface SetAppPermissionsResult {
   success: boolean;
   appId: string;
   deviceId: string;
-  platform: "android" | "ios" | "tvos";
+  platform: "android" | "ios" | SimctlPrivacyPlatform;
   action: AppPermissionAction;
   changedCount: number;
   failedCount: number;
@@ -145,8 +146,8 @@ export interface SetAppPermissionsResult {
    */
   diagnostics?: AudioInputDiagnostic[];
   /**
-   * True when an Apple TV simulator applied a change: `simctl privacy` terminates the app, so the
-   * next interaction would otherwise reach the tvOS home screen (#19186).
+   * True when an Apple TV or Apple Vision Pro simulator applied a change: `simctl privacy`
+   * terminates the app, so the next interaction would otherwise reach the home screen (#19186).
    */
   appTerminated?: true;
 }
@@ -199,11 +200,12 @@ export class AppPermissions {
     input: SetAppPermissionsInput,
   ): Promise<SetAppPermissionsResult> {
     const action = input.action ?? "grant";
+    const platform = this.device.platform;
     const result =
-      this.device.platform === "ios"
+      platform === "ios"
         ? await this.setIosPermissions(appId, action, input)
-        : this.device.platform === "tvos"
-          ? await this.setTvosPermissions(appId, action, input)
+        : platform === "tvos" || platform === "visionos"
+          ? await this.setSimctlPrivacyPermissions(appId, action, input, platform)
           : await this.setAndroidPermissions(appId, action, input);
     return await this.withAudioInputDiagnostic(
       result,
@@ -281,18 +283,26 @@ export class AppPermissions {
     };
   }
 
-  /** grant/revoke/reset through simctl privacy on an Apple TV simulator (#17527). */
-  private async setTvosPermissions(
+  /**
+   * grant/revoke/reset through simctl privacy on an Apple TV (#17527) or Apple Vision Pro (#19186)
+   * simulator.
+   */
+  private async setSimctlPrivacyPermissions(
     appId: string,
     action: AppPermissionAction,
     input: SetAppPermissionsInput,
+    platform: SimctlPrivacyPlatform,
   ): Promise<SetAppPermissionsResult> {
-    const refusal = this.refuseAndroidOnlyFields(appId, action, input, "tvos");
+    const refusal = this.refuseAndroidOnlyFields(appId, action, input, platform);
     if (refusal) {
       return refusal;
     }
-    const tvos = new TvosPermissions(this.device, this.simctl ?? new SimCtlClient(this.device));
-    const result = await tvos.setPermissions(
+    const privacy = new TvosPermissions(
+      this.device,
+      this.simctl ?? new SimCtlClient(this.device),
+      platform,
+    );
+    const result = await privacy.setPermissions(
       action,
       appId.trim(),
       normalizePermissions(input.permissions),
@@ -301,12 +311,12 @@ export class AppPermissions {
       success: result.success,
       appId: appId.trim(),
       deviceId: this.device.deviceId,
-      platform: "tvos",
+      platform,
       action,
       changedCount: result.changedCount,
       failedCount: result.failedCount,
       operations: result.results.map((permissionResult) => ({
-        stepId: `tvos_simctl_privacy:${action}:${permissionResult.permission}`,
+        stepId: `${platform}_simctl_privacy:${action}:${permissionResult.permission}`,
         success: permissionResult.success,
         changedCount: permissionResult.success ? 1 : 0,
         failedCount: permissionResult.success ? 0 : 1,
@@ -324,7 +334,7 @@ export class AppPermissions {
     appId: string,
     action: AppPermissionAction,
     input: SetAppPermissionsInput,
-    platform: "ios" | "tvos",
+    platform: "ios" | SimctlPrivacyPlatform,
   ): SetAppPermissionsResult | undefined {
     const unsupportedFields = (
       ["notificationPolicyAccess", "notificationsEnabled", "scheduleExactAlarm"] as const
@@ -341,7 +351,7 @@ export class AppPermissions {
       changedCount: 0,
       failedCount: 0,
       operations: [],
-      error: `setAppPermissions does not support the following fields on ${platform === "ios" ? "iOS" : "tvOS"}: ${unsupportedFields.join(", ")}`,
+      error: `setAppPermissions does not support the following fields on ${PLATFORM_LABELS[platform]}: ${unsupportedFields.join(", ")}`,
     };
   }
 

@@ -20543,6 +20543,163 @@
           "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "configuredInventory": {},
+        "provisioningCatalog": {
+          "description": "watchOS only: installed watchOS runtimes and Apple Watch device types; absent when the catalog read failed (see catalogObservation)",
+          "type": "object",
+          "properties": {
+            "runtimes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "const": "watchos"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "string"
+                  },
+                  "availability": {
+                    "type": "object",
+                    "properties": {
+                      "available": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["available"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["platform", "id", "name", "availability"],
+                "additionalProperties": false
+              }
+            },
+            "deviceTypes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "platform": {
+                    "type": "string",
+                    "const": "watchos"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "family": {
+                    "type": "string"
+                  },
+                  "availability": {
+                    "type": "object",
+                    "properties": {
+                      "available": {
+                        "type": "boolean"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": ["available"],
+                    "additionalProperties": false
+                  },
+                  "runtimeCompatibility": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "knowledge": {
+                            "type": "string",
+                            "const": "known"
+                          },
+                          "minRuntimeVersion": {
+                            "type": "string"
+                          },
+                          "maxRuntimeVersion": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "compatibleRuntimeIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          }
+                        },
+                        "required": [
+                          "knowledge",
+                          "minRuntimeVersion",
+                          "maxRuntimeVersion",
+                          "compatibleRuntimeIds"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "knowledge": {
+                            "type": "string",
+                            "const": "unknown"
+                          },
+                          "reason": {
+                            "type": "string"
+                          }
+                        },
+                        "required": ["knowledge", "reason"],
+                        "additionalProperties": false
+                      }
+                    ]
+                  }
+                },
+                "required": ["platform", "id", "name", "availability"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["runtimes", "deviceTypes"],
+          "additionalProperties": false
+        },
+        "catalogObservation": {
+          "description": "watchOS only: whether provisioningCatalog was read",
+          "type": "object",
+          "properties": {
+            "catalogComplete": {
+              "type": "boolean"
+            },
+            "error": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message"],
+              "additionalProperties": {}
+            }
+          },
+          "required": ["catalogComplete"],
+          "additionalProperties": false
+        },
         "capabilityProfiles": {
           "description": "Compact detail: capability inventories shared by images, by `capabilityProfile`",
           "type": "object",
@@ -47182,7 +47339,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos"]
+          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "action": {
           "type": "string",
@@ -47247,7 +47404,7 @@
           }
         },
         "appTerminated": {
-          "description": "tvOS: the change terminated the app; relaunch it with launchApp",
+          "description": "tvOS and visionOS: the change terminated the app; relaunch it with launchApp",
           "type": "boolean",
           "const": true
         },
@@ -47287,7 +47444,12 @@
       "additionalProperties": {}
     },
     "_meta": {
-      "automobile/requires": ["platform:android", "platform:ios", "platform:tvos"]
+      "automobile/requires": [
+        "platform:android",
+        "platform:ios",
+        "platform:tvos",
+        "platform:visionos"
+      ]
     }
   },
   {

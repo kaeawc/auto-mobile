@@ -22,6 +22,11 @@ import {
 } from "../utils/configuredDeviceInventory";
 import { describeDevice, projectConfiguredImage } from "../daemon/deviceDescription";
 import { compactDeviceImages } from "./listDeviceImagesCompaction";
+import {
+  readAppleSimulatorProvisioningCatalog,
+  type ProvisioningCatalog,
+  type ProvisioningCatalogObservation,
+} from "./simulatorProvisioningCatalog";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { reconcileDiscoveryObservation } from "../daemon/discoveryReconcile";
 import { logger } from "../utils/logger";
@@ -247,6 +252,7 @@ export function createListingHandlers() {
         count: images.length,
         platform: args.platform,
         configuredInventory,
+        ...(args.platform === "watchos" ? await watchProvisioningCatalogFields(deviceUtils) : {}),
       });
     } catch (error) {
       throw toActionableError(error, `Failed to list ${args.platform} AVDs`);
@@ -404,6 +410,32 @@ export function availableDeviceResourceNote() {
     uriPrefix:
       "All resource URIs use the 'automobile:' prefix. URIs like 'android://devices' are not supported.",
   };
+}
+
+/**
+ * The watchOS runtimes and Apple Watch device types `provisionDevice` can create, built as the
+ * `automobile:devices/images/watchos` resource builds them (#19186). A failed read keeps the
+ * listing and reports the failure in `catalogObservation` instead of a catalog.
+ */
+async function watchProvisioningCatalogFields(
+  deviceManager: Pick<PlatformDeviceManager, "readWatchSimulatorCatalog">,
+): Promise<{
+  provisioningCatalog?: Pick<ProvisioningCatalog, "runtimes" | "deviceTypes">;
+  catalogObservation?: ProvisioningCatalogObservation;
+}> {
+  const readCatalog = deviceManager.readWatchSimulatorCatalog?.bind(deviceManager);
+  if (!readCatalog) {
+    return {};
+  }
+  const { catalog, observation } = await readAppleSimulatorProvisioningCatalog("watchos", () =>
+    readCatalog(),
+  );
+  return observation.catalogComplete
+    ? {
+        provisioningCatalog: { runtimes: catalog.runtimes, deviceTypes: catalog.deviceTypes },
+        catalogObservation: observation,
+      }
+    : { catalogObservation: observation };
 }
 
 async function listSimulatorPairFields(

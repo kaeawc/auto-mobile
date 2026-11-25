@@ -121,6 +121,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private appleVisionSimulators?: Pick<AppleVisionSimulatorInventory, "listAppleVisionSimulators">;
   private appleTvSimulators?: Pick<AppleTvSimulatorInventory, "listAppleTvSimulators">;
   private watchSimulators?: Pick<WatchSimulatorInventory, "listWatchSimulators">;
+  private watchCatalog?: Pick<WatchSimulatorInventory, "readCatalog">;
   private simulatorPairs?: Pick<SimulatorPairService, "list">;
   private readonly physicalIosDevices: IosPhysicalDeviceLister;
   private readonly lifecycleCoordinator: VirtualDeviceLifecycleCoordinator;
@@ -153,7 +154,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.adb = adb || defaultAdbClientFactory.create(null);
     this.simctl = simctl || new SimCtlClient();
     if (this.simctl instanceof SimCtlClient) {
-      this.watchSimulators = new WatchSimulatorInventory(this.simctl);
+      const watches = new WatchSimulatorInventory(this.simctl);
+      this.watchSimulators = watches;
+      this.watchCatalog = watches;
       this.simulatorPairs = new SimulatorPairService(this.simctl);
       this.appleVisionSimulators = new AppleVisionSimulatorInventory(this.simctl);
       this.appleTvSimulators = new AppleTvSimulatorInventory(this.simctl);
@@ -178,10 +181,25 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     return this;
   }
 
-  /** Booted Apple Watch simulators; read only when a caller asks for watchOS (#14908). */
-  withWatchSimulators(source: Pick<WatchSimulatorInventory, "listWatchSimulators">): this {
+  /** Watch simulators, read only for watchOS (#14908); no `readCatalog` means no watch catalog. */
+  withWatchSimulators(
+    source: Pick<WatchSimulatorInventory, "listWatchSimulators"> &
+      Partial<Pick<WatchSimulatorInventory, "readCatalog">>,
+  ): this {
     this.watchSimulators = source;
+    const readCatalog = source.readCatalog?.bind(source);
+    this.watchCatalog = readCatalog ? { readCatalog } : undefined;
     return this;
+  }
+
+  /** Installed watchOS runtimes and Apple Watch device types (#19186). */
+  async readWatchSimulatorCatalog(
+    signal?: AbortSignal,
+  ): ReturnType<WatchSimulatorInventory["readCatalog"]> {
+    if (!this.watchCatalog) {
+      throw new ActionableError("Apple Watch simulator catalog is unavailable on this host.");
+    }
+    return this.watchCatalog.readCatalog(signal);
   }
 
   /** Watch–iPhone simulator pairs; injectable for unit tests (#17418). */

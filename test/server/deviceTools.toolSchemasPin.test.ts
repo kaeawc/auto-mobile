@@ -8,6 +8,7 @@ import {
   listDevicesSchema,
   teardownDeviceSchema,
 } from "../../src/server/deviceTools";
+import { listDeviceImagesOutputSchema } from "../../src/features/deviceLifecycle/core/toolSchemas";
 
 // Pins the device tool schemas captured before they moved to
 // features/deviceLifecycle/core/toolSchemas (#11827): a drift here changes the wire contract.
@@ -18,7 +19,8 @@ import {
 // when the listDevices output gained watch–iPhone `simulatorPairs` (#17418), and when its
 // Android entries gained the Android Auto `headUnit` (#17840), and when Zod 4.6 began spelling
 // nullable fields as `type` arrays and ordering `default` differently (#16102), and when
-// listDeviceImages gained the watchOS platform (#19186).
+// listDeviceImages gained the watchOS platform (#19186). The listDeviceImages output is pinned
+// since it gained the watchOS provisioningCatalog and catalogObservation (#19186).
 function fingerprint(schema: z.ZodType): string {
   const json = JSON.stringify(z.toJSONSchema(schema, { io: "input", unrepresentable: "any" }));
   return createHash("sha256").update(json).digest("hex").slice(0, 16);
@@ -27,6 +29,7 @@ function fingerprint(schema: z.ZodType): string {
 describe("device tool schemas", () => {
   test.each([
     ["listDeviceImagesSchema", listDeviceImagesSchema, "8eed535a6d9b7bb9"],
+    ["listDeviceImagesOutputSchema", listDeviceImagesOutputSchema, "962dce84175dbe51"],
     ["listDevicesSchema", listDevicesSchema, "5d79d40ab5756996"],
     ["listDevicesOutputSchema", listDevicesOutputSchema, "fc397473d939bc02"],
     ["killDeviceSchema", killDeviceSchema, "b35d2ec6d2e0bf85"],

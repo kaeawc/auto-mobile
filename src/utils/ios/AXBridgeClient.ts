@@ -43,6 +43,9 @@ interface Pending {
 
 export const AX_BRIDGE_DEFAULT_TIMEOUT_MS = 10_000;
 
+const AX_BRIDGE_EXITED_MESSAGE = "AXBridge process exited before replying.";
+const AX_BRIDGE_CLOSED_MESSAGE = "AXBridge client is closed.";
+
 function isWireResponse(value: unknown): value is AXBridgeWireResponse {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -53,7 +56,8 @@ function isWireResponse(value: unknown): value is AXBridgeWireResponse {
 
 export class TransportAXBridgeClient implements AXBridgeClient {
   private readonly pending = new Map<string, Pending>();
-  private closed = false;
+  /** Why new actions are refused: null while open, else the exited or closed message. */
+  private closedReason: string | null = null;
 
   constructor(
     private readonly transport: AXBridgeTransport,
@@ -63,14 +67,14 @@ export class TransportAXBridgeClient implements AXBridgeClient {
   ) {
     transport.onLine((line) => this.handleLine(line));
     transport.onClose(() => {
-      this.closed = true;
-      this.failAll("AXBridge process exited before replying.");
+      this.closedReason ??= AX_BRIDGE_EXITED_MESSAGE;
+      this.failAll(AX_BRIDGE_EXITED_MESSAGE);
     });
   }
 
   invokeAction(request: AXBridgeInvokeActionRequest): Promise<void> {
-    if (this.closed) {
-      return Promise.reject(new ActionableError("AXBridge client is closed."));
+    if (this.closedReason !== null) {
+      return Promise.reject(new ActionableError(this.closedReason));
     }
     const id = this.idGenerator.next();
     return new Promise<void>((resolve, reject) => {
@@ -90,10 +94,10 @@ export class TransportAXBridgeClient implements AXBridgeClient {
   }
 
   close(): void {
-    if (this.closed) {
+    if (this.closedReason !== null) {
       return;
     }
-    this.closed = true;
+    this.closedReason = AX_BRIDGE_CLOSED_MESSAGE;
     this.failAll("AXBridge client closed.");
     this.transport.close();
   }

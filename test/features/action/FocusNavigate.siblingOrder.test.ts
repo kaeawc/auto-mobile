@@ -318,3 +318,34 @@ test("a wrapper holding another control is an ownership barrier", () => {
   ];
   expect(focusLabelSibling(nodes, nodes[1])).toBeUndefined();
 });
+
+test("a labelled wrapper holding its own control cannot claim the next row's control", () => {
+  const nodes = [
+    { index: 0, element: { bounds: { left: 0, top: 0, right: 100, bottom: 100 } } },
+    { index: 1, parentIndex: 0, element: titled("WiFi") },
+    { index: 2, parentIndex: 1, element: { ...control } },
+    { index: 3, parentIndex: 0, element: titled("Bluetooth") },
+    { index: 4, parentIndex: 0, element: { ...control } },
+    { index: 5, parentIndex: 0, element: titled("Airplane") },
+    { index: 6, parentIndex: 0, element: { ...control } },
+  ];
+  expect(focusLabelSibling(nodes, nodes[1])).toBeUndefined();
+});
+
+test("each barrier-delimited segment is measured against its own first row", () => {
+  const nodes = rowNodes(
+    titled("A title"),
+    titled("A summary"),
+    { ...control },
+    { ...control, text: "Back" },
+    titled("WiFi title"),
+    { ...control },
+    titled("WiFi summary"),
+    titled("Bluetooth title"),
+    { ...control },
+    titled("Bluetooth summary"),
+  );
+  for (const index of [5, 7, 8]) {
+    expect(focusLabelSibling(nodes, nodes[index])).toBeUndefined();
+  }
+});

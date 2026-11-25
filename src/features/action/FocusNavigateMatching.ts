@@ -266,13 +266,16 @@ function siblingLayoutTokens(
 
 /**
  * Every barrier-delimited segment must match (L+ C)* L*, and a label run between two controls
- * longer than the first row's leading run is ambiguous (a trailing summary or the next title).
+ * longer than its segment's first leading run is ambiguous (a trailing summary or the next title).
  */
 function isLabelFirstSiblingLayout(tokens: readonly FocusSiblingToken[]): boolean {
   let previous: FocusSiblingToken["kind"] = "barrier";
   let run = 0;
   let firstRun: number | undefined;
   for (const { kind } of tokens) {
+    if (kind === "barrier") {
+      firstRun = undefined;
+    }
     if (kind === "control") {
       if (previous !== "label" || (firstRun !== undefined && run > firstRun)) {
         return false;
@@ -291,10 +294,11 @@ function followingLabelSibling(
   label: FocusSiblingNode,
   candidates: readonly FocusSiblingNode[],
 ): Element | undefined {
-  if (isTruthyFlag(label.element?.focusable)) {
+  const tokens = siblingLayoutTokens(nodes, label, candidates);
+  // A focusable label or a wrapper holding its own control is a barrier, never a row label.
+  if (tokens.find(({ node }) => node.index === label.index)?.kind !== "label") {
     return undefined;
   }
-  const tokens = siblingLayoutTokens(nodes, label, candidates);
   if (!isLabelFirstSiblingLayout(tokens)) {
     return undefined;
   }

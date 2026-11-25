@@ -48,6 +48,7 @@ import { sortedReaddir } from "../utils/io";
 import { matchesXctestrunSelection } from "./IosXctestrunPlatform";
 import { isSourceXctestrunFile, readSourceXctestrun } from "./IosSourceXctestrun";
 import { ENV, readEnvBool, readEnvRaw, readEnvTrimmed } from "../config/env";
+import * as derivedData from "./IosLocalBuildDerivedData";
 
 export {
   IOS_CTRL_PROXY_RUNNER_SHA256_ENV,
@@ -78,6 +79,8 @@ interface CtrlProxyIosBuildConfig {
 
 interface CtrlProxyIosBuilderDependencies {
   downloader?: CtrlProxyIosBundleDownloader;
+  /** Cross-process release-install lock (#19183); defaults to the `O_EXCL` file lock. */
+  derivedDataProcessLock?: derivedData.DirectoryLock;
 }
 
 /** Process-wide collaborators and overrides; see {@link IosCtrlProxyBuilder.configure}. */
@@ -158,6 +161,7 @@ export class IosCtrlProxyBuilder {
 
   private readonly config: CtrlProxyIosBuildConfig;
   private readonly downloader: CtrlProxyIosBundleDownloader;
+  private readonly processLock: derivedData.DirectoryLock;
   private readonly artifactCache: VerifiedArtifactCache;
   private readonly artifactVerifier: IosRunnerArtifactVerifier;
   /**
@@ -220,6 +224,7 @@ export class IosCtrlProxyBuilder {
         getSharedAutoMobileDir(IosCtrlProxyBuilder.DEFAULT_BUNDLE_CACHE_SUBDIR),
     };
     this.downloader = dependencies.downloader ?? new DefaultIOSCtrlProxyBundleDownloader();
+    this.processLock = derivedData.processLock(dependencies, this.config.derivedDataPath);
     // Adapters read `this.downloader` lazily so the cache always uses the injected seam.
     this.artifactCache = new VerifiedArtifactCache({
       downloader: { download: (url, destination) => this.downloader.download(url, destination) },
@@ -259,7 +264,7 @@ export class IosCtrlProxyBuilder {
   ): IosCtrlProxyBuilder {
     const key = JSON.stringify({
       config: config || {},
-      deps: dependencies?.downloader ? "custom" : "default",
+      deps: dependencies?.downloader || dependencies?.derivedDataProcessLock ? "custom" : "default",
     });
     if (!IosCtrlProxyBuilder.instances.has(key)) {
       IosCtrlProxyBuilder.instances.set(key, new IosCtrlProxyBuilder(config, dependencies));
@@ -702,20 +707,25 @@ export class IosCtrlProxyBuilder {
         return { success: true, message: "Using locally built CtrlProxy products" };
       }
 
+      await derivedData.assertNoLocalXcodeBuild(this.config.derivedDataPath);
+      const metadataBefore = await this.artifactVerifier.readBundleMetadata();
       const { bundlePath, usedCachedFallback, localOverridePath } = await perf.track(
         "downloadBundle",
         () => this.ensureBundleDownloaded(),
       );
-      if (!usedCachedFallback) {
-        await perf.track("extractBundle", () => this.extractBundle(bundlePath, localOverridePath));
-      }
-
-      // Clear cached paths to force rediscovery
-      this.cachedBuildProductsPath.clear();
-      this.cachedXctestrunPath.clear();
-      this.artifactVerifier.clearAppBundleHashes();
-
-      await this.cleanStaleXctestrunFiles();
+      const install = () =>
+        perf.track("extractBundle", () => this.extractBundle(bundlePath, localOverridePath));
+      await derivedData.installReleaseExclusively(
+        this.releaseInstallTarget(localOverridePath),
+        metadataBefore,
+        usedCachedFallback ? null : install,
+        async () => {
+          this.cachedBuildProductsPath.clear();
+          this.cachedXctestrunPath.clear();
+          this.artifactVerifier.clearAppBundleHashes();
+          await this.cleanStaleXctestrunFiles();
+        },
+      );
 
       perf.end();
       return {
@@ -733,6 +743,17 @@ export class IosCtrlProxyBuilder {
         error: errorMsg,
       };
     }
+  }
+
+  private releaseInstallTarget(localOverridePath: string | null): derivedData.ReleaseInstallTarget {
+    return {
+      derivedDataPath: this.config.derivedDataPath,
+      lock: this.processLock,
+      expectedChecksum: () =>
+        localOverridePath === null ? this.artifactVerifier.getExpectedChecksum() : "",
+      readMetadata: () => this.artifactVerifier.readBundleMetadata(),
+      findXctestrun: () => this.getXctestrunPath(),
+    };
   }
 
   /**
@@ -785,6 +806,9 @@ export class IosCtrlProxyBuilder {
    */
   public async cleanBuildArtifacts(): Promise<void> {
     await this.runExclusiveOnDerivedData(async () => {
+      if (await derivedData.keepsLocalXcodeBuild(this.config.derivedDataPath)) {
+        return;
+      }
       try {
         await fs.rm(this.config.derivedDataPath, { recursive: true, force: true });
         this.cachedBuildProductsPath.clear();

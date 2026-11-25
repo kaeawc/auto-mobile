@@ -112,11 +112,13 @@ export class SessionBinding {
     if (!mintedSessionUuid) {
       return;
     }
+    // Record the Apple platform first: an acquisition released before it binds is refused with
+    // recovery prose that must name startDevice for watchOS, tvOS and visionOS (#19211).
+    this.rememberApplePlatform(mintedSessionUuid, result);
     if (mintedSessionUuid !== this.deps.state.boundSessionUuid) {
       this.deps.port.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     }
     const platform = getDevicePlatformFromResult(result);
-    this.rememberApplePlatform(mintedSessionUuid, result);
     if (mintedSessionUuid === this.deps.state.boundSessionUuid) {
       if (platform) {
         this.deps.sessionPlatforms.set(mintedSessionUuid, platform);

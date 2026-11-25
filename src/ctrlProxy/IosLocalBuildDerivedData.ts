@@ -4,76 +4,74 @@ import { ActionableError } from "../models/ActionableError";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { type DirectoryLock, FileDirectoryLock } from "../utils/directoryLock";
-
-export type { DirectoryLock };
+import { sortedReaddir } from "../utils/io";
 import type { IOSCtrlProxyBundleMetadata } from "./IosRunnerArtifactVerifier";
 
-/**
- * Entries `xcodebuild -derivedDataPath` always writes and an extracted release bundle never
- * contains: the release archive carries only `Build/Products`, and its extraction empties the
- * directory first. Any one of them means the directory holds a local Xcode build (#19183).
- */
-const LOCAL_XCODE_BUILD_ENTRIES = [
-  path.join("Build", "Intermediates.noindex"),
-  "Logs",
-  "info.plist",
-  "ModuleCache.noindex",
-] as const;
+export type { DirectoryLock };
 
-export type PathProbe = (target: string) => Promise<void>;
+/** Xcode per-configuration intermediates directory for an iOS platform, e.g. `Debug-iphoneos`. */
+const IOS_INTERMEDIATES_DIR = /-(iphonesimulator|iphoneos)$/;
+
+/** Entry names in `dir`, or none when it is missing or unreadable. */
+async function listDir(dir: string): Promise<string[]> {
+  try {
+    return await sortedReaddir(dir);
+  } catch (error) {
+    // A missing directory is the expected case for release-extracted or empty derived data.
+    logger.debug(`[IOSCtrlProxyBuilder] No entries at ${dir}: ${errorMessage(error)}`, error);
+    return [];
+  }
+}
 
 /**
- * The first local-Xcode-build entry found in `derivedDataPath`, or null when the directory is
- * missing or holds only extracted release products.
+ * The first iOS intermediates directory a local `xcodebuild -derivedDataPath` build left in
+ * `derivedDataPath` (`Build/Intermediates.noindex/<Project>.build/<Config>-iphone*`), or null.
+ * A release extraction never has intermediates: the archive carries only `Build/Products`, and
+ * extraction empties the directory first. Builds for other platforms (the tvOS, visionOS and
+ * watchOS source-build fallbacks share this directory) do not count (#19183).
  */
-export async function findLocalXcodeBuildEntry(
-  derivedDataPath: string,
-  probe: PathProbe = (target) => fs.access(target),
-): Promise<string | null> {
-  for (const entry of LOCAL_XCODE_BUILD_ENTRIES) {
-    const candidate = path.join(derivedDataPath, entry);
-    try {
-      await probe(candidate);
-      return candidate;
-    } catch (error) {
-      // A missing entry is the expected case for release-extracted or empty directories.
-      logger.debug(
-        `[IOSCtrlProxyBuilder] No local build entry at ${candidate}: ${errorMessage(error)}`,
-        error,
-      );
+export async function findLocalXcodeBuildEntry(derivedDataPath: string): Promise<string | null> {
+  const intermediates = path.join(derivedDataPath, "Build", "Intermediates.noindex");
+  for (const project of await listDir(intermediates)) {
+    if (!project.endsWith(".build")) {
+      continue;
+    }
+    const projectDir = path.join(intermediates, project);
+    const platformDir = (await listDir(projectDir)).find((entry) =>
+      IOS_INTERMEDIATES_DIR.test(entry),
+    );
+    if (platformDir !== undefined) {
+      return path.join(projectDir, platformDir);
     }
   }
   return null;
 }
 
-/** The refusal raised instead of deleting or replacing a local Xcode build. */
+/** The refusal raised instead of deleting or replacing a local iOS Xcode build. */
 export function localBuildOverwriteRefusal(
   derivedDataPath: string,
   entry: string,
 ): ActionableError {
   return new ActionableError(
     `Refusing to replace ${derivedDataPath} with the release CtrlProxy runner: it holds a local ` +
-      `Xcode build (found ${entry}). Set AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true to use ` +
-      `that build, or point AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA at a separate directory for ` +
-      `the release runner.`,
+      `iOS Xcode build (found ${entry}). Set AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true to ` +
+      `use that build, point AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA at a separate directory for ` +
+      `the release runner, or delete ${derivedDataPath} to reinstall the release runner.`,
   );
 }
 
-/** Whether `derivedDataPath` holds a local Xcode build that must be kept; logs why. */
+/** Whether `derivedDataPath` holds a local iOS Xcode build that must be kept; logs why. */
 export async function keepsLocalXcodeBuild(derivedDataPath: string): Promise<boolean> {
   const entry = await findLocalXcodeBuildEntry(derivedDataPath);
   if (entry !== null) {
-    logger.warn(`[IOSCtrlProxyBuilder] Kept local Xcode build artifacts (${entry})`);
+    logger.warn(`[IOSCtrlProxyBuilder] Kept local iOS Xcode build artifacts (${entry})`);
   }
   return entry !== null;
 }
 
-/** Throws {@link localBuildOverwriteRefusal} when `derivedDataPath` holds a local Xcode build. */
-export async function assertNoLocalXcodeBuild(
-  derivedDataPath: string,
-  probe?: PathProbe,
-): Promise<void> {
-  const entry = await findLocalXcodeBuildEntry(derivedDataPath, probe);
+/** Throws {@link localBuildOverwriteRefusal} when `derivedDataPath` holds a local iOS build. */
+export async function assertNoLocalXcodeBuild(derivedDataPath: string): Promise<void> {
+  const entry = await findLocalXcodeBuildEntry(derivedDataPath);
   if (entry !== null) {
     throw localBuildOverwriteRefusal(derivedDataPath, entry);
   }

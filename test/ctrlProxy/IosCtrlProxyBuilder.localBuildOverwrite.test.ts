@@ -29,10 +29,11 @@ describe("iOS release runner install over a configured derived-data directory", 
   let downloader: FakeIOSCtrlProxyBundleDownloader;
   let lock: FakeDirectoryLock;
 
+  const intermediates = (platformDir: string) =>
+    path.join(derivedDataPath, "Build", "Intermediates.noindex", "CtrlProxy.build", platformDir);
+
   async function writeLocalXcodeBuild(): Promise<void> {
-    await fs.mkdir(path.join(derivedDataPath, "Build", "Intermediates.noindex"), {
-      recursive: true,
-    });
+    await fs.mkdir(intermediates("Debug-iphonesimulator"), { recursive: true });
     await fs.mkdir(path.join(derivedDataPath, "Build", "Products", "Debug-iphonesimulator"), {
       recursive: true,
     });
@@ -99,7 +100,7 @@ describe("iOS release runner install over a configured derived-data directory", 
 
     expect(result.success).toBe(false);
     expect(result.error).toContain("AUTOMOBILE_CTRL_PROXY_IOS_USE_LOCAL_BUILD=true");
-    expect(result.error).toContain(path.join(derivedDataPath, "Build", "Intermediates.noindex"));
+    expect(result.error).toContain(intermediates("Debug-iphonesimulator"));
     expect(downloader.downloadedUrls).toEqual([]);
     expect(downloader.extractedPaths).toEqual([]);
     expect(await fs.readFile(localXctestrun, "utf-8")).toBe("local xctestrun");
@@ -150,6 +151,18 @@ describe("iOS release runner install over a configured derived-data directory", 
     expect(result.success).toBe(true);
     expect(downloader.extractedPaths).toEqual([derivedDataPath]);
     expect(lock.acquired).toEqual([path.dirname(derivedDataPath)]);
+  });
+
+  test("a tvOS source build sharing the directory does not block the iOS release", async () => {
+    // The tvOS/visionOS/watchOS source-build fallbacks build into this same directory.
+    await fs.mkdir(intermediates("Debug-appletvsimulator"), { recursive: true });
+    await fs.mkdir(path.join(derivedDataPath, "Logs"), { recursive: true });
+    await fs.writeFile(path.join(derivedDataPath, "info.plist"), "xcode derived data");
+
+    const result = await builder().build("simulator");
+
+    expect(result.success).toBe(true);
+    expect(downloader.extractedPaths).toEqual([derivedDataPath]);
   });
 
   test("a release another daemon installed while this one waited is reused, not re-extracted", async () => {

@@ -35,6 +35,15 @@ import { type WatchCommand, type WatchRunnerClient } from "./WatchRunnerClient";
 import { WatchRunnerError } from "./WatchRunnerError";
 import { watchRunners } from "./WatchRunnerRegistry";
 import { requireWatchRunner } from "./WatchRunnerRecovery";
+import {
+  WATCH_SCROLL_INTO_VIEW_MAX_STEPS,
+  isFullyOnWatchScreen,
+  isUsefullyOnWatchScreen,
+  isWatchScrollReachable,
+  watchRevealCommand,
+  watchRevealDirection,
+  watchVisibleTapPoint,
+} from "./WatchScrollIntoView";
 
 export function unsupportedWatchAction(action: string): never {
   throw new ActionableError(
@@ -130,12 +139,16 @@ function rejectOptions(options: object, allowed: readonly string[]): void {
   }
 }
 
-async function elements(
+/** A lookFor match counts once enough of it is on screen to tap; tapOn scrolls the rest in. */
+async function findWatchLookFor(
   client: WatchRunnerClient,
+  lookFor: { elementId?: string; text?: string },
   signal?: AbortSignal,
-): Promise<{ all: Element[]; available: Element[] }> {
+): Promise<Element | undefined> {
   const hierarchy = normalizeWatchHierarchy(await client.hierarchy(signal));
-  return watchHierarchyElements(hierarchy);
+  return watchHierarchyElements(hierarchy).all.find(
+    (element) => matches(element, lookFor) && isUsefullyOnWatchScreen(element.bounds, hierarchy),
+  );
 }
 
 /** Only direct taps use hierarchy effects; sendKeys already polls the runner's focus state. */
@@ -268,14 +281,22 @@ function validateWatchTapOn(options: TapOnElementOptions): void {
   }
 }
 
-function resolveWatchTapTarget(
+/**
+ * Matches among elements on screen first, so `index` counts what observe shows and a visible match
+ * wins over a hidden one. Only when none is on screen does it match elements the screen can scroll
+ * to: observe lists a row just past the edge as tappable, so tapOn must be able to reach it (#19184).
+ */
+function resolveWatchTapMatch(
   hierarchy: ViewHierarchyResult,
   options: TapOnElementOptions,
   preferTextInput: boolean,
-): { element: Element; command: WatchCommand } {
-  const { all, available } = watchHierarchyElements(hierarchy);
+): { element: Element; all: Element[] } {
+  const { all } = watchHierarchyElements(hierarchy);
+  const reachable = all.filter((element) => isWatchScrollReachable(element.bounds, hierarchy));
+  const matched = matchWatchTapCandidates(reachable, options);
+  const onScreen = matched.filter((element) => isUsefullyOnWatchScreen(element.bounds, hierarchy));
   const candidates = orderWatchTapCandidates(
-    matchWatchTapCandidates(available, options),
+    onScreen.length > 0 ? onScreen : matched,
     options.text !== undefined && preferTextInput,
   );
   const element = candidates[options.index ?? 0];
@@ -285,7 +306,91 @@ function resolveWatchTapTarget(
     );
   }
   rejectWatchAlertCoveredTap(hierarchy, element);
-  return { element, command: watchTapCommand(element, all) };
+  return { element, all };
+}
+
+interface WatchTapTarget {
+  raw: WatchHierarchy;
+  hierarchy: ViewHierarchyResult;
+  element: Element;
+  all: Element[];
+}
+
+/** Sends one reveal step; false when the crown reports it could not scroll any further. */
+async function revealWatchStep(
+  client: WatchRunnerClient,
+  command: WatchCommand,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  if (command.type !== "crown") {
+    await client.request(command, signal);
+    return true;
+  }
+  try {
+    await client.request(command, signal, { timeoutMs: CROWN_REQUEST_TIMEOUT_MS });
+    return true;
+  } catch (error) {
+    if (error instanceof WatchRunnerError && error.message.startsWith(CROWN_UNCHANGED_PREFIX)) {
+      // An unchanged crown turn means the alert is at its scroll limit, so stop revealing.
+      logger.debug(`Watch crown reveal reached the scroll limit: ${errorMessage(error)}`);
+      return false;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Brings a matched element below or above the fold into view, re-reading after each bounded step
+ * and stopping once it is on screen or stops moving.
+ */
+async function scrollWatchTapTargetIntoView(
+  client: WatchRunnerClient,
+  raw: WatchHierarchy,
+  match: { options: TapOnElementOptions; preferTextInput: boolean },
+  signal?: AbortSignal,
+): Promise<WatchTapTarget> {
+  const { options, preferTextInput } = match;
+  let current = raw;
+  const seen = new Set<string>();
+  for (let step = 0; ; step++) {
+    const hierarchy = normalizeWatchHierarchy(current);
+    const { element, all } = resolveWatchTapMatch(hierarchy, options, preferTextInput);
+    const reveal = watchRevealDirection(element.bounds, hierarchy);
+    const { left, top, right, bottom } = element.bounds;
+    const position = `${left},${top},${right},${bottom}`;
+    const target = { raw: current, hierarchy, element, all };
+    // Any position seen before means the scroll is stuck or oscillating, so stop revealing.
+    if (!reveal || step >= WATCH_SCROLL_INTO_VIEW_MAX_STEPS || seen.has(position)) {
+      return target;
+    }
+    seen.add(position);
+    if (
+      !(await revealWatchStep(
+        client,
+        watchRevealCommand(reveal, hasWatchSystemAlert(current)),
+        signal,
+      ))
+    ) {
+      return target;
+    }
+    current = await client.hierarchy(signal);
+  }
+}
+
+/** A fully visible target taps as usual; a partly visible one taps its on-screen part. */
+function watchTapCommandInView({ hierarchy, element, all }: WatchTapTarget): WatchCommand {
+  if (isFullyOnWatchScreen(element.bounds, hierarchy)) {
+    return watchTapCommand(element, all);
+  }
+  const point = watchVisibleTapPoint(element.bounds, hierarchy);
+  if (!point) {
+    const name = element.text ?? element["resource-id"] ?? "the matched element";
+    throw new ActionableError(
+      `The watch element "${name}" is off-screen and scrolling did not bring it into view; ` +
+        "scroll with swipeOn or rotateCrown, observe, then retry.",
+    );
+  }
+  return { type: "tap", ...point };
 }
 
 function watchTapCommand(element: Element, all: Element[]): WatchCommand {
@@ -348,10 +453,16 @@ export async function watchTapOn(
     return tapSmartStackOn(client, stack, options, signal);
   }
   // A short look has no action buttons yet; wait for the long look that shows them (#18655).
-  const raw = await readSettledWatchHierarchy(() => client.hierarchy(signal), timer, signal);
-  const hierarchy = normalizeWatchHierarchy(raw);
-  const { element, command } = resolveWatchTapTarget(hierarchy, options, preferTextInput);
-  const before = observeEffect ? watchTapBaseline(raw) : undefined;
+  const settled = await readSettledWatchHierarchy(() => client.hierarchy(signal), timer, signal);
+  const target = await scrollWatchTapTargetIntoView(
+    client,
+    settled,
+    { options, preferTextInput },
+    signal,
+  );
+  const { element } = target;
+  const command = watchTapCommandInView(target);
+  const before = observeEffect ? watchTapBaseline(target.raw) : undefined;
   await client.request(command, signal);
   return {
     success: true,
@@ -446,9 +557,7 @@ export async function watchSwipeOn(
   let found: Element | undefined;
   for (;;) {
     if (options.lookFor) {
-      found = (await elements(client, signal)).available.find((element) =>
-        matches(element, options.lookFor!),
-      );
+      found = await findWatchLookFor(client, options.lookFor, signal);
     }
     if (found || count >= maxSwipes) {
       break;

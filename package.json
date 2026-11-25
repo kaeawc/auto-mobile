@@ -164,7 +164,7 @@
     "@jimp/plugin-mask": "1.6.1",
     "@jimp/plugin-print": "1.6.1",
     "@jimp/plugin-quantize": "1.6.1",
-    "@jimp/plugin-resize": "1.6.1",
+    "@jimp/plugin-resize": "1.7.0",
     "@jimp/plugin-rotate": "1.6.1",
     "@jimp/plugin-threshold": "1.6.1",
     "@jimp/types": "1.6.1",

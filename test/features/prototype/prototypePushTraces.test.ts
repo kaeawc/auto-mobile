@@ -8,6 +8,7 @@ import {
 } from "../../../src/features/prototype/prototypeDataWrite";
 import { prototypePlatformDeliveredEventOf } from "../../../src/features/prototype/prototypePlatformEvent";
 import { validatePrototypePushPayload } from "../../../src/features/prototype/prototypePush";
+import { prototypePushDelivery } from "../../../src/features/prototype/prototypePushDelivery";
 import {
   PROTOTYPE_PUSH_DELIVERIES,
   PROTOTYPE_PUSH_EVENT,
@@ -110,13 +111,56 @@ describe("prototype push traces", () => {
       const handled = trace.spec.platform?.on?.[PROTOTYPE_PUSH_EVENT] !== undefined;
       for (const step of trace.steps) {
         expect(step.expect.events).toHaveLength(1);
-        const delivered = prototypePlatformDeliveredEventOf(step.expect.events[0]!);
+        const [expected] = step.expect.events;
+        const delivered = prototypePlatformDeliveredEventOf(expected!);
         const data = delivered?.data as { type: string; delivery: string; handled: boolean };
         expect(delivered?.event).toBe(PROTOTYPE_PUSH_EVENT);
         expect(data.type).toBe((step.push as { type: string }).type);
         expect(PROTOTYPE_PUSH_DELIVERIES).toContain(data.delivery as "foreground");
         expect(data.handled).toBe(handled);
+        // The traces push over the live connection to a foreground prototype.
+        const validation = validatePrototypePushPayload(step.push);
+        expect(validation.success).toBe(true);
+        if (!validation.success) {
+          continue;
+        }
+        const outcome = prototypePushDelivery({
+          handled,
+          payload: validation.payload,
+          appState: "active",
+          route: "connection",
+        });
+        expect(expected).toEqual({
+          kind: "emit",
+          name: "prototype_platform_event",
+          payload: outcome.event,
+        });
       }
     }
+  });
+
+  test("only an unhandled push with a notification asks for an alert", () => {
+    const alerts = all.flatMap((trace) => {
+      const handled = trace.spec.platform?.on?.[PROTOTYPE_PUSH_EVENT] !== undefined;
+      return trace.steps.map((step) => {
+        const validation = validatePrototypePushPayload(step.push);
+        if (!validation.success) {
+          throw new Error(`${trace.name}: invalid push`);
+        }
+        const outcome = prototypePushDelivery({
+          handled,
+          payload: validation.payload,
+          appState: "active",
+          route: "connection",
+        });
+        return { trace: trace.name, alert: outcome.alert };
+      });
+    });
+    expect(alerts).toEqual([
+      { trace: all[0]!.name, alert: undefined },
+      { trace: all[1]!.name, alert: undefined },
+      { trace: all[1]!.name, alert: undefined },
+      { trace: all[2]!.name, alert: { title: "Ada", body: "Hi", channel: "chat" } },
+    ]);
   });
 });

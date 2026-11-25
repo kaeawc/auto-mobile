@@ -319,6 +319,7 @@
 		C67197CEEB3C35A3FE2999D3 /* PrototypeBundleCommit.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF2A5391EDABF87ED430A8F6 /* PrototypeBundleCommit.swift */; };
 		C887BA5F5D42502527A82E97 /* PrototypeShimmerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D3822C802C4B4C2782B39D74 /* PrototypeShimmerView.swift */; };
 		C88CAF9BE224A0A2AFAFA804 /* PrototypeRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DFE5254AE59D16A06947704 /* PrototypeRefresh.swift */; };
+		C8BEEC5DAB2A46CDC5909495 /* PrototypePushDelivery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 731A38C2F3CC5A50ADC1458D /* PrototypePushDelivery.swift */; };
 		C8C7CD68E2802E22F998C990 /* PrototypeShare.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FB612668CAA7B03AC2287E1 /* PrototypeShare.swift */; };
 		C9A1977492B71CC9FE85DA16 /* PlaygroundDatabaseFixture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CF899DC96DC92471BB6FC81 /* PlaygroundDatabaseFixture.swift */; };
 		CA6DDB01CB5AFB754DC48661 /* PrototypeStorageRestore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87A7C6B282AC469C60A877A4 /* PrototypeStorageRestore.swift */; };
@@ -601,6 +602,7 @@
 		70E50DE79CB5C719FCF859D1 /* PrototypeScreenBudget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeScreenBudget.swift; sourceTree = "<group>"; };
 		711319542C26E37B851AE2A9 /* PrototypeMotion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeMotion.swift; sourceTree = "<group>"; };
 		72A152ABD47FA51591E22423 /* PrototypePinnedHttpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePinnedHttpClient.swift; sourceTree = "<group>"; };
+		731A38C2F3CC5A50ADC1458D /* PrototypePushDelivery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePushDelivery.swift; sourceTree = "<group>"; };
 		75EAAC8926115764BD668A33 /* PrototypeKeyframes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypeKeyframes.swift; sourceTree = "<group>"; };
 		76D62C2A235EB2D2A41251D4 /* SdkContractLaunch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkContractLaunch.swift; sourceTree = "<group>"; };
 		76EA67B71B75273AB6F35432 /* PrototypePlatformPermissionsData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrototypePlatformPermissionsData.swift; sourceTree = "<group>"; };
@@ -1235,6 +1237,7 @@
 				FCB1B1FD6C60FB5C62A193FF /* PrototypePlatformValidator.swift */,
 				97F696CBCDA4BA512478B551 /* PrototypePresenterWindow.swift */,
 				A23BF6CBF66ED858A41789DD /* PrototypePurchaseOutcome.swift */,
+				731A38C2F3CC5A50ADC1458D /* PrototypePushDelivery.swift */,
 				AF85AD7CF6E0A07D35C33665 /* PrototypeQueue.swift */,
 				B8F266FB669C94B188E02E76 /* PrototypeRealtimeModule.swift */,
 				DF88C9549715E4B0A280F41F /* PrototypeRecordingMode.swift */,
@@ -1811,6 +1814,7 @@
 				11470AD5FBB205550CEEBA89 /* PrototypePlatformValidator.swift in Sources */,
 				790AECF7FFEB2142B18B415A /* PrototypePresenterWindow.swift in Sources */,
 				AB47B5E3B7EAFB4B6B0CB54A /* PrototypePurchaseOutcome.swift in Sources */,
+				C8BEEC5DAB2A46CDC5909495 /* PrototypePushDelivery.swift in Sources */,
 				22EC8ADE93224ECFFBF88C35 /* PrototypeQueue.swift in Sources */,
 				3ECEDE0267DF08815044CFE5 /* PrototypeRealtimeModule.swift in Sources */,
 				9CCD400F276F71C1E5A91F38 /* PrototypeRecordingMode.swift in Sources */,

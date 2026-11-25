@@ -1,6 +1,7 @@
 import type { PrototypeEvent } from "../observe/android/ctrlProxyProtocol";
 import type { PrototypeJson } from "./prototypeJson";
 import type { PrototypeLocationFix } from "./prototypeLocationOutcome";
+import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
 import { isPrototypePlatformDeliveredEventName } from "./prototypePlatformEvent";
 import { logger } from "../../utils/logger";
 
@@ -89,4 +90,66 @@ export function redactPrototypeLocationEvent<
     );
   }
   return { ...event, payload: { ...payload, data: redacted } };
+}
+
+/** The `/platform` state one `inspect` reports: `{<module>: {<key>: value}}`. */
+export type PrototypeInspectPlatform = Record<string, Record<string, PrototypeJson>>;
+
+/** `/platform/location/current` as `inspect` reports it without `includeLocation`. */
+export type PrototypeRedactedLocationFix = Partial<PrototypeLocationEventSummary> & {
+  redacted: true;
+};
+
+function redactedLocationFix(fix: PrototypeJson): PrototypeRedactedLocationFix | null {
+  return fix === null ? null : { ...redactPrototypeLocationEventData(fix), redacted: true };
+}
+
+/**
+ * The `/platform` state an `inspect` reports (#16463). Only keys in a module's contract `state`
+ * table are kept (the placeholder `test` module has no table and keeps every key). A key the
+ * contract marks `sensitive` never leaves as is: `location.current` becomes its accuracy summary
+ * with `redacted: true` (null stays null) unless `includeLocation`, and any other sensitive key is
+ * omitted. Both runtimes redact before replying and the host applies this again to the reply; the
+ * Swift twin (`PrototypeInspectPlatformRedaction.swift`) replays
+ * `test/fixtures/prototype-location/inspect-redaction.json`.
+ */
+export function redactPrototypeInspectPlatform(
+  platform: PrototypeJson | undefined,
+  options: { includeLocation: boolean },
+): PrototypeInspectPlatform {
+  if (platform === undefined || !isRecord(platform)) {
+    return {};
+  }
+  const redacted: PrototypeInspectPlatform = {};
+  for (const [name, values] of Object.entries(platform)) {
+    const definition = Object.hasOwn(PROTOTYPE_PLATFORM_MODULES, name)
+      ? PROTOTYPE_PLATFORM_MODULES[name]
+      : undefined;
+    if (definition !== undefined && isRecord(values)) {
+      redacted[name] = redactModuleState(name, definition.state, values, options);
+    }
+  }
+  return redacted;
+}
+
+/** One module's reported keys; a module with no state table (the placeholder `test`) keeps all. */
+function redactModuleState(
+  name: string,
+  table: PrototypePlatformModule["state"],
+  values: { [key: string]: PrototypeJson },
+  { includeLocation }: { includeLocation: boolean },
+): Record<string, PrototypeJson> {
+  if (table === undefined) {
+    return { ...values };
+  }
+  const kept: Record<string, PrototypeJson> = {};
+  for (const [key, value] of Object.entries(values)) {
+    const entry = Object.hasOwn(table, key) ? table[key] : undefined;
+    if (name === "location" && key === "current") {
+      kept[key] = includeLocation ? value : redactedLocationFix(value);
+    } else if (entry !== undefined && entry.sensitive !== true) {
+      kept[key] = value;
+    }
+  }
+  return kept;
 }

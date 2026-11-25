@@ -775,7 +775,7 @@ final class PrototypeAgent: NSObject {
             if let id = message["id"] as? String { model.removeAsset(id) }
             result(true)
         case "get_prototype_status":
-            reportStatus(result: result)
+            reportStatus(includeLocation: message["includeLocation"] as? Bool == true, result: result)
         case "inspect_prototypes" where model.mode == .standalone:
             for pending in outbox.drainForInspect() {
                 server?.broadcast(pending)
@@ -819,11 +819,11 @@ final class PrototypeAgent: NSObject {
         result(true)
     }
 
-    private func reportStatus(result: ProtocolResult) {
+    private func reportStatus(includeLocation: Bool, result: ProtocolResult) {
         for pending in outbox.drainForInspect() {
             server?.broadcast(pending)
         }
-        var status = model.status()
+        var status = model.status(includeLocation: includeLocation)
         status["visible"] = viewerHosted || window?.isHidden == false
         let prototypeWindow = viewerHosted ? model.prototypeWindow : window
         let insets = prototypeWindow?.safeAreaInsets

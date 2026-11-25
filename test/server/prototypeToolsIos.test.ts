@@ -272,6 +272,53 @@ describe("prototype tool on an iOS simulator", () => {
       expect(payload.platformRuntime?.modules.notifications?.report).toEqual(report);
     });
 
+    const fix = {
+      latitude: 37.7749,
+      longitude: -122.4194,
+      accuracyM: 12,
+      timestampMs: 1_700_000_000_000,
+      approximate: false,
+    };
+    const platform = {
+      location: { current: fix, servicesEnabled: true },
+      auth: { signedIn: true, userId: "user-42" },
+    };
+
+    test("inspect reports /platform with location accuracy only and no other sensitive key", async () => {
+      agent.queueReplies(agentStatus({ platform }));
+      const { payload } = await call({ action: "inspect" });
+      expect(agent.requests[0].body).toEqual({});
+      expect(payload.prototypes?.[0].platform).toEqual({
+        location: {
+          current: { accuracyM: 12, approximate: false, redacted: true },
+          servicesEnabled: true,
+        },
+        auth: { signedIn: true },
+      });
+      expect(JSON.stringify(payload)).not.toContain("37.7749");
+      expect(JSON.stringify(payload)).not.toContain("user-42");
+    });
+
+    test("inspect includeLocation asks the agent for the fix and reports it only in that answer", async () => {
+      agent.queueReplies(agentStatus({ platform }));
+      const { payload } = await call({ action: "inspect", includeLocation: true });
+      expect(agent.requests[0].body).toEqual({ includeLocation: true });
+      expect(payload.prototypes?.[0].platform?.location).toEqual({
+        current: fix,
+        servicesEnabled: true,
+      });
+      expect(payload.prototypes?.[0].platform?.auth).toEqual({ signedIn: true });
+      const status = await call({ action: "status" });
+      expect(status.payload.prototypes?.[0].platform).toBeUndefined();
+      expect(JSON.stringify(status.payload)).not.toContain("37.7749");
+    });
+
+    test("includeLocation is refused outside inspect", async () => {
+      const { response } = await call({ action: "status", includeLocation: true });
+      expect(toolIsError(response)).toBe(true);
+      expect(agent.requests).toEqual([]);
+    });
+
     test("inspect and status preserve iOS stack paths", async () => {
       const stacks = { nav: { path: ["home", "detail"], depth: 2 } };
       agent.queueReplies(agentStatus({ stacks }));

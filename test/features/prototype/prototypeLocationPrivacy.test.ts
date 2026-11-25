@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { decodePrototypeEvent } from "../../../src/features/observe/android/CtrlProxyPrototypes";
+import type { PrototypeJson } from "../../../src/features/prototype/prototypeJson";
 import type { PrototypeLocationFix } from "../../../src/features/prototype/prototypeLocationOutcome";
 import {
   prototypeLocationEventSummary,
+  redactPrototypeInspectPlatform,
   redactPrototypeLocationEvent,
   redactPrototypeLocationEventData,
 } from "../../../src/features/prototype/prototypeLocationPrivacy";
@@ -21,6 +23,22 @@ const fixture = JSON.parse(
     "utf8",
   ),
 ) as SummaryFixture;
+
+interface InspectRedactionFixture {
+  cases: {
+    name: string;
+    includeLocation: boolean;
+    platform: Record<string, PrototypeJson>;
+    expected: Record<string, unknown>;
+  }[];
+}
+
+const inspectFixture = JSON.parse(
+  readFileSync(
+    path.join(import.meta.dir, "../../fixtures/prototype-location/inspect-redaction.json"),
+    "utf8",
+  ),
+) as InspectRedactionFixture;
 
 const SENSITIVE = ["latitude", "longitude", "altitudeM", "speedMps", "bearingDeg"];
 
@@ -112,5 +130,32 @@ describe("decoded location.updated events", () => {
     expect<unknown>(decodePrototypeEvent(other, "test")?.payload).toEqual(other.payload);
     const plain = { kind: "emit" as const, name: "location.updated", payload: { latitude: 1 } };
     expect(redactPrototypeLocationEvent(plain)).toBe(plain);
+  });
+});
+
+describe("redactPrototypeInspectPlatform shared cases", () => {
+  for (const { name, includeLocation, platform, expected } of inspectFixture.cases) {
+    test(name, () => {
+      expect<unknown>(redactPrototypeInspectPlatform(platform, { includeLocation })).toEqual(
+        expected,
+      );
+    });
+  }
+
+  test("a fix without includeLocation carries no coordinates", () => {
+    const redacted = redactPrototypeInspectPlatform(
+      { location: { current: fullFix } },
+      { includeLocation: false },
+    );
+    expect(Object.keys(redacted.location.current as object)).toEqual([
+      "accuracyM",
+      "approximate",
+      "redacted",
+    ]);
+  });
+
+  test("an absent or non-object platform reports nothing", () => {
+    expect(redactPrototypeInspectPlatform(undefined, { includeLocation: true })).toEqual({});
+    expect(redactPrototypeInspectPlatform([1], { includeLocation: true })).toEqual({});
   });
 });

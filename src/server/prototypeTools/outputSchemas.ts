@@ -498,6 +498,12 @@ export const prototypeOutputSchema = z.object({
           .describe("Last reported stack paths and depths; absent when the device reports none"),
         state: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
         data: dataOutput,
+        platform: z
+          .record(z.string(), z.record(z.string(), z.unknown()))
+          .optional()
+          .describe(
+            "iOS inspect only: the shown prototype's /platform state by module. location.current is {accuracyM, approximate, redacted: true} unless includeLocation: true; other sensitive keys (auth.userId) are omitted. Never in status",
+          ),
         context: prototypeEventOutputSchema.shape.context,
         contextTruncated: prototypeEventOutputSchema.shape.contextTruncated,
         lastKnown: z

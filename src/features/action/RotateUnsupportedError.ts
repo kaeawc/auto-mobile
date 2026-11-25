@@ -9,16 +9,21 @@ import {
   defaultWearOsDetector,
   type WearOsDetector,
 } from "../../utils/android-cmdline-tools/wearOsDevice";
+import {
+  defaultAndroidTvDetector,
+  type AndroidTvDetector,
+} from "../../utils/android-cmdline-tools/androidTvDevice";
 
-/** The rotate options that inject the shared XR and Wear OS predicates (tests pass fakes). */
+/** The rotate options that inject the shared XR, Wear OS and Android TV predicates (tests pass fakes). */
 export interface RotateXrOptions {
   xrDetector?: AndroidXrDetector;
   wearOsDetector?: WearOsDetector;
+  tvDetector?: AndroidTvDetector;
 }
 
 /**
  * `rotate` targeted a fixed-orientation Android display: an Android XR headset or glasses display
- * (#18909) or a Wear OS watch (#18959). Neither honours `user_rotation`, so rotate refuses before
+ * (#18909), a Wear OS watch (#18959) or an Android TV (#19178). None of them is meant to honour `user_rotation`, so rotate refuses before
  * writing any rotation setting instead of waiting out the rotation settle timeout. Typed so callers
  * can tell an unsupported target from a rotation that failed to settle.
  */
@@ -43,8 +48,20 @@ export function wearOsRotateUnsupportedError(deviceId: string): RotateUnsupporte
 }
 
 /**
+ * The refusal for an Android TV; no rotation setting has been written. TV images do apply
+ * `user_rotation`, which turns the landscape-only TV UI into a portrait display that stays rotated.
+ */
+export function androidTvRotateUnsupportedError(deviceId: string): RotateUnsupportedError {
+  return new RotateUnsupportedError(
+    `rotate is not supported on Android TV ${deviceId}: a TV display has a fixed landscape ` +
+      "orientation, so no rotation setting was changed. Use a phone, tablet or foldable device " +
+      "to test orientation changes.",
+  );
+}
+
+/**
  * Throw {@link RotateUnsupportedError} when the shared XR predicate says the device is Android XR,
- * or the Wear OS predicate says it is a watch, before any rotation setting is written or a
+ * the Wear OS predicate says it is a watch, or the Android TV predicate says it is a TV, before any rotation setting is written or a
  * rotation wait starts.
  */
 export async function refuseRotateOnFixedOrientationDevice(
@@ -53,6 +70,7 @@ export async function refuseRotateOnFixedOrientationDevice(
   {
     xrDetector = defaultAndroidXrDetector,
     wearOsDetector = defaultWearOsDetector,
+    tvDetector = defaultAndroidTvDetector,
   }: RotateXrOptions = {},
   signal?: AbortSignal,
 ): Promise<void> {
@@ -65,5 +83,10 @@ export async function refuseRotateOnFixedOrientationDevice(
   signal?.throwIfAborted();
   if (watch) {
     throw wearOsRotateUnsupportedError(device.deviceId);
+  }
+  const tv = await tvDetector.isAndroidTv({ device, adb, signal });
+  signal?.throwIfAborted();
+  if (tv) {
+    throw androidTvRotateUnsupportedError(device.deviceId);
   }
 }

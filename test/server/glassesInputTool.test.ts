@@ -13,9 +13,10 @@ import { DEVICE_TRAITS_TIMEOUT_MS } from "../../src/server/bootedDeviceTraits";
 import type { BootedDevice } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { toolJson } from "../helpers/toolResponse";
+import { ActionableError } from "../../src/models/ActionableError";
 
 const android: BootedDevice = { name: "Glasses", deviceId: "emulator-5554", platform: "android" };
-function setup(glasses: boolean | undefined = true, output = "") {
+function setup(glasses: boolean | "unknown" = true, output = "") {
   const calls: string[] = [];
   const checks: string[] = [];
   const handler = createGlassesInputHandler(
@@ -28,7 +29,7 @@ function setup(glasses: boolean | undefined = true, output = "") {
       }),
     async (device) => {
       checks.push(device.deviceId);
-      return glasses;
+      return glasses === "unknown" ? undefined : glasses;
     },
   );
   return { calls, checks, handler };
@@ -51,29 +52,26 @@ describe("glassesInput tool", () => {
     expect(calls).toHaveLength(1);
     expect(glassesInputResultSchema.safeParse(json).success).toBe(true);
   });
-  for (const glasses of [false, undefined]) {
-    test(`unconfirmed identity ${glasses} warns but sends input`, async () => {
-      // Pass through undefined explicitly; setup's default represents confirmed glasses.
-      const { handler, calls } = setup(false);
-      const actualHandler =
-        glasses === undefined
-          ? createGlassesInputHandler(
-              () =>
-                new AdbGlassesInputInjector({
-                  executeCommand: async (command) => {
-                    calls.push(command);
-                    return createExecResult("", "");
-                  },
-                }),
-              async () => undefined,
-            )
-          : handler;
-      const json = toolJson(
-        await actualHandler(android, { gesture: "tap", count: 20, axis: "horizontal" }),
+  test("unreadable traits warn but send input", async () => {
+    const { handler, calls } = setup("unknown");
+    const json = toolJson(
+      await handler(android, { gesture: "tap", count: 20, axis: "horizontal" }),
+    );
+    expect(json.warningCode).toBe("traits_unavailable");
+    expect(json.success).toBe(true);
+    expect(calls).toHaveLength(20);
+  });
+  for (const formFactor of ["watch", "tv"] as const) {
+    test(`refuses a ${formFactor} confirmed not to be glasses without sending a key (#19179)`, async () => {
+      const { handler, calls, checks } = setup(false);
+      const device: BootedDevice = { ...android, deviceId: "emulator-5558", formFactor };
+      const error = await handler(device, { gesture: "tap" }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(ActionableError);
+      expect((error as Error).message).toContain(
+        "glassesInput only works on Android XR glasses; emulator-5558 is not glasses",
       );
-      expect(json.warningCode).toBe(glasses === false ? "not_glasses" : "traits_unavailable");
-      expect(json.success).toBe(true);
-      expect(calls).toHaveLength(20);
+      expect(checks).toEqual(["emulator-5558"]);
+      expect(calls).toEqual([]);
     });
   }
   test("command rejection marks the tool response as an error", async () => {
@@ -140,6 +138,15 @@ describe("traitsGlassesCheck", () => {
     expect(await check(android)).toBe(true);
     adb.setCommandResult("shell getprop ro.product.device", "sdk_gwear_arm64\n");
     expect(await check(android)).toBe(false);
+  });
+  test("a failed product device read leaves a watch-trait device unknown, not refused", async () => {
+    const adb = new FakeAdbClient();
+    adb.setCommandError("shell getprop ro.product.device", new Error("adb: closed"));
+    const check = traitsGlassesCheck(
+      new FakeDeviceTraits(androidDeviceTraits({ formFactor: "watch" })),
+      new FakeAdbClientFactory(adb),
+    );
+    expect(await check(android)).toBeUndefined();
   });
   test("phones are not glasses and failed traits are unavailable", async () => {
     const traits = new FakeDeviceTraits(androidDeviceTraits());

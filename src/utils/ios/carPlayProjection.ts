@@ -3,6 +3,7 @@ import { ENV, readEnvRaw } from "../../config/env";
 import { ActionableError, toActionableError } from "../../models/ActionableError";
 import { execFileAsync, type ExecFileAsync } from "../HostCommandExecutor";
 import { runExecSeam } from "../ExecSeam";
+import { type CarPlayRuntimeReader, requireCarPlayRuntime } from "./carPlayRuntime";
 import { boundedHelperTimeoutMs, type CarPlayHelperCallOptions } from "./carPlayScreenPower";
 
 export const carPlayProjectionStateSchema = z.discriminatedUnion("found", [
@@ -107,12 +108,23 @@ export function assertCarPlayProjecting(
   );
 }
 
+/** The projection probe and the runtime check every CarPlay action runs first. */
+export interface CarPlayProjectionCheck {
+  probe: CarPlayProjectionProbe;
+  runtime: CarPlayRuntimeReader;
+}
+
+/** Refuses an iOS 27+ simulator, then a CarPlay screen that is not projecting. */
 export async function requireCarPlayProjection(
   udid: string,
-  probe: CarPlayProjectionProbe,
+  deps: CarPlayProjectionCheck,
   options?: { signal?: AbortSignal; skipped?: string },
 ): Promise<CarPlayProjectingState> {
-  const state = await probe.probe(udid, options?.signal ? { signal: options.signal } : undefined);
+  await requireCarPlayRuntime(udid, deps.runtime, options?.signal);
+  const state = await deps.probe.probe(
+    udid,
+    options?.signal ? { signal: options.signal } : undefined,
+  );
   assertCarPlayProjecting(state, options?.skipped);
   return state;
 }

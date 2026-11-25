@@ -1,6 +1,6 @@
 /**
- * Advisory lint for placeholders in fields that do not bind (#15444). A repeat or state
- * placeholder in such a field is drawn literally, and the validator accepts the spec. This reads
+ * Advisory lint for placeholders in fields that do not bind (#15444). A repeat, component prop or
+ * state placeholder in such a field is drawn literally, and the validator accepts the spec. This reads
  * the spec only and never refuses a show; findings name the spec path they apply to.
  */
 
@@ -47,7 +47,12 @@ const STATE_LITERAL_FIELDS = new Set([
 interface Scope {
   /** Repeat aliases of the enclosing containers; `index` is a placeholder only inside one. */
   aliases: readonly string[];
+  /** Inside an expanded component root, where `{props.<field>}` is a placeholder. */
+  props: boolean;
 }
+
+/** Component props bind like a repeat alias named `props`, without `{index}`. */
+const PROPS_ALIAS = "props";
 
 interface Visit {
   node: Record<string, unknown>;
@@ -72,16 +77,22 @@ function placeholderTokens(text: string): { token: string; inner: string }[] {
   return tokens;
 }
 
+const namesField = (inner: string, alias: string): boolean =>
+  inner.startsWith(`${alias}.`) && STATE_KEY.test(inner.slice(alias.length + 1));
+
 function isRepeatPlaceholder(inner: string, scope: Scope): boolean {
   if (scope.aliases.length === 0) {
     return false;
   }
-  if (inner === "index") {
-    return true;
+  return inner === "index" || scope.aliases.some((alias) => namesField(inner, alias));
+}
+
+/** Where the placeholder binds, if the field did: a repeat instance or a component's props. */
+function boundPlaceholderSource(inner: string, scope: Scope): string | undefined {
+  if (isRepeatPlaceholder(inner, scope)) {
+    return "repeat placeholders";
   }
-  return scope.aliases.some(
-    (alias) => inner.startsWith(`${alias}.`) && STATE_KEY.test(inner.slice(alias.length + 1)),
-  );
+  return scope.props && namesField(inner, PROPS_ALIAS) ? "component props" : undefined;
 }
 
 function boundTextPaths(node: Record<string, unknown>, path: string): Set<string> {
@@ -110,12 +121,13 @@ function nodeFindings(visit: Visit, stateKeys: ReadonlySet<string>): PrototypePl
     const fieldPath = `${path}.${field}`;
     const name = `${type}.${field}`;
     return placeholderTokens(value).flatMap(({ token, inner }): PrototypePlaceholderFinding[] => {
-      if (isRepeatPlaceholder(inner, scope) && !bound.has(fieldPath)) {
+      const source = boundPlaceholderSource(inner, scope);
+      if (source !== undefined && !bound.has(fieldPath)) {
         return [
           {
             path: fieldPath,
             placeholder: token,
-            detail: `${name} does not bind repeat placeholders, so ${token} is drawn literally. Use a field that binds (for example a text node) or write the text without it.`,
+            detail: `${name} does not bind ${source}, so ${token} is drawn literally. Use a field that binds (for example a text node) or write the text without it.`,
           },
         ];
       }
@@ -139,11 +151,17 @@ function declaredStateKeys(spec: unknown): Set<string> {
 
 function childScope(node: Record<string, unknown>, scope: Scope): Scope {
   const alias = record(node.repeat)?.as;
-  return typeof alias === "string" ? { aliases: [...scope.aliases, alias] } : scope;
+  return typeof alias === "string" ? { ...scope, aliases: [...scope.aliases, alias] } : scope;
 }
 
-/** Every finding for a spec, in tree order, and how many there were before the output cap. */
-export function lintPrototypePlaceholders(spec: unknown): {
+/**
+ * Every finding for a spec, in tree order, and how many there were before the output cap.
+ * `inComponent` says whether an (expanded) node path lies inside an expanded component root.
+ */
+export function lintPrototypePlaceholders(
+  spec: unknown,
+  inComponent: (path: string) => boolean = () => false,
+): {
   findings: PrototypePlaceholderFinding[];
   total: number;
 } {
@@ -152,11 +170,15 @@ export function lintPrototypePlaceholders(spec: unknown): {
   const pending: Visit[] = prototypeSpecNodeRoots(spec)
     .flatMap(({ node, path }) => {
       const object = record(node);
-      return object ? [{ node: object, path, scope: { aliases: [] } }] : [];
+      return object ? [{ node: object, path, scope: { aliases: [], props: false } }] : [];
     })
     .reverse();
   while (pending.length > 0) {
-    const visit = pending.pop()!;
+    const popped = pending.pop()!;
+    const visit =
+      popped.scope.props || !inComponent(popped.path)
+        ? popped
+        : { ...popped, scope: { ...popped.scope, props: true } };
     findings.push(...nodeFindings(visit, stateKeys));
     const scope = childScope(visit.node, visit.scope);
     const children = prototypeNodeChildren(visit.node);
@@ -176,7 +198,8 @@ export function lintPrototypePlaceholders(spec: unknown): {
 /**
  * The tool-output fields for a spec's lint: both absent when there is nothing to report. Like the
  * accessibility lint, a spec with `use` nodes is linted after component expansion and reported at
- * the authored path.
+ * the authored path. Expansion keeps every path outside a component, so a path `locate` moves lies
+ * inside one, where a `{props.<field>}` left in a field that does not bind is drawn literally.
  */
 export function prototypePlaceholderOutput(spec: unknown): {
   placeholderFindings?: PrototypePlaceholderFinding[];
@@ -185,7 +208,7 @@ export function prototypePlaceholderOutput(spec: unknown): {
   const expansion = expandPrototypeComponents(spec);
   const linted = expansion.success ? expansion.spec : spec;
   const locate = expansion.success ? expansion.locate : (path: string) => path;
-  const { findings, total } = lintPrototypePlaceholders(linted);
+  const { findings, total } = lintPrototypePlaceholders(linted, (path) => locate(path) !== path);
   if (findings.length === 0) {
     return {};
   }

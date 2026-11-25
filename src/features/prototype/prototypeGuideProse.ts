@@ -827,7 +827,8 @@ every limit counts the expanded tree.
 
 - A \`use\` node has only \`type\`, \`component\` and \`props\`; props are scalars (string, number,
   boolean). \`{props.<field>}\` binds in the same fields as repeat placeholders, state keys included,
-  and a string that is exactly one placeholder keeps the prop's type.
+  and a string that is exactly one placeholder keeps the prop's type. A \`{props.<field>}\` in any
+  other field is drawn literally and listed in the show or patch result's \`placeholderFindings\`.
 - A component may contain \`repeat\` and other \`use\` nodes. A \`use\` inside a repeat template may
   pass item placeholders as props (\`"likeKey": "liked_{item.id}"\`); the repeat binds them later.
 - Rejected: an unknown component, a missing or unused prop, a non-scalar prop, a cycle (including

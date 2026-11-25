@@ -1,6 +1,11 @@
 import { version } from "../../../../../package.json";
 import { PROTOTYPE_EMBED_FORMAT, PROTOTYPE_EMBED_VERSION } from "../prototypeEmbedFormat";
 import { PROTOTYPE_WEB_CAPABILITIES } from "./prototypeWebCapabilities.generated";
+import { prototypeWebBareSpecRequires } from "./prototypeWebBareSpec";
+import {
+  PROTOTYPE_LARGE_BUDGET_CAPABILITY,
+  PROTOTYPE_REMOTE_IMAGE_CAPABILITY,
+} from "../../../observe/android/ctrlProxyProtocol";
 
 /** The web library's version, in lockstep with `@kaeawc/auto-mobile` (#16453). */
 export const PROTOTYPE_WEB_LIBRARY_VERSION: string = version;
@@ -8,7 +13,8 @@ export const PROTOTYPE_WEB_LIBRARY_VERSION: string = version;
 /**
  * Why the library drew an error view instead of the prototype:
  * - `unknownVersion`: an embed envelope version this release does not know;
- * - `missingCapabilities`: the envelope `requires` a capability this release cannot draw;
+ * - `missingCapabilities`: the envelope `requires`, or a bare spec needs, a capability this release
+ *   cannot draw;
  * - `invalidInput`: the spec or envelope is not an object of the expected shape;
  * - `invalidOption`: an option the renderer refuses (an unknown frame, orientation or locale).
  */
@@ -63,6 +69,41 @@ function glyphTable(value: unknown): Readonly<Record<string, string>> | undefine
   return value as Readonly<Record<string, string>>;
 }
 
+function missingFrom(requires: readonly string[], advertised: ReadonlySet<string>): string[] {
+  return [...new Set(requires.filter((name) => !advertised.has(name)))].sort();
+}
+
+/** What to change for each capability no release of the library draws. */
+const UNDRAWABLE_HINTS: Readonly<Record<string, string>> = {
+  [PROTOTYPE_REMOTE_IMAGE_CAPABILITY]:
+    "Replace remote images (url, placeholder, error, crossfade, via) with bundled assets.",
+  [PROTOTYPE_LARGE_BUDGET_CAPABILITY]: "Keep the spec and its data within the base runtime budget.",
+};
+
+/** A bare spec is refused like an envelope whose `requires` it would carry (#16453). */
+function readBareSpec(
+  spec: Readonly<Record<string, unknown>>,
+  advertised: ReadonlySet<string>,
+): PrototypeWebSpecInput {
+  const missing = missingFrom(prototypeWebBareSpecRequires(spec), advertised);
+  if (missing.length > 0) {
+    const hints = missing.map((name) => UNDRAWABLE_HINTS[name]).filter(Boolean);
+    const update = missing.some((name) => UNDRAWABLE_HINTS[name] === undefined)
+      ? ["Update the library."]
+      : [];
+    throw new PrototypeWebRefusal(
+      "missingCapabilities",
+      [
+        `prototype-web ${PROTOTYPE_WEB_LIBRARY_VERSION} cannot draw this spec: it needs ${missing.join(", ")}.`,
+        ...hints,
+        ...update,
+      ].join(" "),
+      missing,
+    );
+  }
+  return { spec };
+}
+
 function readEnvelope(
   envelope: Readonly<Record<string, unknown>>,
   advertised: ReadonlySet<string>,
@@ -80,7 +121,7 @@ function readEnvelope(
       "An embed envelope needs a string array `requires` and an object `spec`.",
     );
   }
-  const missing = [...new Set(requires.filter((name) => !advertised.has(name)))].sort();
+  const missing = missingFrom(requires, advertised);
   if (missing.length > 0) {
     throw new PrototypeWebRefusal(
       "missingCapabilities",
@@ -94,7 +135,8 @@ function readEnvelope(
 
 /**
  * Reads the `spec` option: an embed envelope is checked against the capabilities this release
- * draws and refused whole when it needs more; anything else is drawn as a bare spec.
+ * draws and refused whole when it needs more; anything else is a bare spec, refused the same way
+ * for the capabilities it needs.
  */
 export function readPrototypeWebInput(
   value: unknown,
@@ -108,5 +150,5 @@ export function readPrototypeWebInput(
   }
   return value.format === PROTOTYPE_EMBED_FORMAT
     ? readEnvelope(value, advertised)
-    : { spec: value };
+    : readBareSpec(value, advertised);
 }

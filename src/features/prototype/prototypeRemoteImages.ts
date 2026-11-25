@@ -1,7 +1,6 @@
 import contract from "../../../schemas/prototype-spec-contract.json";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import { prototypeRequestUrlError } from "./prototypeRequest";
-import { walkPrototypeNodes } from "./prototypeNodeChildren";
 import { STATE_KEY, record, type Raw } from "./prototypeTemplate";
 import { dataPlaceholderSpans, prototypeBindingSpans } from "./prototypeData";
 
@@ -17,27 +16,6 @@ export const MAX_PROTOTYPE_REMOTE_IMAGE_IOS_MEMORY_BYTES =
 export const MAX_PROTOTYPE_REMOTE_IMAGE_DISK_BYTES =
   contract.limits.MAX_PROTOTYPE_REMOTE_IMAGE_DISK_BYTES;
 export const MAX_PROTOTYPE_REMOTE_IMAGE_LOADS = contract.limits.MAX_PROTOTYPE_REMOTE_IMAGE_LOADS;
-const FIELDS = ["url", "placeholder", "error", "crossfade", "via"];
-
-export function prototypeRemoteImageFields(spec: unknown): string[] {
-  const fields: string[] = [];
-  walkPrototypeNodes(spec, (node, path) => {
-    const accessory = record(record(node.ios)?.bottomAccessory);
-    if (accessory) {
-      fields.push(
-        ...prototypeRemoteImageFields({ root: accessory }).map(
-          (field) => `${path}.ios.bottomAccessory${field.slice(4)}`,
-        ),
-      );
-    }
-    if (node.type === "image") {
-      fields.push(
-        ...FIELDS.filter((field) => node[field] !== undefined).map((field) => `${path}.${field}`),
-      );
-    }
-  });
-  return fields;
-}
 
 /** Contract only. Loopback HTTP is reserved for development fixtures; loaders must enforce flavor. */
 export function prototypeRemoteImageError(

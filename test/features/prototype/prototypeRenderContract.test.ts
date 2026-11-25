@@ -32,4 +32,20 @@ describe("generated prototype render contract (#16451)", () => {
       "Contract repeat.items: no array option with a max",
     );
   });
+
+  test("refuses a contract without the large runtime budget (#16453)", () => {
+    expect(() => renderPrototypeRenderContract({ ...contract, runtimeBudgets: {} })).toThrow(
+      "Contract runtimeBudgets.prototype_large_budget_v1: no limits",
+    );
+  });
+
+  test("names each raised limit at its base contract value (#16453)", () => {
+    const rendered = renderPrototypeRenderContract(contract);
+    for (const [name, value] of Object.entries(contract.runtimeBudgets.prototype_large_budget_v1)) {
+      expect(rendered).toContain(`  ${name}: ${value},`);
+      expect(rendered).toContain(
+        `  ${name}: ${contract.limits[name as keyof typeof contract.limits]},`,
+      );
+    }
+  });
 });

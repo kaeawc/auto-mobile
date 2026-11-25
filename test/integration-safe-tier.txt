@@ -204,6 +204,7 @@ test/features/prototype/PrototypeHttpExecutor.integration.test.ts | safe | Bun.s
 test/features/prototype/disposableApp/android/androidDisposableAppStamper.integration.test.ts | unsafe | invokes real Android SDK tools and keytool with an env-provided template
 test/features/prototype/preview/PrototypePreviewServer.integration.test.ts | safe | node:http preview server on 127.0.0.1 port 0 with in-memory spec revisions; loopback only, no writes
 test/features/prototype/prototypeBundleFuzz.integration.test.ts | safe | seeded pure-function fuzz of the bundle reader over in-memory buffers; no I/O, ports or shared paths
+test/features/prototype/web/embed/prototypeWebBareSpec.integration.test.ts | safe | reads committed spec fixtures and compares two pure functions in process; no writes, ports or shared paths
 test/features/prototype/web/prototypeEmbedGlyphsCoverage.integration.test.ts | safe | renders read-only repo fixtures in process with a recording fake glyph source; no writes, ports or shared paths
 test/features/prototype/web/webAndroidParity.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes parity budgets or scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1
 test/features/prototype/web/webDevice3dFold.integration.test.ts | unsafe | launches headless Chromium via playwright-core and writes scratch/ screenshots; opt-in via AUTOMOBILE_PROTOTYPE_WEB_SCREENSHOTS=1

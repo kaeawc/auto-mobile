@@ -4,6 +4,7 @@
 export const prototypeRenderLimits = {
   MAX_PROTOTYPE_DATA_ARRAY_ITEMS: 2000,
   MAX_PROTOTYPE_DATA_POINTER_LENGTH: 256,
+  MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH: 24,
   MAX_PROTOTYPE_LIST_ITEMS: 2000,
   MAX_PROTOTYPE_INNER_REPEAT_ITEMS: 100,
   MAX_PROTOTYPE_NODES: 2000,
@@ -16,6 +17,24 @@ export const prototypeRenderLimits = {
 
 /** The largest literal `repeat.items` array. */
 export const PROTOTYPE_REPEAT_ITEMS_MAX = 128;
+
+/** The limits `prototype_large_budget_v1` raises, at their base values. */
+export const prototypeBaseRuntimeBudget = {
+  MAX_PROTOTYPE_SPEC_BYTES: 1048576,
+  MAX_PROTOTYPE_DATA_BYTES: 786432,
+  MAX_PROTOTYPE_DATA_WRITE_BYTES: 786432,
+  MAX_PROTOTYPE_DATA_ARRAY_ITEMS: 2000,
+  MAX_PROTOTYPE_LIST_ITEMS: 2000,
+} as const;
+
+/** The same limits as raised by `prototype_large_budget_v1`. */
+export const prototypeLargeRuntimeBudget = {
+  MAX_PROTOTYPE_SPEC_BYTES: 4194304,
+  MAX_PROTOTYPE_DATA_BYTES: 3145728,
+  MAX_PROTOTYPE_DATA_WRITE_BYTES: 3145728,
+  MAX_PROTOTYPE_DATA_ARRAY_ITEMS: 10000,
+  MAX_PROTOTYPE_LIST_ITEMS: 10000,
+} as const;
 
 /** The `/device/widthClass` medium and expanded breakpoints, in dp. */
 export const PROTOTYPE_WIDTH_CLASS_BREAKPOINTS = [600, 840] as const;

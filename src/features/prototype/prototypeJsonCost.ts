@@ -1,14 +1,29 @@
-import contract from "../../../schemas/prototype-spec-contract.json";
-import { object } from "./prototypeBindingValidation";
+import { prototypeRenderLimits } from "./prototypeRenderContract.generated";
+
+// Zod-free, with no Node globals, so the web library's bare-spec budget check runs in the browser
+// (#16453).
+
+const utf8 = new TextEncoder();
 
 function bytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value), "utf8");
+  return utf8.encode(JSON.stringify(value)).byteLength;
+}
+
+/** A plain object, as `object` in prototypeBindingValidation.ts reads one. */
+function object(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 // Reserve 32 bytes per finite number so lexical exponent/decimal spellings cannot
 // change payload acceptance between JavaScript and JVM JSON decoders.
 export function jsonCost(value: unknown, depth = 0): number {
-  if (depth > contract.limits.MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH) {
+  if (depth > prototypeRenderLimits.MAX_PROTOTYPE_EMIT_PAYLOAD_DEPTH) {
     return Infinity;
   }
   if (value === null) {

@@ -486,6 +486,68 @@ describe("two-stage swipe budgets", () => {
     expect(timer.now()).toBe(5000);
   });
 
+  // #19167: a swipe that reports success is checked against the lock state before success.
+  async function unlockWithReads(reads: Array<boolean | undefined>) {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const actions = new FakeIosActions();
+    const phases: Array<string | undefined> = [];
+    const result = await new IosLockScreenUnlocker(device, actions, timer).wakeAndDismiss({
+      remainingMs: () => 20_000 - timer.now(),
+      readUnlocked: async (options) => {
+        actions.calls.push("read");
+        phases.push(options?.phase);
+        return reads.shift();
+      },
+    });
+    return { result, calls: actions.calls, phases };
+  }
+
+  test("a fast swipe the lock state confirms needs no fallback or second wake", async () => {
+    const { result, calls } = await unlockWithReads([false, true]);
+    expect(calls).toEqual(["home", "read", "swipe", "read"]);
+    expect(result).toEqual({ success: true, error: undefined });
+  });
+
+  test("a fallback swipe the lock state confirms reports the fallback warning", async () => {
+    const { result, calls, phases } = await unlockWithReads([false, false, true]);
+    expect(calls).toEqual(["home", "read", "swipe", "read", "swipe", "read"]);
+    expect(phases).toEqual(["afterWake", "afterSwipe", "afterSwipe"]);
+    expect(result).toEqual({
+      success: true,
+      error: undefined,
+      warning: "unlocked by the fallback swipe after the fast swipe had no effect",
+    });
+  });
+
+  test("a fallback swipe that leaves the device locked wakes once more, then succeeds", async () => {
+    const { result, calls, phases } = await unlockWithReads([false, false, false, true]);
+    expect(calls).toEqual(["home", "read", "swipe", "read", "swipe", "read", "home", "read"]);
+    expect(phases.at(-1)).toBe("afterWake");
+    expect(result).toEqual({
+      success: true,
+      warning: "unlocked by a second wake after the lock-screen swipe had no effect",
+    });
+  });
+
+  test("a lock screen still showing after the fallback swipe and second wake is a failure", async () => {
+    const { result, calls } = await unlockWithReads([false, false, false, false]);
+    expect(calls).toEqual(["home", "read", "swipe", "read", "swipe", "read", "home", "read"]);
+    expect(result).toEqual({
+      success: false,
+      stillLocked: true,
+      error:
+        "the lock-screen swipe reported success but did not dismiss the lock screen, and a second wake did not either",
+    });
+  });
+
+  test("an unknown lock state after the fallback swipe defers to the caller's probe", async () => {
+    const { result, calls } = await unlockWithReads([false, false, undefined]);
+    expect(calls).toEqual(["home", "read", "swipe", "read", "swipe", "read"]);
+    expect(result).toMatchObject({ success: true });
+    expect(result).not.toHaveProperty("stillLocked");
+  });
+
   test("default swipe factory omits the lock-screen flag on legacy fallback", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();

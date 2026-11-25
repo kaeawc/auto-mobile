@@ -83,7 +83,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
   async wakeAndDismiss(
     options: IosUnlockOptions | (() => number) = () => Infinity,
     legacySignal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string; warning?: string }> {
+  ): Promise<{ success: boolean; error?: string; warning?: string; stillLocked?: true }> {
     const { remainingMs, signal, readUnlocked } =
       typeof options === "function"
         ? { remainingMs: options, signal: legacySignal, readUnlocked: undefined }
@@ -118,7 +118,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
     swipeBudget,
   }: IosUnlockOptions & {
     swipeBudget: number;
-  }): Promise<{ success: boolean; error?: string; warning?: string }> {
+  }): Promise<{ success: boolean; error?: string; warning?: string; stillLocked?: true }> {
     const swipeDeadline = this.timer.now() + swipeBudget;
     const fast = await this.swipe({
       timeoutMs: readUnlocked ? swipeBudget / 2 : swipeBudget,
@@ -141,14 +141,71 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       logger.info(
         "[IosLockScreenUnlocker] fast swipe left lock state locked or unknown; budget exhausted",
       );
-      return fast;
+      return unlocked === false && fast.success
+        ? this.rewakeAfterIneffectiveSwipe({ remainingMs, signal, readUnlocked }, fast)
+        : fast;
     }
     const fallback = await this.swipe({ timeoutMs: fallbackBudget, signal });
-    // Confirmation/polling stays with WakeAndUnlock's existing bounded probe path.
     logger.info(`[IosLockScreenUnlocker] fallback swipe finished: ${fallback.error ?? "success"}`);
+    if (!fallback.success) {
+      // WakeAndUnlock's bounded probe decides a failed swipe: it may still have landed.
+      return fallback;
+    }
+    const afterFallback = await awaitWhileRequestIsLive(
+      readUnlocked({ phase: "afterSwipe" }),
+      signal,
+    );
+    if (afterFallback === false) {
+      return this.rewakeAfterIneffectiveSwipe({ remainingMs, signal, readUnlocked }, fallback);
+    }
+    // Unlocked, or unknown: WakeAndUnlock's bounded probe confirms the final state.
     return {
       ...fallback,
       warning: "unlocked by the fallback swipe after the fast swipe had no effect",
+    };
+  }
+
+  /**
+   * A swipe reported success but the lock state still reads locked (#19167): the swipe landed on
+   * the lock screen without dismissing it. Retry once with a second wake, then report failure.
+   */
+  private async rewakeAfterIneffectiveSwipe(
+    {
+      remainingMs,
+      signal,
+      readUnlocked,
+    }: IosUnlockOptions & {
+      readUnlocked: NonNullable<IosUnlockOptions["readUnlocked"]>;
+    },
+    swipe: { success: boolean; error?: string; warning?: string },
+  ): Promise<{ success: boolean; error?: string; warning?: string; stillLocked?: true }> {
+    logger.warn(
+      "[IosLockScreenUnlocker] swipe reported success but the device is still locked; waking again",
+    );
+    if (remainingMs() > 0) {
+      await this.pressHomeBestEffort(remainingMs, signal);
+      throwIfAborted(signal);
+      const remaining = remainingMs();
+      if (remaining > 0) {
+        const unlocked = await this.readUnlockedAfterWake({
+          readUnlocked,
+          swipeBudget: Math.min(5_000, remaining),
+          signal,
+        });
+        if (unlocked === true) {
+          logger.info("[IosLockScreenUnlocker] second wake unlocked the device");
+          return {
+            success: true,
+            warning: `unlocked by a second wake after the lock-screen swipe had no effect${swipe.warning ? ` (${swipe.warning})` : ""}`,
+          };
+        }
+      }
+    }
+    return {
+      success: false,
+      stillLocked: true,
+      error:
+        "the lock-screen swipe reported success but did not dismiss the lock screen, and a second wake did not either",
     };
   }
 

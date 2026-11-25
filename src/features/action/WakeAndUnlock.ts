@@ -45,7 +45,13 @@ export interface IosScreenUnlocker {
   wakeAndDismiss(
     options?: IosUnlockOptions | (() => number),
     signal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string; warning?: string }>;
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    warning?: string;
+    /** The swipe was applied and the lock state read locked afterwards: no gesture is pending. */
+    stillLocked?: true;
+  }>;
 }
 
 /** The same runner recovery operations used by iOS observe. */
@@ -240,7 +246,7 @@ export class WakeAndUnlock {
     deadline,
     signal,
   }: {
-    result: { success: boolean; error?: string; warning?: string };
+    result: { success: boolean; error?: string; warning?: string; stillLocked?: true };
     stageLock?: DeviceLockState;
     deadline: number;
     signal?: AbortSignal;
@@ -261,6 +267,7 @@ export class WakeAndUnlock {
         : await this.confirmIosSimulatorUnlocked({
             deadline,
             swipeFailure,
+            stillLocked: result.stillLocked === true,
             signal,
             lastLock: result.warning ? undefined : stageLock,
           });
@@ -321,11 +328,14 @@ export class WakeAndUnlock {
   private async confirmIosSimulatorUnlocked({
     deadline,
     swipeFailure,
+    stillLocked = false,
     signal,
     lastLock,
   }: {
     deadline: number;
     swipeFailure: string | undefined;
+    /** No gesture is in flight, so only the short settle window applies. */
+    stillLocked?: boolean;
     signal?: AbortSignal;
     lastLock?: DeviceLockState;
   }): Promise<WakeAndUnlockResult> {
@@ -333,7 +343,7 @@ export class WakeAndUnlock {
     const finalLock =
       (await this.pollIosUnlocked(
         deadline,
-        swipeFailure === undefined ? IOS_UNLOCK_POLL_MAX_MS : Infinity,
+        swipeFailure === undefined || stillLocked ? IOS_UNLOCK_POLL_MAX_MS : Infinity,
         signal,
       )) ?? lastLock;
     if (!finalLock) {
@@ -343,9 +353,11 @@ export class WakeAndUnlock {
     }
     if (finalLock.locked) {
       throw new ActionableError(
-        swipeFailure
-          ? `wakeAndUnlock: iOS lock screen is still locked after the swipe failed (${swipeFailure}); re-observe the device`
-          : "wakeAndUnlock: iOS swipe reported success but the device is still locked; re-observe the device",
+        stillLocked
+          ? `wakeAndUnlock: iOS lock screen is still showing (${swipeFailure}); re-observe the device and call wakeAndUnlock again`
+          : swipeFailure
+            ? `wakeAndUnlock: iOS lock screen is still locked after the swipe failed (${swipeFailure}); re-observe the device`
+            : "wakeAndUnlock: iOS swipe reported success but the device is still locked; re-observe the device",
       );
     }
     if (swipeFailure) {
@@ -354,7 +366,9 @@ export class WakeAndUnlock {
       );
       return {
         ...this.iosResult(true, true),
-        warning: `the lock-screen swipe did not complete (${swipeFailure}); the device is unlocked`,
+        warning: stillLocked
+          ? "the lock screen dismissed late, after a second wake; the device is unlocked"
+          : `the lock-screen swipe did not complete (${swipeFailure}); the device is unlocked`,
       };
     }
     return this.iosResult(true, true);

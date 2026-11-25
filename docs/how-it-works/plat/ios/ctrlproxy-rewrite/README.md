@@ -124,6 +124,8 @@ For swipes, both bound and final log lines additionally report
 The cached tracker is not an app-state query; XCUITest activity lines are not forwarded.
 A failed unlock swipe followed by a confirmed unlocked lock state returns success
 with a warning containing the swipe error.
+A swipe that reports success while the lock state still reads locked gets one more
+Home press; if the device is still locked after it, `wakeAndUnlock` fails.
 
 ## Opt-in tap diagnostics
 

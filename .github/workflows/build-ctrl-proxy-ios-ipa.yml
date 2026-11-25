@@ -1,6 +1,9 @@
 name: "Build CtrlProxy iOS IPA"
 
 on:
+  # TEMPORARY: verification run for #19236, never merged.
+  push:
+    branches: [verify/19236-ipa-bun]
   workflow_call:
     inputs:
       checkout-ref:

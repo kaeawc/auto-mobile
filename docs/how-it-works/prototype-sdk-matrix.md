@@ -36,6 +36,31 @@ Image facts that affect setup:
   `InAppBillingService.BIND`. Neither has a signed-in account, a Wallet package or NFC/HCE.
 - `google_apis` is a userdebug build that allows `adb root`; the Play Store image is a user build.
 
+## Vendor prerequisites
+
+What each vendor's documentation says an SDK needs at run time. "Not stated" means the vendor
+documents no emulator or Simulator support either way. The quotes and sources are in
+[SDK vendor prerequisites](../devlog/2026-11-25-prototype-sdk-vendor-prerequisites.md); the runs
+that would turn a cell `verified` are tracked in #19267.
+
+| SDK                        | Needs                                                                                            | Emulator or Simulator                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------------------------------------- |
+| Google Maps SDK            | GMS; an API key from a billing-enabled Cloud project                                             | Google APIs image, Android 6.0 or later                   |
+| MapLibre Native            | No key for the public demo style; no GMS mentioned                                               | Not stated                                                |
+| Play Billing               | Current Play Store app; package matching a Play app; a license-tester account                    | Not stated; the test page names hardware only             |
+| Google Pay TEST            | `play-services-wallet` 20.0.0, minSdk 23, GMS 8.4+; vendor pages disagree on needing a card      | Codelab: emulator with current GMS                        |
+| Credential Manager         | Passkeys on API 28+ with a screen lock; `credentials-play-services-auth` on Android 13 and lower | Not stated                                                |
+| Custom Tabs                | A browser that supports Custom Tabs; otherwise the default browser opens                         | Not stated                                                |
+| ML Kit                     | Unbundled models need GMS; bundled models are linked into the app                                | Not stated                                                |
+| Glance, TileService        | Glance minSdk 23 and Compose; `TileService` API 24, add-tile prompt API 33                       | Not stated                                                |
+| MapKit                     | No key; routing directions need the paid developer program                                       | Not stated                                                |
+| Apple Pay                  | Merchant ID and the Apple Pay capability (paid program)                                          | Simulator needs no card; the sandbox is device-only       |
+| StoreKit Testing           | A `.storekit` file; In-App Purchase capability (paid program)                                    | Supported; `SKTestSession` fixed on Simulator in iOS 26.6 |
+| Sign in with Apple         | Entitlement (paid program); an Apple Account with two-factor authentication                      | Staff report an iOS 18 Simulator regression               |
+| Vision                     | Some requests need the Neural Engine                                                             | Staff: no Neural Engine on Simulator                      |
+| WidgetKit                  | A widget extension target                                                                        | Not stated                                                |
+| ASWebAuthenticationSession | iOS 12+; HTTPS callbacks need iOS 17.4 and an associated domain                                  | Not stated                                                |
+
 ## Provisioning
 
 `ANDROID_TAG_PREFERENCE` in `src/devices/deviceProvisioning.ts` ranks
@@ -85,3 +110,4 @@ for the node that carries `backend`.
 ## Background
 
 - [SDK prerequisite captures](../devlog/2026-10-31-prototype-sdk-matrix-prerequisite-captures.md)
+- [SDK vendor prerequisites](../devlog/2026-11-25-prototype-sdk-vendor-prerequisites.md)

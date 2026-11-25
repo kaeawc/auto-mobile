@@ -24,7 +24,7 @@ also reads. The Play pipeline uploads it with `supply` ([ProtoViewer](protoviewe
 and the same rules validate any other locale directory. Neither store has a repository-hosted source of truth
 today: the stores keep whatever was last uploaded, and this tree is what gets uploaded.
 
-The text is provisional until the owner decision in #14143 (policy positioning, review notes) lands.
+The text is provisional until the owner decisions in #19268 (policy positioning, review notes) land.
 The name is ProtoViewer on both stores, and the privacy and support URLs are docs-site pages
 (`docs/protoviewer/privacy.md`, `docs/protoviewer/support.md`), per #14144.
 
@@ -40,6 +40,8 @@ position: ProtoViewer is a viewer for design prototypes the user authors, not a 
 - The Local Network prompt appears only after that switch is turned on and confirmed.
 - Received prototypes have Report (a mail draft to the published contact) and Hide on both apps.
   Android also blocks a link host (App Store 1.2, Play User Generated Content).
+- Neither app has terms of use or an acceptance step yet. Play User Generated Content requires
+  users to accept terms before they create or upload content (#19269).
 - The library is empty on first launch. There is no bundled sample gallery, and the listing must not
   claim one (decision in the [ProtoViewer design record](../devlog/2026-10-20-protoviewer-design.md)).
 
@@ -50,6 +52,9 @@ Play Console declarations:
 | User-generated content    | Yes: users receive prototypes others made; in-app Report, Hide and Block |
 | Downloads executable code | No: prototypes are declarative JSON read by a fixed renderer             |
 | Data safety               | See the [privacy page](../protoviewer/privacy.md)                        |
+
+The current rule text behind this position is in
+[ProtoViewer store policy fit](../devlog/2026-11-25-protoviewer-store-policy-fit.md).
 
 ## Validation
 

@@ -24,7 +24,7 @@ import {
 import { toHtml } from "../../../../src/features/prototype/web/webNodes";
 import {
   buildPrototypeWebPage,
-  PROTOTYPE_WEB_RUNTIME,
+  PROTOTYPE_WEB_PAGE_SCRIPT,
 } from "../../../../src/features/prototype/web/webPage";
 
 const registry = withDeviceFrameSources(rawRegistry, sources);
@@ -323,7 +323,7 @@ describe("prototype web 3D page wiring (#16458)", () => {
     );
   });
 
-  test("the page offers the 3D toggle and inlines the 3D rules in its one script", () => {
+  test("the page offers the 3D toggle and runs the 3D view in its one script", () => {
     const page = buildPrototypeWebPage({
       title: "t",
       variants: [
@@ -334,18 +334,10 @@ describe("prototype web 3D page wiring (#16458)", () => {
     expect(shell).toContain('data-control="3d"');
     expect(shell).not.toContain('data-control="posture"');
     expect(shell).not.toContain("data-hinge-axis");
-    expect(page.html.match(/<script/g)).toHaveLength(1);
-    for (const rule of [
-      "prototypeWeb3dRuntime",
-      "prototypeWebPose",
-      "prototypeWebOrbit",
-      "prototypeWebHingeLine",
-      "prototypeWebPostureAt",
-      "prototypeWebLeaves",
-      "prototypeWeb3dWrap",
-      "prototypeWeb3dUnwrap",
-    ]) {
-      expect(PROTOTYPE_WEB_RUNTIME).toContain(`function ${rule}(`);
+    expect(page.html.match(/<script>/g)).toHaveLength(1);
+    // The page bundle runs the 3D runtime (#16528): its orbit box, wrap marker and controls.
+    for (const marker of ['"data-orbit"', "data-device3d", "data-3d-control", "preserve-3d"]) {
+      expect(PROTOTYPE_WEB_PAGE_SCRIPT).toContain(marker);
     }
   });
 });

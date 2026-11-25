@@ -42,12 +42,12 @@ describe("committed prototype web page bundle (#16528)", () => {
     expect(PROTOTYPE_WEB_PAGE_BUNDLE_SOURCE).not.toMatch(/<\/script|<!--/i);
   });
 
-  test("names its version only through the mark, which the server replaces", () => {
+  test("names no release version itself, so a release's version bump leaves it fresh", () => {
+    // The page bundle no longer holds `mount`, which reports the library version; any version it
+    // came to name would still go through the mark the server replaces.
     expect(PROTOTYPE_WEB_PAGE_BUNDLE_VERSION_MARK).toBe(PROTOTYPE_WEB_PAGE_VERSION_MARK);
-    expect(PROTOTYPE_WEB_PAGE_BUNDLE_SOURCE).toContain(PROTOTYPE_WEB_PAGE_VERSION_MARK);
-    const served = prototypeWebPageBundle();
-    expect(served).not.toContain(PROTOTYPE_WEB_PAGE_VERSION_MARK);
-    expect(served).toContain(JSON.stringify(version));
+    expect(PROTOTYPE_WEB_PAGE_BUNDLE_SOURCE).not.toContain(JSON.stringify(version));
+    expect(prototypeWebPageBundle()).not.toContain(PROTOTYPE_WEB_PAGE_VERSION_MARK);
   });
 });
 

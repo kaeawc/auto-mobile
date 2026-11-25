@@ -10,6 +10,7 @@ import {
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
 import type { WebImageBox } from "../../../../src/features/prototype/web/webImages";
+import { webPageDrawnViews } from "./webPageDrawn";
 
 const photo = (asset: string, height = 200) => ({
   type: "image",
@@ -86,7 +87,7 @@ describe("buildPrototypeWebPage with images", () => {
     expect(built.unsupportedNodes).toEqual([]);
     // Both orientations reference the slot; the bytes appear once, in the head.
     expect(built.html.split("--pa-0:url(data:image/webp;base64,").length).toBe(2);
-    expect(built.html.split("var(--pa-0)").length).toBe(3);
+    expect(webPageDrawnViews(built.html).split("var(--pa-0)").length).toBe(3);
   });
 
   test("inlines a video poster and drops its entry (#16591)", async () => {
@@ -142,35 +143,31 @@ describe("buildPrototypeWebPage with images", () => {
   });
 });
 
-describe("budget order for a stack's other screens (#17241)", () => {
-  test("charges each screen's images before the next screen's markup", () => {
-    const stack = {
-      id: "stacked",
-      root: {
-        type: "stack",
-        start: "a",
-        screens: {
-          a: { type: "text", text: "start" },
-          b: { type: "image", asset: "pb", style: { width: { dp: 100 }, height: { dp: 100 } } },
-          c: { type: "text", text: "x".repeat(4000) },
-        },
-      },
+describe("budget order for older revisions (#17241, #16528)", () => {
+  test("charges each kept revision's images before the next older revision's data", () => {
+    const text = (value: string) => ({
+      id: "text",
+      window: { placement: { type: "fullscreen" } },
+      root: { type: "text", text: value },
+    });
+    const withImage = {
+      id: "image",
+      window: { placement: { type: "fullscreen" } },
+      root: { type: "image", asset: "pb", style: { width: { dp: 100 }, height: { dp: 100 } } },
     };
+    // Oldest first: a long text, then the image, then the latest.
+    const revisions = [text("x".repeat(4000)), withImage, text("latest")];
     const images = [{ id: "pb", bytes: new Uint8Array(3000), width: 4, height: 3 }];
-    const whole = buildPrototypeWebPage(page([stack], { images }));
+    const whole = buildPrototypeWebPage(page(revisions, { images }));
     expect(whole.inlinedImages).toEqual(["pb"]);
-    // One byte short: either screen c's markup or b's image goes. Screen b comes first, so its
-    // image is charged before c is considered.
+    expect(whole.inlinedRevisions).toEqual({ feed: [3, 2, 1] });
+    // One byte short: either revision 1's data or revision 2's image goes. Revision 2 comes
+    // first, so its image is charged before revision 1 is considered.
     const built = buildPrototypeWebPage(
-      page([stack], { images, maxBytes: Buffer.byteLength(whole.html) - 1 }),
+      page(revisions, { images, maxBytes: Buffer.byteLength(whole.html) - 1 }),
     );
     expect(built.inlinedImages).toEqual(["pb"]);
-    expect([...built.html.matchAll(/data-screen="([^"]*)"/g)].map((match) => match[1])).toEqual([
-      "a",
-      "a",
-      "b",
-      "b",
-    ]);
+    expect(built.inlinedRevisions).toEqual({ feed: [3, 2] });
   });
 });
 

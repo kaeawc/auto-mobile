@@ -18,6 +18,9 @@ import { logger } from "../utils/logger";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { setToolEnabledResultSchema } from "./toolSelectionToolOutputSchemas";
 import { ToolRegistry } from "./toolRegistry";
+import { platformCallableToolNames } from "./applePlatformToolSupport";
+import type { Platform } from "../models/Platform";
+import { defaultDaemonContext } from "../daemon/daemonContext";
 
 export { SET_TOOL_ENABLED_TOOL_NAME } from "../features/toolSelection/toolSelectionControl";
 
@@ -279,22 +282,62 @@ export async function listEnabledToolNames(
   return names.filter((toolName): toolName is string => toolName !== undefined).sort();
 }
 
+/** The platform of the device a session holds, or undefined when no live session matches. */
+export type SessionPlatformLookup = (sessionUuid: string) => Platform | undefined;
+
+/** Reads the daemon's SessionManager; stdio and tests without a daemon have no session platform. */
+const daemonSessionPlatform: SessionPlatformLookup = (sessionUuid) =>
+  defaultDaemonContext.sessionManager()?.findSession(sessionUuid)?.platform;
+
+/** The first of the call's sessions whose device platform is known. */
+function selectionSessionPlatform(
+  sessionPlatform: SessionPlatformLookup,
+  sessionUuids: ReadonlyArray<string | undefined>,
+): Platform | undefined {
+  for (const sessionUuid of sessionUuids) {
+    const platform = sessionUuid === undefined ? undefined : sessionPlatform(sessionUuid);
+    if (platform !== undefined) {
+      return platform;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Report only tools the session's device platform admits (#19186), as the acquisition result does
+ * (#18013): a watch session must not list appLifecycle or keyboard, which refuse it at the platform
+ * gate. A session with no known platform keeps every name.
+ */
+function callableOnSessionDevice(names: string[], platform: Platform | undefined): string[] {
+  return platform === undefined
+    ? names
+    : platformCallableToolNames(
+        names,
+        platform,
+        (name) => ToolRegistry.getRegisteredTool(name)?.deviceAwareHandler !== undefined,
+      );
+}
+
 async function getEnabledToolsResponse(
   sessionUuid: string,
   context: ReturnType<typeof getToolSelectionContext>,
+  sessionPlatform: SessionPlatformLookup,
 ): Promise<{ enabledTools: string[] } | { enabledToolsError: string }> {
   try {
-    return {
-      enabledTools: await listEnabledToolNames(
-        context?.sessionToolSelectionService,
-        [sessionUuid, context?.routingSessionUuid],
-        {
-          connectionProfileUuid: context?.toolSelectionProfileUuid,
-          labelSessionUuids: context?.labelSessionUuids ?? [],
-          baseSessionUuid: context?.routingBaseSessionUuid,
-        },
-      ),
-    };
+    const platform = selectionSessionPlatform(sessionPlatform, [
+      sessionUuid,
+      context?.routingSessionUuid,
+    ]);
+    const enabledTools = await listEnabledToolNames(
+      context?.sessionToolSelectionService,
+      [sessionUuid, context?.routingSessionUuid],
+      {
+        connectionProfileUuid: context?.toolSelectionProfileUuid,
+        labelSessionUuids: context?.labelSessionUuids ?? [],
+        baseSessionUuid: context?.routingBaseSessionUuid,
+      },
+    );
+    return { enabledTools: callableOnSessionDevice(enabledTools, platform) };
   } catch (error) {
     const enabledToolsError =
       `Could not report enabled tools for session ${sessionUuid}: ${errorMessage(error)}. ` +
@@ -304,7 +347,9 @@ async function getEnabledToolsResponse(
   }
 }
 
-export function registerToolSelectionTools(): void {
+export function registerToolSelectionTools(
+  sessionPlatform: SessionPlatformLookup = daemonSessionPlatform,
+): void {
   ToolRegistry.register(
     SET_TOOL_ENABLED_TOOL_NAME,
     "Control tools/list discovery for this MCP session: one exact name via toolName, or a batch via toolNames. Omitted tools remain callable directly by name through tools/call, including default-off tools such as pinchOn and prototype that tools/list never shows until enabled; read the automobile:tools resource for every tool's name and default discovery state. Returns enabledTools, or enabledToolsError if post-write readback fails (the change still applies).",
@@ -343,7 +388,7 @@ export function registerToolSelectionTools(): void {
         };
         return createStructuredToolResponse({
           ...response,
-          ...(await getEnabledToolsResponse(sessionUuid, context)),
+          ...(await getEnabledToolsResponse(sessionUuid, context, sessionPlatform)),
         });
       },
       defaultEnabled: true,

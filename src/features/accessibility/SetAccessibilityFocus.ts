@@ -23,10 +23,36 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import { logger } from "../../utils/logger";
 import { AccessibilityTargetResolver } from "./AccessibilityTargetResolver";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { accessibilityDetector } from "../../ctrlProxy/accessibility/AccessibilityDetector";
 
 /** The accessibility service reports focus asynchronously, so the read-back can lag the action. */
 const FOCUS_READBACK_ATTEMPTS = 5;
 const FOCUS_READBACK_INTERVAL_MS = 100;
+
+/** CtrlProxy's generic refusal when the framework declines ACTION_ACCESSIBILITY_FOCUS. */
+const PERFORM_ACTION_REFUSED = "performAction returned false";
+
+/** True when TalkBack is on, false when off, null when the state could not be read. */
+export type TalkBackStateProbe = (device: BootedDevice) => Promise<boolean | null>;
+
+const defaultTalkBackProbe: TalkBackStateProbe = (device) =>
+  accessibilityDetector.resolveTalkBackState(
+    device.deviceId,
+    defaultAdbClientFactory.create(device),
+  );
+
+/**
+ * Android only moves the accessibility cursor while a screen reader is running, so a
+ * bare refusal from the framework usually means TalkBack is off (#19194).
+ */
+function explainRefusedFocus(action: string, message: string, talkBack: boolean | null): string {
+  if (!message.includes(PERFORM_ACTION_REFUSED) || talkBack === true) {
+    return message;
+  }
+  return talkBack === false
+    ? `Android refused to ${action} accessibility focus because TalkBack is off: accessibility focus only exists while a screen reader runs. Enable it with accessibility {talkback:true} and retry.`
+    : `Android refused to ${action} accessibility focus (${message}). Accessibility focus only exists while a screen reader runs; if TalkBack is off, enable it with accessibility {talkback:true} and retry.`;
+}
 
 function focusMatchesTarget(focused: Element | null | undefined, resourceId: string): boolean {
   return matchesCtrlProxyResourceId(focused?.["resource-id"], resourceId);
@@ -68,6 +94,8 @@ export interface SetAccessibilityFocusDependencies {
   iosServiceFactory?: (device: BootedDevice) => IosAccessibilityFocusService;
   /** Paces the bounded read-back polling; fakes inject a FakeTimer. */
   timer?: Timer;
+  /** Reads TalkBack state to explain a refused focus action; fakes inject directly. */
+  talkBackProbe?: TalkBackStateProbe;
 }
 
 export class SetAccessibilityFocus {
@@ -76,11 +104,13 @@ export class SetAccessibilityFocus {
   private readonly serviceFactory: (device: BootedDevice) => AccessibilityFocusService;
   private readonly timer: Timer;
   private readonly iosServiceFactory: (device: BootedDevice) => IosAccessibilityFocusService;
+  private readonly talkBackProbe: TalkBackStateProbe;
 
   constructor(device: BootedDevice, deps: SetAccessibilityFocusDependencies = {}) {
     this.device = device;
     this.target = new AccessibilityTargetResolver(device, "accessibility focus", deps);
     this.timer = deps.timer ?? defaultTimer;
+    this.talkBackProbe = deps.talkBackProbe ?? defaultTalkBackProbe;
     this.iosServiceFactory =
       deps.iosServiceFactory ??
       (() => {
@@ -119,7 +149,7 @@ export class SetAccessibilityFocus {
     } catch (error) {
       const message = errorMessage(error);
       logger.warn(`[accessibilityFocus] Failed to ${action} focus: ${errorMessage(error)}`, error);
-      return { success: false, error: message };
+      return { success: false, error: await this.explainFailure(action, message) };
     }
 
     const { focusedElement, readError, mismatch } = await this.readBackFocus(
@@ -138,6 +168,20 @@ export class SetAccessibilityFocus {
       warning,
       ...(alreadySatisfied ? { alreadySatisfied } : {}),
     };
+  }
+
+  private async explainFailure(action: string, message: string): Promise<string> {
+    if (!message.includes(PERFORM_ACTION_REFUSED)) {
+      return message;
+    }
+    let talkBack: boolean | null = null;
+    try {
+      talkBack = await this.talkBackProbe(this.device);
+    } catch (error) {
+      // The probe only refines the hint; the unknown-state wording still names TalkBack.
+      logger.debug(`[accessibilityFocus] TalkBack state probe failed: ${errorMessage(error)}`);
+    }
+    return explainRefusedFocus(action, message, talkBack);
   }
 
   private async executeIos(

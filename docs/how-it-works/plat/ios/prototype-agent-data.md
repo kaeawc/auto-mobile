@@ -112,6 +112,12 @@ Keychain access group. Biometric-bound keys remain live state only and are not p
 Storage reset (`clear_prototype_storage`) removes both stores; dismissal retains them. Keychain items can survive app uninstall, so use
 `clear_prototype_storage` for explicit erasure.
 
+The status omits the `secure` report when the show could not read the Keychain. A Keychain write or
+delete that fails (the device is locked) stays pending. The coordinator retries it after 1 s,
+doubling to at most 30 s, and the agent flushes again on unlock and foreground. A same-id show keeps
+it pending. When the delete of a dropped item fails, the next show of that id deletes it before
+restoring, unless a newer version replaced it.
+
 The iOS saved prototype is its own app, so `deleteSaved` uninstalls it and its sandbox.
 Uninstall does not remove its Keychain items, and the app's clear endpoint is gone afterwards, so call
 `clear_prototype_storage` on the saved app before `deleteSaved` when its spec declares `storage.secure` keys.

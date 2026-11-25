@@ -7,7 +7,7 @@ import { McpTestFixture } from "../fixtures/mcpTestFixture";
 import { installHermeticServerFixture } from "../helpers/hermeticServerFixture";
 import { RealToolCallPath } from "../helpers/realToolCallPath";
 import { createDevicePoolDependencies } from "../helpers/devicePoolDependencies";
-import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import { ToolRegistry, type ToolRegistryCollaborators } from "../../src/server/toolRegistry";
 import { DaemonState } from "../../src/daemon/daemonState";
@@ -200,13 +200,22 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
   );
 
   describe("a managed connection", () => {
-    beforeEach(() => {
-      DaemonState.getInstance()
-        .getBrokerConnectionScopes()
-        .bind(mcpA, { scopeKey: keyA.scopeKey, sessionUuids: [execA] });
-    });
+    // Bind after this test's harness exists: a beforeEach runs before the body arranges it, so
+    // it would read the key another test left behind, or none when run first (#19237).
+    function managed(name: string, fn: () => void | Promise<void>, timeout?: number): void {
+      arranged(
+        name,
+        async () => {
+          DaemonState.getInstance()
+            .getBrokerConnectionScopes()
+            .bind(mcpA, { scopeKey: keyA.scopeKey, sessionUuids: [execA] });
+          await fn();
+        },
+        timeout,
+      );
+    }
 
-    arranged("controls its binding device", async () => {
+    managed("controls its binding device", async () => {
       await call("controlProbe", {
         sessionUuid: execA,
         deviceId: slotA.deviceId,
@@ -215,7 +224,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       expect(handled).toEqual([`control:${slotA.deviceId}`]);
     });
 
-    arranged("may not control an unassigned device, sessionless or not", async () => {
+    managed("may not control an unassigned device, sessionless or not", async () => {
       const refused = await outcome("controlProbe", {
         platform: "ios",
         deviceId: free.deviceId,
@@ -233,7 +242,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       expect(handled).toEqual([]);
     });
 
-    arranged("may not route control through a session outside its grants", async () => {
+    managed("may not route control through a session outside its grants", async () => {
       await sessionManager.createSession("other-session", free.deviceId, "ios");
       const refused = await outcome("controlProbe", {
         sessionUuid: "other-session",
@@ -246,7 +255,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       });
     });
 
-    arranged("still reads any device", async () => {
+    managed("still reads any device", async () => {
       await call("readProbe", { platform: "ios", deviceId: free.deviceId, __mcpSessionId: mcpA });
       await call("readProbe", { platform: "ios", deviceId: slotB.deviceId, __mcpSessionId: mcpA });
       expect(handled).toEqual([`read:${free.deviceId}`, `read:${slotB.deviceId}`]);
@@ -254,7 +263,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
 
     // #11397: a plan step or nested tool call never passes the MCP ingress and carries no socket
     // session id; it is confined by the slot session it runs on.
-    arranged("an internal call on its binding session may not reach lifecycle tools", async () => {
+    managed("an internal call on its binding session may not reach lifecycle tools", async () => {
       ToolRegistry.register("getAndroid", "Acquire probe", z.object({}).passthrough(), async () => {
         handled.push("acquire");
         return { success: true };
@@ -283,7 +292,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
     });
 
     // #11469: a sessionless plan's steps run for the managed connection that called executePlan.
-    arranged(
+    managed(
       "a sessionless plan step may name its binding session, not one another connection owns",
       async () => {
         const asBrokerConnection = (sessionUuid: string): Promise<unknown> =>
@@ -307,7 +316,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       },
     );
 
-    arranged(
+    managed(
       "an internal call on its binding session may not control an unassigned device",
       async () => {
         let refused: unknown;
@@ -332,7 +341,7 @@ describe("ToolRegistry binding enforcement (#11178)", () => {
       },
     );
 
-    arranged(
+    managed(
       "may not acquire, start, provision or delete devices, or retarget setActiveDevice",
       () => {
         const gate =

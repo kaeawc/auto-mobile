@@ -48,16 +48,17 @@ function names(devices: DeviceInfo[]): string[] {
 }
 
 describe("isMissingExecutableError", () => {
-  const enoent = Object.assign(new Error("spawn emulator ENOENT"), { code: "ENOENT" });
+  // A fresh error per use: a shared one mutated by one test leaks into the next (#19237).
+  const enoentError = () => Object.assign(new Error("spawn emulator ENOENT"), { code: "ENOENT" });
 
   test("is true for an ENOENT with no surviving executable", () => {
-    expect(isMissingExecutableError(enoent, "emulator", false)).toBe(true);
+    expect(isMissingExecutableError(enoentError(), "emulator", false)).toBe(true);
   });
 
   test("is false when the executable exists, the process was killed, or it is not an Error", () => {
-    expect(isMissingExecutableError(enoent, "emulator", true)).toBe(false);
+    expect(isMissingExecutableError(enoentError(), "emulator", true)).toBe(false);
     expect(
-      isMissingExecutableError(Object.assign(enoent, { killed: true }), "emulator", false),
+      isMissingExecutableError(Object.assign(enoentError(), { killed: true }), "emulator", false),
     ).toBe(false);
     expect(isMissingExecutableError("ENOENT", "emulator", false)).toBe(false);
   });

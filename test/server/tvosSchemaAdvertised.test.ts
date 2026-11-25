@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { ActionableError } from "../../src/models";
 import {
   APPLE_PLATFORM_SUPPORTED_TOOLS,
@@ -9,12 +9,16 @@ import { registerAllTools } from "../../src/server/registerAllTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { isolateToolRegistry } from "../helpers/withTemporaryTool";
 
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { MultiPlatformDeviceManager } from "../../src/devices/deviceUtils";
 import { createLifecycleHandlers } from "../../src/server/deviceToolsLifecycle";
 import { registerDeviceTools, setDeviceToolsDependencies } from "../../src/server/deviceTools";
 import { AppleTvSimulatorInventory } from "../../src/utils/ios-cmdline-tools/AppleTvSimulatorInventory";
 import { FakeAppleTvProvisionSimctl, tvDevice } from "../fakes/FakeAppleTvSimctl";
 import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { createFakeAndroidEmulator } from "../fakes/FakeAndroidEmulator";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { fakeDeviceManagerSimctl } from "../helpers/fakeDeviceManagerSimctl";
@@ -45,8 +49,20 @@ function platformEnums(
 }
 
 describe("tvOS is advertised in tool schemas and refused by unsupported tools (#15886)", () => {
+  let previousCollaborators: ReturnType<typeof ToolRegistry.getCollaboratorsForTesting>;
   beforeAll(() => {
     registerAllTools({ daemonMode: true });
+    // Supported tools reach device readiness; a fake one keeps them off whatever readiness
+    // (real simctl included) an earlier file installed on the shared registry (#19237).
+    previousCollaborators = ToolRegistry.getCollaboratorsForTesting();
+    ToolRegistry.setCollaboratorsForTesting({
+      deviceReadiness: DeviceReadiness.createInstance(
+        new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
+      ),
+    });
+  });
+  afterAll(() => {
+    ToolRegistry.setCollaboratorsForTesting(previousCollaborators);
   });
 
   test("every tool input that offers Android also offers tvos", () => {

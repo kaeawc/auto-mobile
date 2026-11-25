@@ -41,7 +41,17 @@ async function setup() {
   return { registry, socket, connector, adb, attacher };
 }
 
+/**
+ * The shared daemon host keeps the attacher of the registration that created it, so one another
+ * file left undisposed would serve these calls (#19237). A registration on a different host
+ * supersedes the active one; disposing it leaves no shared host for the test to inherit.
+ */
+function dropLeakedSharedHost(): void {
+  createPrototypeToolRuntime({ timer: new FakeTimer() }).dispose();
+}
+
 test("two MCP registrations share one host attachment and its reconnect cursor", async () => {
+  dropLeakedSharedHost();
   const h = await setup();
   h.socket.replay = [{ ...event(9) }];
   const first = createPrototypeToolRuntime({
@@ -90,6 +100,7 @@ test("two MCP registrations share one host attachment and its reconnect cursor",
 });
 
 test("host disposal closes its app socket and removes the adb forward", async () => {
+  dropLeakedSharedHost();
   const h = await setup();
   h.socket.replay = [{ ...event(1) }];
   const runtime = createPrototypeToolRuntime({

@@ -4,7 +4,7 @@ import { registerInteractionTools } from "../../src/server/interactionTools";
 import { registerPrototypeTools } from "../../src/server/prototypeTools";
 import { registerAccessibilityTools } from "../../src/server/accessibilityTools";
 import { registerUtilityTools } from "../../src/server/utilityTools";
-import { isolateToolRegistry } from "../helpers/withTemporaryTool";
+import { isolateEmptyToolRegistry } from "../helpers/withTemporaryTool";
 import { afterEach, beforeAll, describe, expect, test } from "bun:test";
 import {
   getStaticToolDefinitions,
@@ -25,7 +25,9 @@ import { prototypeSpecJsonSchema } from "../../src/features/prototype/prototypeS
 // (name, description, inputSchema, _meta) and deliberately omits outputSchema,
 // which depends on daemon flag state the proxy cannot read cold.
 
-isolateToolRegistry();
+// Start empty: the per-call classifier count covers only the tools registered below, not tools
+// another file left in the shared registry (#19237).
+isolateEmptyToolRegistry();
 
 describe("getStaticToolDefinitions", () => {
   beforeAll(() => {

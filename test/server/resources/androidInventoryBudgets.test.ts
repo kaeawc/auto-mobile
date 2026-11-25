@@ -12,7 +12,7 @@ import {
   resetBootedDevicesResourceCache,
   getBootedDevicesForPlatforms,
 } from "../../../src/server/bootedDeviceResources";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   createDeviceImageResourcesHandler,
   invalidateAndroidInventoryProvenanceAndCatalog,
@@ -34,14 +34,18 @@ class SlowCatalog extends FakeAvdManager {
   }
 }
 
-afterEach(() => {
+function resetInventoryState(): void {
   setDeviceManager(null);
   setDeviceLockProbe(null);
   resetBootedDevicesResourceCache();
   resetDeviceToolsDependencies();
   invalidateAndroidInventoryProvenanceAndCatalog();
   AndroidAvdProvenanceCache.resetForTests();
-});
+}
+
+// Before too: provenance another file cached or left in flight would serve the first test (#19237).
+beforeEach(resetInventoryState);
+afterEach(resetInventoryState);
 
 describe("Android inventory read budgets", () => {
   test("8s booted response retains discovery and aborts unfinished enrichment without late mutation", async () => {

@@ -101,7 +101,9 @@ describe("typed env readers", () => {
     const warnings: string[] = [];
     const log = { warn: (message: string) => warnings.push(message) };
     const spec = ENV.DOCTOR_TIMEOUT_MS;
-    expect(readEnvInt(spec, { [spec.name]: "2m" }, { log })).toBe(5000);
+    // Warnings are once per name=value per process; a value no other test reads keeps this one
+    // ours (strictEnvIntegerReads also feeds "2m" to this variable) (#19237).
+    expect(readEnvInt(spec, { [spec.name]: "2m-env-test" }, { log })).toBe(5000);
     expect(warnings).toHaveLength(1);
     expect(readEnvInt(spec, { [spec.name]: "7000" }, { log: silent })).toBe(7000);
     expect(readEnvInt(spec, {}, { fallback: 9, log: silent })).toBe(9);

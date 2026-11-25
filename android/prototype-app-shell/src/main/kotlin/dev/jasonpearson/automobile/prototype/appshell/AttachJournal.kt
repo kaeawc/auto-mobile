@@ -42,7 +42,9 @@ internal object NoAttachJournal : AttachJournal {
  * Saves journal snapshots on [executor], never on the recording thread. A write always saves the
  * newest snapshot, so saves stay in order and a burst costs one rewrite. Each snapshot gets a
  * version; [awaitSaved] lets delivery hold a frame until the write of the state it exposes
- * completes, so a restored process never reissues a sequence the host has seen.
+ * finishes, whether it saved or failed and was logged, so a failed write releases the frame rather
+ * than stalling delivery. Only a successful write guarantees a restored process never reissues a
+ * sequence the host has seen.
  */
 internal class AttachJournalWriter(
   private val journal: AttachJournal,

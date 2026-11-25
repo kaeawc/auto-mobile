@@ -33,10 +33,7 @@ class ShellReachabilityTest {
     )
 
   /** Zero-caller `shell/` components awaiting a wire-or-delete decision (issue #4017). */
-  private val knownDormant =
-    setOf(
-      "CenterTabStrip",
-    )
+  private val knownDormant = emptySet<String>()
 
   private val declarations by lazy { shellDeclarations() }
   private val reachable by lazy { reachableNames(declarations, rootIdentifiers()) }

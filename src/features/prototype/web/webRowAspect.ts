@@ -232,11 +232,12 @@ export function rowMeasured(
   );
   const measureHeight = rowMeasureHeight(record(node.style), inherited);
   const { height } = measureHeight;
+  const spacing = record(node.style)?.spacing;
   const children = rowSequentialChildren(
     node.children,
     (_entry, index) => styled[index],
     measureHeight,
-    unboundedWidth,
+    { unboundedWidth, spacing: typeof spacing === "number" ? spacing : 0 },
   );
   if (children === node.children) {
     return node;
@@ -271,9 +272,11 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  *
  * CSS flex has no sequential measure, so the mapping zeroes those siblings (`max-width: 0`) and makes
  * the aspect-ratio child the row's lone grower (`flex: 1 1 0`). The earlier siblings
- * keep their content width, and the grower takes the rest. Two cases still differ: the row's
- * `spacing` still separates the zeroed siblings, which Compose drops once no width is left, and an
- * earlier `fill` sibling shares the remaining width instead of taking all of it.
+ * keep their content width, and the grower takes the rest. Compose spaces each child by at most
+ * the width left after it, so once the grower has taken it all no spacing follows; a later zeroed
+ * sibling takes back the row's `spacing` (`dropGap`) that CSS `gap` puts before it (#16711). One
+ * case still differs: an earlier `fill` sibling shares the remaining width instead of taking all
+ * of it.
  *
  * A capped aspect ratio (see aspectRatioCap) before any unsized one takes `min(remaining, cap)`: it
  * gets its cap as a flex basis, and it and every later unweighted sibling get a shrink tier, so the
@@ -301,11 +304,24 @@ const measured = (entry: unknown, measure: RowMeasure) =>
  * undefined when it is hidden or draws in a window layer (see inFlow). A repeat's children are one
  * template, so they are left as authored.
  */
+/** How a row lays its children out beyond their height: an unbounded width, and its `spacing`. */
+export interface RowLine {
+  readonly unboundedWidth?: boolean;
+  readonly spacing?: number;
+}
+
+/**
+ * The zero hint for a child measured against no width: a later sibling of the grower also takes
+ * back the spacing before it, which Compose's Row only gives while width is left.
+ */
+const zeroed = (entry: unknown, later: boolean, spacing: number) =>
+  measured(entry, later && spacing > 0 ? { zero: true, dropGap: spacing } : { zero: true });
+
 export function rowSequentialChildren(
   entries: readonly unknown[],
   prepared: (entry: unknown, index: number) => Raw | undefined,
   measureHeight: number | RowMeasureHeight = Infinity,
-  unboundedWidth = false,
+  { unboundedWidth = false, spacing = 0 }: RowLine = {},
 ): readonly unknown[] {
   const { height: rowHeight, boundOnly: heightBoundOnly } =
     typeof measureHeight === "number" ? { height: measureHeight, boundOnly: false } : measureHeight;
@@ -327,7 +343,7 @@ export function rowSequentialChildren(
     }
     const weighted = typeof record(node.style)?.weight === "number";
     if (taker >= 0 && (index > taker || weighted)) {
-      return measured(entry, { zero: true });
+      return zeroed(entry, index > taker, spacing);
     }
     if (capped < 0 || index < capped || weighted) {
       return entry;

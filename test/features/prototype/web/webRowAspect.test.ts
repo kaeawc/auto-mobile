@@ -517,7 +517,9 @@ test("under an unbounded width with no definite height a row neither takes nor f
   expect(styleOf(children[2])?.[ROW_MEASURE_KEY]).toEqual({ shrink: CAPPED_SHRINK, basis: 10 });
   const plain = { ...row, children: row.children.slice(0, 2) };
   expect(rowMeasured(plain, "root", prepare, unbounded)).toBe(plain);
-  expect(rowSequentialChildren(plain.children, shown, Infinity, true)).toBe(plain.children);
+  expect(rowSequentialChildren(plain.children, shown, Infinity, { unboundedWidth: true })).toBe(
+    plain.children,
+  );
 });
 
 test("under an unbounded width a row's own width bound restores its fill (#17603)", () => {
@@ -588,4 +590,70 @@ test("a layer child in a row neither takes the width nor zeroes its siblings (#1
   expect(styleOf(children[1])?.[ROW_MEASURE_KEY]).toEqual({ take: true });
   expect(styleOf(children[2])?.[ROW_MEASURE_KEY]).toEqual({ zero: true });
   expect(rowFillAxes(mixed, "root", prepare)).toEqual(["width"]);
+});
+
+test("a zeroed sibling after the grower takes back the row's spacing (#16711)", () => {
+  const prepare = (entry: unknown) => record(entry);
+  const row = (spacing?: number) => ({
+    type: "row",
+    ...(spacing === undefined ? {} : { style: { spacing } }),
+    children: [
+      { type: "spacer", style: { weight: 1 } },
+      { type: "text", text: "a" },
+      { type: "box", style: { aspectRatio: 2 } },
+      { type: "text", text: "b" },
+    ],
+  });
+  const spaced = rowMeasured(row(8), "root", prepare).children as unknown[];
+  // Compose spaces a child by at most the width left after it: none once the grower took it all.
+  expect(styleOf(spaced[3])?.[ROW_MEASURE_KEY]).toEqual({ zero: true, dropGap: 8 });
+  // A weighted sibling before the grower is still measured against no width, gap untouched.
+  expect(styleOf(spaced[0])?.[ROW_MEASURE_KEY]).toEqual({ zero: true });
+  const plain = rowMeasured(row(), "root", prepare).children as unknown[];
+  expect(styleOf(plain[3])?.[ROW_MEASURE_KEY]).toEqual({ zero: true });
+
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  expect(nodeCss(styleOf(spaced[3]), context)).toMatchObject({
+    "max-width": "0px",
+    "margin-inline-start": "-8px",
+  });
+  expect(nodeCss(styleOf(plain[3]), context)).not.toHaveProperty("margin-inline-start");
+});
+
+test("the capped aspect ratio's own minWidth folds into its basis (#16711)", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "row" as const };
+  const capped = (minWidth: number, basis: number) => ({
+    aspectRatio: 1,
+    maxWidth: basis,
+    minWidth,
+    [ROW_MEASURE_KEY]: { shrink: CAPPED_SHRINK, basis },
+  });
+  // Below its cap the minimum changes nothing but no longer holds against the row's width.
+  expect(nodeCss(capped(80, 100), context)).toMatchObject({
+    width: "100px",
+    "flex-basis": "100px",
+    "min-width": "0",
+    "flex-shrink": String(CAPPED_SHRINK),
+  });
+  // Above the cap it widens the basis, still clamped by what the row has left.
+  expect(nodeCss(capped(80, 50), context)).toMatchObject({
+    width: "80px",
+    "flex-basis": "80px",
+    "min-width": "0",
+  });
+});
+
+test("a bounded row clamps its authored minWidth into its bound (#16711)", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "column" as const };
+  expect(nodeCss({ minWidth: 300, [ROW_BOUND_KEY]: true }, context)).toMatchObject({
+    "min-width": "min(100%, 300px)",
+    "max-width": "100%",
+  });
+  // Without the bound, or under an unbounded width, the minimum stays as authored.
+  expect(nodeCss({ minWidth: 300 }, context)["min-width"]).toBe("300px");
+  expect(
+    nodeCss({ minWidth: 300, [ROW_BOUND_KEY]: true }, { ...context, unboundedWidth: true })[
+      "min-width"
+    ],
+  ).toBe("300px");
 });

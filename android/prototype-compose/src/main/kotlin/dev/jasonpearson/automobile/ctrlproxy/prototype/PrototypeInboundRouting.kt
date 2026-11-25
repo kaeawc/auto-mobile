@@ -30,8 +30,7 @@ internal class PrototypeInboundRouting(links: JsonArray?) {
   fun actions(match: PrototypeLinkMatcher.Match): List<PrototypeAction> {
     val values = match.query + match.captures.mapValues { JsonPrimitive(it.value) }
     return entries[match.entryIndex].getValue("actions").jsonArray.map { raw ->
-      val bound = bind(raw, values).jsonObject
-      json.decodeFromJsonElement<PrototypeAction>(unwrapStateValue(bound))
+      json.decodeFromJsonElement<PrototypeAction>(bind(raw, values))
     }
   }
 
@@ -44,12 +43,14 @@ internal class PrototypeInboundRouting(links: JsonArray?) {
 
   private fun bindObject(value: JsonObject, values: Map<String, JsonElement>): JsonObject =
     when {
-      value.size == 1 && value["link"] is JsonPrimitive ->
-        buildJsonObject {
-          put("value", values[value.getValue("link").jsonPrimitive.content] ?: JsonNull)
-        }
+      value.size == 1 && value["link"] is JsonPrimitive -> {
+        val name = value.getValue("link").jsonPrimitive.content
+        // An absent optional query refuses the whole action list, as on iOS.
+        val bound = requireNotNull(values[name]) { "Absent link binding: $name" }
+        buildJsonObject { put("value", bound) }
+      }
       value.size == 1 && "value" in value -> value
-      else -> JsonObject(value.mapValues { (key, child) -> bindField(key, child, values) })
+      else -> unwrapStateValue(value.mapValues { (key, child) -> bindField(key, child, values) })
     }
 
   private fun bindField(
@@ -64,13 +65,14 @@ internal class PrototypeInboundRouting(links: JsonArray?) {
       else -> bind(child, values)
     }
 
-  // setState owns a scalar, while params/context/args own binding objects.
-  private fun unwrapStateValue(bound: JsonObject): JsonObject {
-    if (bound["type"]?.jsonPrimitive?.content != "setState") return bound
+  // setState owns a scalar, while params/context/args own binding objects. Nested actions such as
+  // startTimer.actions and request.onSuccess are bound here too, so every level unwraps.
+  private fun unwrapStateValue(bound: Map<String, JsonElement>): JsonObject {
+    if (bound["type"] != JsonPrimitive("setState")) return JsonObject(bound)
     val value = bound["value"]
     return if (value is JsonObject && "value" in value)
       JsonObject(bound + ("value" to value.getValue("value")))
-    else bound
+    else JsonObject(bound)
   }
 
   /** Remove every occurrence, including encoded names, even on an unmatched URL. */

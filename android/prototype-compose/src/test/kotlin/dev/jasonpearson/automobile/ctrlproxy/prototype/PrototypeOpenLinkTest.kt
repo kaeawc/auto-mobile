@@ -131,6 +131,55 @@ class PrototypeOpenLinkTest {
   }
 
   @Test
+  fun `absent optional binding refuses the whole list instead of writing null data`() = runTest {
+    val runtime = runtime()
+    val raw = runtime.current.spec.links!![0].jsonObject
+    val write = buildJsonObject {
+      put("type", "setData")
+      put("path", "/data/draft")
+      put("value", buildJsonObject { put("link", "ref") })
+    }
+    val entry =
+      JsonObject(
+        raw +
+          mapOf(
+            "query" to buildJsonObject { put("ref", "string?") },
+            "actions" to JsonArray(raw.getValue("actions").jsonArray.take(1) + write),
+          ),
+      )
+    val data = buildJsonObject { put("draft", "keep") }
+    runtime.replace(runtime.current.spec.copy(data = data, links = JsonArray(listOf(entry))))
+    runtime.openLink("amp-feed://post/41")
+    assertEquals(PrototypeEventKind.LINK_OPENED, events.single().kind)
+    assertNull(events.single().name)
+    assertEquals(data, runtime.current.spec.data)
+    assertEquals(PrototypeScalar.Text(""), runtime.current.state["title"])
+    assertEquals(listOf("feed"), runtime.current.stacks.getValue("main").path)
+  }
+
+  @Test
+  fun `nested timer actions unwrap a linked state value`() = runTest {
+    val runtime = runtime()
+    val raw = runtime.current.spec.links!![0].jsonObject
+    val actions = raw.getValue("actions").jsonArray.toMutableList()
+    val linkedTitle = actions[0]
+    actions[0] = buildJsonObject {
+      put("type", "startTimer")
+      put("id", "open")
+      put("afterMs", 1000)
+      put("actions", JsonArray(listOf(linkedTitle)))
+    }
+    val entry = JsonObject(raw + ("actions" to JsonArray(actions)))
+    runtime.replace(runtime.current.spec.copy(links = JsonArray(listOf(entry))))
+    runtime.openLink("amp-feed://post/41?ref=private")
+    assertEquals(listOf("feed", "post"), runtime.current.stacks.getValue("main").path)
+    assertEquals("open", runtime.timerReports().single().id)
+    assertEquals(PrototypeScalar.Text(""), runtime.current.state["title"])
+    assertEquals(1, runtime.advanceClock(1000))
+    assertEquals(PrototypeScalar.Text("41"), runtime.current.state["title"])
+  }
+
+  @Test
   fun `missing capability ignores links`() = runTest {
     val runtime = runtime()
     runtime.replace(runtime.current.spec.copy(requires = null))

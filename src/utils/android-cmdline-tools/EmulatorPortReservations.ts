@@ -16,6 +16,10 @@ import {
   FileEmulatorGrpcPortRegistry,
   type EmulatorGrpcPortRegistry,
 } from "./emulatorGrpc/EmulatorGrpcPortRegistry";
+import {
+  TcpEmulatorGrpcPortListenerProbe,
+  type EmulatorGrpcPortListenerProbe,
+} from "./emulatorGrpc/EmulatorGrpcPortListenerProbe";
 
 const MIN_EMULATOR_CONSOLE_PORT = 5554;
 const MAX_EMULATOR_CONSOLE_PORT = 5682;
@@ -280,6 +284,7 @@ export interface EmulatorPortReservationDeps {
   hostPortAvailabilityChecker: () => PortAvailabilityChecker;
   excludedConsolePorts?: () => ReadonlySet<number>;
   grpcPortRegistry?: EmulatorGrpcPortRegistry;
+  grpcPortListenerProbe?: EmulatorGrpcPortListenerProbe;
 }
 
 /**
@@ -323,19 +328,25 @@ export interface EmulatorPortReservations {
   releaseInFlightLaunch(avdName: string): void;
   /**
    * Lease a host gRPC port for an emulator launch that does not pass `-grpc` itself. A port is
-   * free when no live launch holds it and the host can bind it.
+   * free when no live launch on this host holds it, the host can bind it, and nothing accepts
+   * connections on it.
    */
   reserveEmulatorGrpcPort(): Promise<EmulatorGrpcPortLease>;
 }
 
 export class DefaultEmulatorPortReservations implements EmulatorPortReservations {
   private readonly grpcPortRegistry: EmulatorGrpcPortRegistry;
+  private readonly grpcPortListenerProbe: EmulatorGrpcPortListenerProbe;
 
   constructor(private readonly deps: EmulatorPortReservationDeps) {
     this.grpcPortRegistry =
       deps.grpcPortRegistry ??
       testOverrides.emulatorGrpcPortRegistry?.() ??
       new FileEmulatorGrpcPortRegistry();
+    this.grpcPortListenerProbe =
+      deps.grpcPortListenerProbe ??
+      testOverrides.emulatorGrpcPortListenerProbe?.() ??
+      new TcpEmulatorGrpcPortListenerProbe();
   }
 
   async reserveEmulatorGrpcPort(): Promise<EmulatorGrpcPortLease> {
@@ -345,7 +356,11 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
       let lease: EmulatorGrpcPortLease | undefined;
       try {
         lease = this.grpcPortRegistry.claim(port, owner);
-        if (lease && PortManager.isPortAvailable(port, checker)) {
+        if (
+          lease &&
+          PortManager.isPortAvailable(port, checker) &&
+          !(await this.grpcPortListenerProbe.isListening(port))
+        ) {
           return lease;
         }
       } catch (error) {
@@ -356,7 +371,7 @@ export class DefaultEmulatorPortReservations implements EmulatorPortReservations
     throw new ActionableError(
       `Cannot start an Android emulator with gRPC audio: all gRPC ports ` +
         `${EMULATOR_GRPC_PORT_FIRST}-${EMULATOR_GRPC_PORT_LAST} are in use on this host. ` +
-        `Stop an emulator holding one, or check that daemons sharing this ADB server can write their gRPC lease directory.`,
+        `Stop an emulator holding one, or check that daemons on this host can write their gRPC lease directory.`,
     );
   }
 

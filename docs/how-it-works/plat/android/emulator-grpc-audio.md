@@ -177,8 +177,9 @@ A recording started with `audio: true` (#13629) is wrapped by `AudioTrackVideoCa
 
 - The launcher passes `-grpc <port>` to every emulator it spawns unless the arguments already
   carry `-grpc` or `-grpc=`. The port is leased from `EmulatorPortReservations`
-  (`reserveEmulatorGrpcPort`) across 8554-8653: a port another launch holds, or one the host
-  cannot bind, is skipped. The lease is released with the child's launch reservation on exit.
+  (`reserveEmulatorGrpcPort`) across 8554-8653. It skips a port locked by any daemon of the OS
+  user (`~/.auto-mobile/emulator-grpc`), one the host cannot bind, or one accepting a loopback
+  connect. The lease is released with the child's launch reservation on exit.
   Console and ADB ports (5554-5683) are outside that range.
 - The emulator writes `pid_<pid>.ini` under `<dir>/avd/running`, where `<dir>` is
   `~/Library/Caches/TemporaryItems` on macOS, `$XDG_RUNTIME_DIR` (else `/tmp/android-<user>`)

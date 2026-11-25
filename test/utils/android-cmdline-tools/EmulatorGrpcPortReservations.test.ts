@@ -15,6 +15,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { ActionableError } from "../../../src/models/ActionableError";
 import { FakeEmulatorGrpcPortRegistry } from "../../fakes/FakeEmulatorGrpcPortRegistry";
 import {
+  defaultEmulatorGrpcLeaseDir,
   FileEmulatorGrpcPortRegistry,
   type EmulatorGrpcPortRegistry,
 } from "../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorGrpcPortRegistry";
@@ -23,16 +24,19 @@ import { FakeIdGenerator } from "../../fakes/FakeIdGenerator";
 import { parseLockContent } from "../../../src/utils/fileLock";
 import { logger } from "../../../src/utils/logger";
 import { testOverrides } from "../../../src/utils/testOverrides";
+import { FakeEmulatorGrpcPortListenerProbe } from "../../fakes/FakeEmulatorGrpcPortListenerProbe";
 
 function reservationsWithHostPorts(
   hostPorts: FakePortAvailabilityChecker,
   registry: EmulatorGrpcPortRegistry = new FakeEmulatorGrpcPortRegistry(),
+  listeners = new FakeEmulatorGrpcPortListenerProbe(),
 ) {
   const deps = {
     timer: () => new FakeTimer(),
     adbFactory: () => new FakeAdbClientFactory(),
     hostPortAvailabilityChecker: () => hostPorts,
     grpcPortRegistry: registry,
+    grpcPortListenerProbe: listeners,
   };
   return new DefaultEmulatorPortReservations(deps);
 }
@@ -102,6 +106,49 @@ describe("DefaultEmulatorPortReservations.reserveEmulatorGrpcPort", () => {
       reservationsWithHostPorts(checker, registry).reserveEmulatorGrpcPort(),
     ).rejects.toBeInstanceOf(ActionableError);
     expect(checker.checkedPorts).toEqual([]);
+  });
+
+  test("skips a port an emulator listens on even when the loopback bind probe succeeds", async () => {
+    // macOS: qemu listens on *:8554, and a 127.0.0.1/::1 bind still succeeds beside it (#19188).
+    const registry = new FakeEmulatorGrpcPortRegistry();
+    const listeners = new FakeEmulatorGrpcPortListenerProbe(new Set([8554]));
+    const lease = await reservationsWithHostPorts(
+      new FakePortAvailabilityChecker(),
+      registry,
+      listeners,
+    ).reserveEmulatorGrpcPort();
+    expect(lease.port).toBe(8555);
+    expect(listeners.probed).toEqual([8554, 8555]);
+    expect(registry.view().claim(8554)?.port).toBe(8554);
+  });
+
+  test("two daemons with separate registries never share a port once the first emulator binds", async () => {
+    const host = new Set<number>();
+    const daemonA = reservationsWithHostPorts(
+      new FakePortAvailabilityChecker(),
+      new FakeEmulatorGrpcPortRegistry(),
+      new FakeEmulatorGrpcPortListenerProbe(host),
+    );
+    const first = await daemonA.reserveEmulatorGrpcPort();
+    host.add(first.port);
+    resetEmulatorLaunchReservations();
+    const daemonB = reservationsWithHostPorts(
+      new FakePortAvailabilityChecker(),
+      new FakeEmulatorGrpcPortRegistry(),
+      new FakeEmulatorGrpcPortListenerProbe(host),
+    );
+    const second = await daemonB.reserveEmulatorGrpcPort();
+    expect([first.port, second.port]).toEqual([8554, 8555]);
+  });
+
+  test("two daemons racing on one host registry get distinct ports before either emulator binds", async () => {
+    const store = new FakeEmulatorGrpcPortRegistry();
+    const daemon = () => reservationsWithHostPorts(new FakePortAvailabilityChecker(), store.view());
+    const leases = await Promise.all([
+      daemon().reserveEmulatorGrpcPort(),
+      daemon().reserveEmulatorGrpcPort(),
+    ]);
+    expect(leases.map((lease) => lease.port).sort()).toEqual([8554, 8555]);
   });
 
   test("skips a port another process holds on the host", async () => {
@@ -216,6 +263,50 @@ describe("FileEmulatorGrpcPortRegistry", () => {
     expect([first.port, second.port]).toEqual([8554, 8555]);
   });
 
+  test("the default lease directory is host-wide, not per ADB server or coordination dir", async () => {
+    expect(defaultEmulatorGrpcLeaseDir("/Users/dev")).toBe(
+      join("/Users/dev", ".auto-mobile", "emulator-grpc"),
+    );
+    const timer = new FakeTimer();
+    const files = new FakeLockFileSystem(() => timer.now());
+    const daemonRegistry = () =>
+      new FileEmulatorGrpcPortRegistry({
+        ensureDirectory: (path) => files.mkdir(path),
+        fileSystem: files.view(),
+        isProcessRunning: () => true,
+        idGenerator: new FakeIdGenerator(),
+        now: () => timer.now(),
+      });
+    const keys = ["AUTOMOBILE_ADB_SERVER_COORDINATION_DIR", "ANDROID_ADB_SERVER_PORT"] as const;
+    const saved = keys.map((key) => process.env[key]);
+    try {
+      // Each manual-test lane runs its daemon with its own coordination dir and ADB server.
+      process.env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR = "/lanes/handheld/adb-servers";
+      process.env.ANDROID_ADB_SERVER_PORT = "5037";
+      const first = await reservationsWithHostPorts(
+        new FakePortAvailabilityChecker(),
+        daemonRegistry(),
+      ).reserveEmulatorGrpcPort();
+      resetEmulatorLaunchReservations();
+      process.env.AUTOMOBILE_ADB_SERVER_COORDINATION_DIR = "/lanes/other/adb-servers";
+      process.env.ANDROID_ADB_SERVER_PORT = "5038";
+      const second = await reservationsWithHostPorts(
+        new FakePortAvailabilityChecker(),
+        daemonRegistry(),
+      ).reserveEmulatorGrpcPort();
+      expect([first.port, second.port]).toEqual([8554, 8555]);
+    } finally {
+      keys.forEach((key, index) => {
+        const value = saved[index];
+        if (value === undefined) {
+          delete process.env[key];
+        } else {
+          process.env[key] = value;
+        }
+      });
+    }
+  });
+
   test("records the owner PID and launch time using the existing lock format", () => {
     const { files, directory, view } = harness();
     expect(view().claim(8554, { pid: 101, launchedAt: 1234 })?.port).toBe(8554);
@@ -292,5 +383,6 @@ describe("FileEmulatorGrpcPortRegistry", () => {
 describe("unit-test preload gRPC registry", () => {
   test("launches without an injected registry use an in-memory registry, not the lock directory", () => {
     expect(typeof testOverrides.emulatorGrpcPortRegistry).toBe("function");
+    expect(typeof testOverrides.emulatorGrpcPortListenerProbe).toBe("function");
   });
 });

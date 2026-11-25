@@ -5,6 +5,7 @@ import type { PerformanceTracker } from "./PerformanceTracker";
 import type { ProxySetupResult } from "./interfaces/ProxyManager";
 import type { PortAvailabilityChecker } from "./PortManager";
 import type { EmulatorGrpcPortRegistry } from "./android-cmdline-tools/emulatorGrpc/EmulatorGrpcPortRegistry";
+import type { EmulatorGrpcPortListenerProbe } from "./android-cmdline-tools/emulatorGrpc/EmulatorGrpcPortListenerProbe";
 
 /** The narrow readiness seam used by ToolExecutionContext. */
 export interface DeviceReadinessProxyDriver {
@@ -32,6 +33,8 @@ export const testOverrides: {
   hostPortAvailabilityChecker: PortAvailabilityChecker | undefined;
   /** Builds a fresh gRPC lease registry per reservation instance so unit tests never touch the lock directory. */
   emulatorGrpcPortRegistry: (() => EmulatorGrpcPortRegistry) | undefined;
+  /** Builds the gRPC listener probe so unit tests never connect to real host ports. */
+  emulatorGrpcPortListenerProbe: (() => EmulatorGrpcPortListenerProbe) | undefined;
   deviceReadinessProxyDriverProvider: DeviceReadinessProxyDriverProvider | null;
   telemetryNoOpDefault: boolean;
   /** Directory read by auxiliary socket configs during in-process tests. */
@@ -47,6 +50,7 @@ export const testOverrides: {
   gitMetadataClient: undefined,
   hostPortAvailabilityChecker: undefined,
   emulatorGrpcPortRegistry: undefined,
+  emulatorGrpcPortListenerProbe: undefined,
   deviceReadinessProxyDriverProvider: null,
   telemetryNoOpDefault: false,
   auxSocketDir: undefined,

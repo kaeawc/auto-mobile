@@ -1,9 +1,8 @@
 /**
- * The prototype web page's only script (#16346). It runs in the browser, so it is self-contained:
- * no imports and no closure over module state, because the page inlines `toString()` of it. It
- * switches between views the host pre-rendered and never runs spec logic. UI state stays in
- * memory: no storage, cookies or URL changes. Rotate animates the turn between the two
- * pre-rendered orientations unless the viewer prefers reduced motion.
+ * The prototype web page's runtime (#16346), run by the page bundle (#16528). It switches between
+ * the page's views and asks `ensureViews` to draw the ones the host did not inline, so it never runs
+ * spec logic itself. UI state stays in memory: no storage, cookies or URL changes. Rotate animates
+ * the turn between the two orientations' views unless the viewer prefers reduced motion.
  */
 /**
  * The scale a zoom step lands on: 50–400 %, except that a fitted scale already below 50 % is
@@ -47,7 +46,7 @@ export function prototypeWebScreenView<View extends { dataset: { screen?: string
   return views.find((view) => view.dataset.screen === screen) ?? views[0];
 }
 
-/** Where the viewer is among the pre-rendered views' dimensions besides the screen. */
+/** Where the viewer is among the views' dimensions besides the screen. */
 export interface PrototypeWebViewKey {
   readonly variant: string;
   readonly revision: string;
@@ -189,6 +188,7 @@ export function prototypeWebBrowserClock(): PrototypeWebClock {
 /**
  * Keeps every status bar clock (`[data-status="clock"]`) under `root` on the clock's local time:
  * writes the text now and again at each minute boundary. Nothing is scheduled without a clock.
+ * Returns a sync for views drawn after the start, which reads the marks again.
  */
 export function prototypeWebStartClock(
   root: { querySelectorAll(selector: string): Iterable<{ textContent: string | null }> },
@@ -197,20 +197,31 @@ export function prototypeWebStartClock(
     readonly clockText: typeof prototypeWebClockText;
     readonly clockDelay: typeof prototypeWebClockDelay;
   },
-): void {
-  const marks = Array.from(root.querySelectorAll('[data-status="clock"]'));
-  if (marks.length === 0) {
-    return;
-  }
-  const tick = () => {
+): () => void {
+  const marks = () => Array.from(root.querySelectorAll('[data-status="clock"]'));
+  const write = () => {
     const now = clock.now();
     const text = format.clockText(new Date(now));
-    marks.forEach((mark) => {
+    marks().forEach((mark) => {
       mark.textContent = text;
     });
-    clock.schedule(tick, format.clockDelay(now));
+    return now;
   };
-  tick();
+  let ticking = false;
+  const tick = () => {
+    clock.schedule(tick, format.clockDelay(write()));
+  };
+  // A view drawn later is synced at once, and starts the ticks when it brings the first mark.
+  const sync = () => {
+    if (ticking) {
+      write();
+    } else if (marks().length > 0) {
+      ticking = true;
+      tick();
+    }
+  };
+  sync();
+  return sync;
 }
 
 /** The elements one turn moves. */
@@ -326,10 +337,34 @@ export interface PrototypeWebRuntimeRules {
   readonly clockDelay: typeof prototypeWebClockDelay;
   readonly startClock: typeof prototypeWebStartClock;
   readonly browserClock: typeof prototypeWebBrowserClock;
+  /**
+   * Draws whichever of a key's views the page does not hold yet, and says whether it drew any
+   * (#16528). A page with every view already in it passes none.
+   */
+  readonly ensureViews?: (key: PrototypeWebViewKey) => boolean;
+}
+
+/**
+ * The page's views, read live from the document: asking for a key's views first draws the ones the
+ * page does not hold yet, and syncs the status bar clock when it drew any (#16528).
+ */
+function prototypeWebLiveViews(
+  doc: Document,
+  rules: Pick<PrototypeWebRuntimeRules, "ensureViews" | "viewMatches">,
+  syncClock: () => void,
+) {
+  const views = () => Array.from(doc.querySelectorAll<HTMLElement>("[data-view]"));
+  const matching = (key: PrototypeWebViewKey) => {
+    if (rules.ensureViews?.(key)) {
+      syncClock();
+    }
+    return views().filter((view) => rules.viewMatches(view.dataset, key));
+  };
+  return { views, matching };
 }
 
 export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
-  const { zoomScale, fitScale: fitted, wheelFactor, screenView, viewMatches } = rules;
+  const { zoomScale, fitScale: fitted, wheelFactor, screenView } = rules;
   const { rotation, animateTurn, heldView, relayout } = rules;
   const doc = document;
   const stage = doc.querySelector<HTMLElement>("[data-stage]");
@@ -337,7 +372,9 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   if (!stage || !viewport) {
     return;
   }
-  const views = Array.from(doc.querySelectorAll<HTMLElement>("[data-view]"));
+  // Every view's status bar clock follows the browser clock (#16585), views drawn later too.
+  const syncClock = rules.startClock(doc, rules.browserClock(), rules);
+  const { views, matching } = prototypeWebLiveViews(doc, rules, syncClock);
   const pick = (name: string) => doc.querySelector<HTMLElement>(`[data-control="${name}"]`);
   const variantSelect = pick("variant") as HTMLSelectElement | null;
   const screenSelect = pick("screen") as HTMLSelectElement | null;
@@ -366,7 +403,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
   const natural = state.frame;
   // `data-rotation-lock="on"` on `body` locks rotation; the quick settings tile flips it (#16547).
   const held = () => heldView(state.frame, natural, bodyData("rotationLock") === "on");
-  const revisionViews = () => views.filter((view) => viewMatches(view.dataset, state));
+  const revisionViews = () => matching(state);
   const current = () => screenView(revisionViews(), state.screen);
   // The picker lists the shown revision's own screens, so it never offers a view the page lacks.
   // A revision without the chosen screen shows its start, which becomes the chosen screen.
@@ -400,7 +437,7 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     const shown = current();
     syncScreens(shown);
     const degrees = (state.degrees = held().degrees);
-    views.forEach((view) => {
+    views().forEach((view) => {
       view.hidden = view !== shown;
       view.style.transform =
         view === shown && degrees !== 0 ? `translate(-50%, -50%) rotate(${degrees}deg)` : "";
@@ -488,7 +525,5 @@ export function prototypeWebPageRuntime(rules: PrototypeWebRuntimeRules): void {
     fit: fitView,
   });
   globalThis.addEventListener("resize", apply);
-  // Every view's status bar clock follows the browser clock (#16585).
-  rules.startClock(doc, rules.browserClock(), rules);
   apply();
 }

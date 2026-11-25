@@ -4,11 +4,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   buildPrototypeWebPage,
-  largestPinnedView,
-  MAX_PROTOTYPE_WEB_RUNTIME_BYTES,
-  PROTOTYPE_WEB_RUNTIME,
+  PROTOTYPE_WEB_PAGE_SCRIPT,
   type PrototypeWebPageInput,
 } from "../../../../src/features/prototype/web/webPage";
+import { prototypeWebPageBundle } from "../../../../src/features/prototype/web/prototypeWebPageBundle";
 import {
   prototypeWebClockDelay,
   prototypeWebClockText,
@@ -22,6 +21,7 @@ import {
   prototypeWebWheelFactor,
   prototypeWebZoomScale,
 } from "../../../../src/features/prototype/web/webPageRuntime";
+import { webPageData, webPageDrawnViews, webPageShownView } from "./webPageDrawn";
 
 const reference = JSON.parse(
   readFileSync(
@@ -52,6 +52,8 @@ const input: PrototypeWebPageInput = {
     },
   ],
 };
+/** Every view the page shows once each is visited: the host's first, then the bundle's. */
+const drawn = (page: { readonly html: string }) => webPageDrawnViews(page.html);
 const controls = (html: string) =>
   [...html.slice(0, html.indexOf("<script")).matchAll(/data-control="([^"]+)"/g)]
     .map((match) => match[1])
@@ -66,14 +68,23 @@ describe("prototype web page (#16346)", () => {
     expect(page.sha256).toBe(createHash("sha256").update(page.html).digest("hex"));
   });
 
-  test("pins its only script by hash and loads nothing from the network", () => {
-    const hash = createHash("sha256").update(PROTOTYPE_WEB_RUNTIME).digest("base64");
+  test("pins its only script, the page bundle, by hash and loads nothing from the network", () => {
+    expect(PROTOTYPE_WEB_PAGE_SCRIPT).toBe(prototypeWebPageBundle());
+    const hash = createHash("sha256").update(PROTOTYPE_WEB_PAGE_SCRIPT).digest("base64");
     expect(page.html).toContain(
       `default-src 'none'; script-src 'sha256-${hash}'; style-src 'unsafe-inline'; img-src data:; font-src data:`,
     );
-    expect(page.html.match(/<script/g)).toHaveLength(1);
-    expect(page.html).not.toMatch(/\s(src|href)="(?!data:|#)/);
-    expect(page.html).not.toMatch(/@import|url\((?!data:)/);
+    // One script runs; the other is the JSON data block, which a browser never executes.
+    expect(page.html.match(/<script>/g)).toHaveLength(1);
+    expect(
+      page.html.match(/<script type="application\/json" data-prototype-page="">/g),
+    ).toHaveLength(1);
+    expect(page.html.match(/<script/g)).toHaveLength(2);
+    const markup = page.html.replace(PROTOTYPE_WEB_PAGE_SCRIPT, "");
+    expect(markup).not.toMatch(/\s(src|href)="(?!data:|#)/);
+    expect(markup).not.toMatch(/@import|url\((?!data:)/);
+    // The script draws only `data:` and in-document `#` references, as the host's stills do.
+    expect(PROTOTYPE_WEB_PAGE_SCRIPT).not.toMatch(/@import|url\((?!data:|#)/);
   });
 
   test("declares an empty icon, so no browser fetches /favicon.ico against the CSP (#16459)", () => {
@@ -100,16 +111,28 @@ describe("prototype web page (#16346)", () => {
     expect(prototypeWebWheelFactor(3)).toBeCloseTo(1 / 1.1);
   });
 
-  test("the inlined runtime carries every rule it is handed", () => {
-    for (const rule of [
-      "prototypeWebZoomScale",
-      "prototypeWebFitScale",
-      "prototypeWebWheelFactor",
-      "prototypeWebScreenView",
-      "prototypeWebViewMatches",
-    ]) {
-      expect(PROTOTYPE_WEB_RUNTIME).toContain(`function ${rule}(`);
-    }
+  test("the data block names every inlined revision's spec, and no spec text can close it", () => {
+    const data = webPageData(page.html);
+    expect(data.revisions.map((entry) => [entry.variant, entry.revision])).toEqual([
+      ["a", 2],
+      ["a", 1],
+      ["b", 1],
+    ]);
+    expect(data.revisions[0]!.spec).toEqual(reference);
+    expect(data.frame).toBe("pixel-9");
+    // The title's `<v2>` is in the page, so a spec holding `</script>` would be escaped too.
+    const closing = buildPrototypeWebPage({
+      ...input,
+      variants: [
+        {
+          id: "a",
+          label: "A",
+          revisions: [{ revision: 1, operation: "show", spec: tiny("</script><!--") }],
+        },
+      ],
+    });
+    expect(webPageData(closing.html).revisions[0]!.spec).toEqual(tiny("</script><!--"));
+    expect(closing.html.match(/<\/script>/g)).toHaveLength(2);
   });
 
   test("the clock reads local time in the stills' fixed 9:41 form (#16585)", () => {
@@ -160,22 +183,35 @@ describe("prototype web page (#16346)", () => {
     expect(pending).toEqual([]);
   });
 
-  test("the inlined runtime carries the clock rules and updates the status bar clock", () => {
-    for (const rule of [
-      "prototypeWebClockText",
-      "prototypeWebClockDelay",
-      "prototypeWebStartClock",
-      "prototypeWebBrowserClock",
-    ]) {
-      expect(PROTOTYPE_WEB_RUNTIME).toContain(`function ${rule}(`);
-    }
-    expect(PROTOTYPE_WEB_RUNTIME).toContain('[data-status="clock"]');
+  test("a view drawn after the start is synced at once and starts the ticks it needs (#16528)", () => {
+    let nowMs = new Date(2026, 0, 1, 13, 7, 30).getTime();
+    const pending: { run: () => void; ms: number }[] = [];
+    const clock = {
+      now: () => nowMs,
+      schedule: (run: () => void, ms: number) => void pending.push({ run, ms }),
+    };
+    const marks: { textContent: string | null }[] = [];
+    const format = { clockText: prototypeWebClockText, clockDelay: prototypeWebClockDelay };
+    const sync = prototypeWebStartClock({ querySelectorAll: () => marks }, clock, format);
+    expect(pending).toEqual([]);
+    marks.push({ textContent: "9:41" });
+    sync();
+    expect(marks.map((mark) => mark.textContent)).toEqual(["1:07"]);
+    expect(pending.map((entry) => entry.ms)).toEqual([30_000]);
+    marks.push({ textContent: "9:41" });
+    sync();
+    // Already ticking: the new mark is written, and no second tick is scheduled.
+    expect(marks.map((mark) => mark.textContent)).toEqual(["1:07", "1:07"]);
+    expect(pending).toHaveLength(1);
+    nowMs += 30_000;
+    pending.shift()!.run();
+    expect(marks.map((mark) => mark.textContent)).toEqual(["1:08", "1:08"]);
   });
 
-  test("keeps the runtime within its budget", () => {
-    expect(Buffer.byteLength(PROTOTYPE_WEB_RUNTIME)).toBeLessThanOrEqual(
-      MAX_PROTOTYPE_WEB_RUNTIME_BYTES,
-    );
+  test("the page script is the bundle that runs the runtime and draws from the data", () => {
+    for (const marker of ['[data-status="clock"]', "data-prototype-page", "[data-view]"]) {
+      expect(PROTOTYPE_WEB_PAGE_SCRIPT).toContain(marker);
+    }
   });
 
   test("offers only rotate, zoom and pan, the 3D toggle, a variant switcher and revision history", () => {
@@ -197,14 +233,18 @@ describe("prototype web page (#16346)", () => {
     expect(controls(single.html)).not.toContain("variant");
   });
 
-  test("pre-renders both orientations of every inlined revision and shows the latest first", () => {
+  test("draws only the view shown first; the bundle draws every other view from the data", () => {
     expect(page.inlinedRevisions).toEqual({ a: [2, 1], b: [1] });
-    // The reference checkout's stack has two screens, so its revision has two views per orientation.
-    expect(page.html.match(/data-view=""/g)).toHaveLength(8);
+    expect(page.html.match(/data-view=""/g)).toHaveLength(1);
+    expect(page.html.match(/data-view="" hidden=""/g)).toBeNull();
     expect(page.html).toContain(
       '<body data-variant="a" data-revision="2" data-platform="android" data-orientation="portrait">',
     );
-    expect(page.html.match(/data-view="" hidden=""/g)).toHaveLength(7);
+    // The reference checkout's stack has two screens, so its revision has two views per orientation.
+    const views = webPageDrawnViews(page.html);
+    expect(views.match(/data-view=""/g)).toHaveLength(8);
+    expect(views.match(/data-view="" hidden=""/g)).toHaveLength(7);
+    expect(views.startsWith(webPageShownView(page.html))).toBe(true);
   });
 
   test("lists revisions newest first with the operation that made them", () => {
@@ -221,7 +261,7 @@ describe("prototype web page (#16346)", () => {
   });
 
   test("drops older revisions to stay within the budget, keeping each variant's latest", () => {
-    const maxBytes = Buffer.byteLength(page.html) - 1000;
+    const maxBytes = Buffer.byteLength(page.html) - 1;
     const small = buildPrototypeWebPage({ ...input, maxBytes });
     expect(small.inlinedRevisions.a).toEqual([2]);
     expect(Buffer.byteLength(small.html)).toBeLessThanOrEqual(maxBytes);
@@ -242,8 +282,8 @@ describe("prototype web page (#16346)", () => {
         b!,
       ],
     };
-    // More than revision 2's second screen, so revision 2 cannot stay even with its start alone.
-    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(three).html) - 8000;
+    // One byte short of every revision: revision 2, neither latest nor requested, goes.
+    const maxBytes = Buffer.byteLength(buildPrototypeWebPage(three).html) - 1;
     const pinned = buildPrototypeWebPage({ ...three, revision: 1, maxBytes });
     expect(pinned.inlinedRevisions.a).toEqual([3, 1]);
     expect(pinned.html).toContain(
@@ -267,21 +307,10 @@ describe("prototype web page (#16346)", () => {
     expect(withEmpty.html).toContain('value="b"');
   });
 
-  test("refuses when even the latest revisions do not fit, naming the largest view", () => {
+  test("refuses when even the latest revisions do not fit, naming the largest revision", () => {
     expect(() => buildPrototypeWebPage({ ...input, maxBytes: 10 * 1024 })).toThrow(
-      /would exceed 10240 bytes even with only the latest revision of each variant and the revision shown first\. Largest view: variant a revision 2/,
+      /would exceed 10240 bytes even with only the latest revision of each variant and the revision shown first\. Largest revision: variant a revision 2 \(\d+ bytes of spec JSON\)/,
     );
-  });
-
-  test("names the largest single view, even outside the group with the most bytes", () => {
-    const view = (variant: string, bytes: number) => ({ variant, html: "x".repeat(bytes) });
-    // Group a holds more bytes in all (180), but group b holds the largest view (120).
-    const largest = largestPinnedView([
-      [view("a", 90), view("a", 90)],
-      [view("b", 40), view("b", 120)],
-    ]);
-    expect(largest.variant).toBe("b");
-    expect(largest.html).toHaveLength(120);
   });
 
   test("an unknown variant lists the valid ones", () => {
@@ -378,12 +407,13 @@ describe("prototype web page screen picker (#16382)", () => {
   });
 
   test("a page without a multi-screen stack has no screen views", () => {
-    expect(pageOf(stackSpec("a", ["a"])).html).not.toContain("data-screen");
-    expect(pageOf(tiny("plain")).html).not.toContain("data-screen");
+    expect(drawn(pageOf(stackSpec("a", ["a"])))).not.toContain("data-screen");
+    expect(drawn(pageOf(tiny("plain")))).not.toContain("data-screen");
   });
 
-  test("pre-renders both orientations of every screen, start first, and shows the start", () => {
-    const { html } = pageOf(stackSpec("b", ["a", "b", "c"]));
+  test("draws both orientations of every screen, start first, and shows the start", () => {
+    const page = pageOf(stackSpec("b", ["a", "b", "c"]));
+    const html = drawn(page);
     expect(attrsOf(html, "data-screen")).toEqual(["b", "b", "a", "a", "c", "c"]);
     expect(attrsOf(html, "data-orientation")).toEqual([
       "portrait",
@@ -397,13 +427,14 @@ describe("prototype web page screen picker (#16382)", () => {
     expect(html).toContain("c: </span>");
     expect(shownScreen(html)).toBe("b");
     expect(html.match(/data-view="" hidden=""/g)).toHaveLength(5);
-    expect(picker(html)).toEqual(["b", "a", "c"]);
-    expect(html).toContain('<select aria-label="Screen" data-control="screen">');
+    expect(picker(page.html)).toEqual(["b", "a", "c"]);
+    expect(page.html).toContain('<select aria-label="Screen" data-control="screen">');
+    expect(shownScreen(page.html)).toBe("b");
   });
 
   test("the start screen's view is the page's view without a picker", () => {
-    const { html } = pageOf(stackSpec("a", ["a", "b"]));
-    const single = pageOf(stackSpec("a", ["a"])).html;
+    const html = drawn(pageOf(stackSpec("a", ["a", "b"])));
+    const single = drawn(pageOf(stackSpec("a", ["a"])));
     const shown = (page: string) =>
       /data-view="">(.*?)<\/div><div data-orientation="landscape"/.exec(page)?.[1];
     expect(shown(html)).toBeDefined();
@@ -411,8 +442,9 @@ describe("prototype web page screen picker (#16382)", () => {
   });
 
   test("lists the shown revision's screens; every revision keeps its own views", () => {
-    const { html } = pageOf(stackSpec("x", ["x", "y"]), stackSpec("a", ["a", "b", "c"]));
-    expect(picker(html)).toEqual(["a", "b", "c"]);
+    const page = pageOf(stackSpec("x", ["x", "y"]), stackSpec("a", ["a", "b", "c"]));
+    const html = drawn(page);
+    expect(picker(page.html)).toEqual(["a", "b", "c"]);
     expect(attrsOf(html, "data-revision")).toEqual([
       "2",
       "2",
@@ -439,17 +471,19 @@ describe("prototype web page screen picker (#16382)", () => {
     ]);
   });
 
-  test("keeps the start screen and as many others as fit when the latest's screens do not", () => {
+  test("a revision is drawn whole from its one spec, so the latest is never cut to fewer screens", () => {
     const spec = stackSpec("a", ["a", "b", "c"], "x".repeat(4000));
-    const full = Buffer.byteLength(pageOf(spec).html);
-    const page = buildPrototypeWebPage({
-      title: "Stack",
-      maxBytes: full - 1,
-      variants: [{ id: "a", label: "A", revisions: [{ revision: 1, operation: "show", spec }] }],
-    });
-    expect(attrsOf(page.html, "data-screen")).toEqual(["a", "a", "b", "b"]);
-    expect(picker(page.html)).toEqual(["a", "b"]);
-    expect(Buffer.byteLength(page.html)).toBeLessThanOrEqual(full - 1);
+    const page = pageOf(spec);
+    expect(attrsOf(drawn(page), "data-screen")).toEqual(["a", "a", "b", "b", "c", "c"]);
+    expect(picker(page.html)).toEqual(["a", "b", "c"]);
+    // Short of what the one revision's spec needs, the page is refused, not cut to its start.
+    expect(() =>
+      buildPrototypeWebPage({
+        title: "Stack",
+        maxBytes: Buffer.byteLength(page.html) - 4000,
+        variants: [{ id: "a", label: "A", revisions: [{ revision: 1, operation: "show", spec }] }],
+      }),
+    ).toThrow(/Largest revision: variant a revision 1/);
   });
 
   test("keeps every screen of the latest revision before an older revision", () => {
@@ -474,11 +508,11 @@ describe("prototype web page screen picker (#16382)", () => {
     });
     expect(both.inlinedRevisions).toEqual({ a: [2, 1] });
     expect(page.inlinedRevisions).toEqual({ a: [2] });
-    expect(attrsOf(page.html, "data-screen")).toEqual(["a", "a", "b", "b"]);
+    expect(attrsOf(drawn(page), "data-screen")).toEqual(["a", "a", "b", "b"]);
     expect(Buffer.byteLength(page.html)).toBeLessThanOrEqual(maxBytes);
   });
 
-  test("an older revision keeps its start screen and as many others as fit", () => {
+  test("an older revision is kept whole or not at all", () => {
     const older = stackSpec("x", ["x", "y"], "o".repeat(4000));
     const latest = stackSpec("a", ["a", "b"], "n".repeat(4000));
     const maxBytes = Buffer.byteLength(pageOf(older, latest).html) - 1;
@@ -496,8 +530,8 @@ describe("prototype web page screen picker (#16382)", () => {
         },
       ],
     });
-    expect(page.inlinedRevisions).toEqual({ a: [2, 1] });
-    expect(attrsOf(page.html, "data-screen")).toEqual(["a", "a", "b", "b", "x", "x"]);
+    expect(page.inlinedRevisions).toEqual({ a: [2] });
+    expect(attrsOf(drawn(page), "data-screen")).toEqual(["a", "a", "b", "b"]);
     expect(Buffer.byteLength(page.html)).toBeLessThanOrEqual(maxBytes);
   });
 
@@ -569,8 +603,9 @@ describe("prototype web page rotation (#16545)", () => {
   });
 
   test("a watch has only a portrait view and no rotate control (#16446)", () => {
-    const html = buildPrototypeWebPage({ ...input, frame: "wearos-small-round" }).html;
-    expect(html).not.toContain('data-control="rotate"');
+    const page = buildPrototypeWebPage({ ...input, frame: "wearos-small-round" });
+    const html = drawn(page);
+    expect(page.html).not.toContain('data-control="rotate"');
     expect(html).not.toContain('data-orientation="landscape"');
     expect(html).toMatch(
       /data-orientation="portrait" data-revision="2"[^>]*data-variant="a" data-view="">/,
@@ -579,10 +614,11 @@ describe("prototype web page rotation (#16545)", () => {
 
   test("a TV or car opens in landscape, its only view, with no rotate control (#16446)", () => {
     for (const frame of ["android-tv-1080p", "apple-tv", "car-1024p-landscape"]) {
-      const html = buildPrototypeWebPage({ ...input, frame }).html;
-      expect(html).not.toContain('data-control="rotate"');
+      const page = buildPrototypeWebPage({ ...input, frame });
+      const html = drawn(page);
+      expect(page.html).not.toContain('data-control="rotate"');
       expect(html).not.toContain('data-orientation="portrait"');
-      expect(html).toMatch(/<body [^>]*data-orientation="landscape"/);
+      expect(page.html).toMatch(/<body [^>]*data-orientation="landscape"/);
       // The first view is shown: no `hidden` on the single landscape view of the latest revision.
       expect(html).toMatch(
         /data-orientation="landscape" data-revision="2"[^>]*data-variant="a" data-view="">/,
@@ -591,18 +627,17 @@ describe("prototype web page rotation (#16545)", () => {
   });
 
   test("a phone keeps both orientations, opens in portrait and offers rotate", () => {
-    const html = buildPrototypeWebPage(input).html;
-    expect(html).toContain('data-control="rotate"');
-    expect(html).toMatch(/<body [^>]*data-orientation="portrait"/);
-    expect(html).toContain('data-orientation="landscape"');
+    const page = buildPrototypeWebPage(input);
+    expect(page.html).toContain('data-control="rotate"');
+    expect(page.html).toMatch(/<body [^>]*data-orientation="portrait"/);
+    expect(drawn(page)).toContain('data-orientation="landscape"');
   });
 
   test("tells the runtime the frame's platform and inlines the rotation rule", () => {
     const ios = buildPrototypeWebPage({ ...input, frame: "iphone-16" });
     expect(ios.html).toContain('data-platform="ios"');
     expect(buildPrototypeWebPage(input).html).toContain('data-platform="android"');
-    expect(PROTOTYPE_WEB_RUNTIME).toContain("rotation: ");
-    expect(PROTOTYPE_WEB_RUNTIME).toContain("prefers-reduced-motion: reduce");
+    expect(PROTOTYPE_WEB_PAGE_SCRIPT).toContain("prefers-reduced-motion: reduce");
   });
 });
 
@@ -650,11 +685,8 @@ describe("prototype web page rotation lock (#16587)", () => {
     ]);
   });
 
-  test("the inlined runtime carries the lock rules and watches the body's lock attribute", () => {
-    expect(PROTOTYPE_WEB_RUNTIME).toContain("heldView: ");
-    expect(PROTOTYPE_WEB_RUNTIME).toContain("relayout: ");
-    expect(PROTOTYPE_WEB_RUNTIME).toContain("viewportGestures: ");
-    expect(PROTOTYPE_WEB_RUNTIME).toContain("data-rotation-lock");
+  test("the page script watches the body's lock attribute", () => {
+    expect(PROTOTYPE_WEB_PAGE_SCRIPT).toContain("data-rotation-lock");
   });
 });
 
@@ -671,8 +703,9 @@ describe("prototype web page postures (#16445)", () => {
       (match) => `${match[2]}/${match[1]}`,
     );
 
-  test("a foldable pre-renders every posture in both orientations, opened portrait shown first", () => {
-    const { html } = buildPrototypeWebPage(foldInput("pixel-fold"));
+  test("a foldable draws every posture in both orientations, opened portrait shown first", () => {
+    const page = buildPrototypeWebPage(foldInput("pixel-fold"));
+    const html = drawn(page);
     expect(viewKeys(html)).toEqual([
       "opened/portrait",
       "opened/landscape",
@@ -681,10 +714,13 @@ describe("prototype web page postures (#16445)", () => {
       "half_opened/portrait",
       "half_opened/landscape",
     ]);
-    expect(html).toContain('data-orientation="portrait" data-posture="opened" data-hinge-axis=');
+    expect(page.html).toContain(
+      'data-orientation="portrait" data-posture="opened" data-hinge-axis=',
+    );
     // Only the first view drops `hidden`.
     expect(html.match(/data-view=""(?! hidden)/g)).toHaveLength(1);
     expect(html).toMatch(/data-posture="opened" data-revision="1" data-variant="a" data-view="">/);
+    expect(viewKeys(page.html)).toEqual(["opened/portrait"]);
   });
 
   test("the toolbar offers the frame's postures in registry order, the shown one selected", () => {
@@ -714,10 +750,11 @@ describe("prototype web page postures (#16445)", () => {
         ],
       },
     };
-    const { html } = buildPrototypeWebPage({
+    const page = buildPrototypeWebPage({
       ...foldInput("pixel-fold"),
       variants: [{ id: "a", label: "A", revisions: [{ revision: 1, operation: "show", spec }] }],
     });
+    const html = drawn(page);
     const screens = [
       ...html.matchAll(
         /data-orientation="(\w+)" data-posture="(\w+)" data-revision="1"(?: data-screen="(\w+)")? data-variant="a" data-view=""/g,
@@ -731,18 +768,21 @@ describe("prototype web page postures (#16445)", () => {
       "opened/portrait/-",
     ]);
     // The picker offers the screens some view has; the runtime narrows it to the shown view's.
-    expect(html).toMatch(/data-control="screen" hidden=""|data-control="screen"[^>]*>/);
-    expect(html).toContain('<option value="detail">detail</option>');
+    expect(page.html).toMatch(/data-control="screen" hidden=""|data-control="screen"[^>]*>/);
+    expect(page.html).toContain('<option value="detail">detail</option>');
   });
 
   test("a frame without postures has no posture picker, attribute or posture views", () => {
-    const { html } = buildPrototypeWebPage(foldInput("pixel-9"));
+    const page = buildPrototypeWebPage(foldInput("pixel-9"));
+    // The page script names the attribute; the page's markup and views carry none.
+    const html = page.html.replace(PROTOTYPE_WEB_PAGE_SCRIPT, "");
     expect(html).not.toContain("data-posture");
+    expect(drawn(page)).not.toContain("data-posture");
     expect(html).not.toContain('<select aria-label="Layout posture"');
   });
 
   test("the runtime matches a view by variant, revision, orientation and posture", () => {
-    expect(PROTOTYPE_WEB_RUNTIME).toContain('pick("layout-posture")');
+    expect(PROTOTYPE_WEB_PAGE_SCRIPT).toContain('"layout-posture"');
     const key = { variant: "a", revision: "1", orientation: "portrait", posture: "closed" };
     const view = { ...key };
     expect(prototypeWebViewMatches(view, key)).toBe(true);

@@ -4,6 +4,7 @@ export {
   type IosForegroundRestorer,
 } from "../../utils/ios-cmdline-tools/IosForegroundRestorer";
 import type { BootedDevice, ObserveResult } from "../../models";
+import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKind";
 import { usableForegroundAppId } from "../observe/observationVerdict";
 
 const SPRINGBOARD_BUNDLE_ID = "com.apple.springboard";
@@ -30,20 +31,24 @@ export class IosPreLockForegroundRegistry {
     }
   }
 
-  /** Returns and clears the recorded app, so one lock restores at most once. */
-  take(deviceId: string): string | undefined {
-    const appId = this.apps.get(deviceId);
+  /** The recorded app, left in place so a failed unlock can still restore it on a retry. */
+  get(deviceId: string): string | undefined {
+    return this.apps.get(deviceId);
+  }
+
+  /** Drops the record once the lock it belongs to is over, so one lock restores at most once. */
+  clear(deviceId: string): void {
     this.apps.delete(deviceId);
-    return appId;
   }
 }
 
 export const iosPreLockForeground = new IosPreLockForegroundRegistry();
 
 /**
- * After a plain iOS `power` press, record the app the pre-press observation showed in front. A
- * pre-press read of a locked device leaves the record alone: that press woke the lock screen and
- * the app behind it is still the one recorded when it locked.
+ * After a plain iOS Simulator `power` press, record the app the pre-press observation showed in
+ * front. A pre-press read of a locked device leaves the record alone: that press woke the lock
+ * screen and the app behind it is still the one recorded when it locked. Physical devices record
+ * nothing, since `wakeAndUnlock` restores only on a simulator.
  */
 export function recordIosAppBeforePowerPress(
   press: {
@@ -58,6 +63,7 @@ export function recordIosAppBeforePowerPress(
   const { device, button, pressSucceeded, durationMs, prePress } = press;
   if (
     device.platform !== "ios" ||
+    resolveIosDeviceKind({ deviceId: device.deviceId }) !== "simulator" ||
     button.toLowerCase() !== "power" ||
     !pressSucceeded ||
     durationMs !== undefined ||

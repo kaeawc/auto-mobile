@@ -213,9 +213,9 @@ export class WakeAndUnlock {
     }
     const simulator = resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
     const deadline = this.iosUnlockDeadline(transportDeadlineMs);
-    // Taken even when already unlocked: a record from an earlier lock must not outlive it.
+    // Read, not cleared: a failed unlock keeps the record so a retry that succeeds can restore.
     const appBeforeLock = simulator
-      ? this.iosPreLockForeground.take(this.device.deviceId)
+      ? this.iosPreLockForeground.get(this.device.deviceId)
       : undefined;
     if (simulator) {
       const initialLock = await this.readIosLockState(deadline, signal);
@@ -223,13 +223,15 @@ export class WakeAndUnlock {
         throw new ActionableError("wakeAndUnlock: could not read the iOS lock state before unlock");
       }
       if (!initialLock.locked) {
+        // Already unlocked: the lock the record belongs to is over and must not restore later.
+        this.iosPreLockForeground.clear(this.device.deviceId);
         return this.iosResult(true, false);
       }
     }
 
     const recoveryResult = await this.prepareIosUnlock(deadline, simulator, signal);
     if (recoveryResult) {
-      return recoveryResult;
+      return this.restoreAppBeforeLock(recoveryResult, appBeforeLock, deadline, signal);
     }
     throwIfAborted(signal);
     let stageLock: DeviceLockState | undefined;
@@ -269,7 +271,8 @@ export class WakeAndUnlock {
   /**
    * Every simulator unlock path wakes through SpringBoard, which lands on the home screen and
    * backgrounds the app that was in front before the lock (#19231). Bring that app back after a
-   * verified unlock; a failure is a warning, since the device is unlocked either way.
+   * verified unlock; a failure is a warning, since the device is unlocked either way. The record
+   * is cleared only here, after the unlock succeeded, so one lock restores at most once.
    */
   private async restoreAppBeforeLock(
     result: WakeAndUnlockResult,
@@ -277,7 +280,11 @@ export class WakeAndUnlock {
     deadline: number,
     signal?: AbortSignal,
   ): Promise<WakeAndUnlockResult> {
-    if (!result.success || !appId) {
+    if (!result.success) {
+      return result;
+    }
+    this.iosPreLockForeground.clear(this.device.deviceId);
+    if (!appId) {
       return result;
     }
     const timeoutMs = Math.min(IOS_FOREGROUND_RESTORE_MAX_MS, deadline - this.timer.now());

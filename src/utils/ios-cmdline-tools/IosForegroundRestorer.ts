@@ -1,5 +1,6 @@
 import { errorMessage } from "../describeUnknownError";
 import { logger } from "../logger";
+import { findIosSimulatorAppProcess, SimulatorIosCrashBackend } from "./IosCrashBackend";
 import type { SimCtl } from "./SimCtlClient";
 
 /** Upper bound for the `simctl launch` that brings a running app back to the front. */
@@ -16,7 +17,9 @@ export interface IosForegroundRestorer {
 
 /**
  * `simctl launch` of a running app activates its existing process (no relaunch and no state
- * loss), the same way tapping its icon does.
+ * loss), the same way tapping its icon does. The app is brought back only while its process is
+ * still in `launchctl list`: `simctl launch` of an app that was terminated, crashed or lost to a
+ * reboot since the lock would cold-launch it.
  */
 export class SimctlIosForegroundRestorer implements IosForegroundRestorer {
   constructor(
@@ -34,6 +37,14 @@ export class SimctlIosForegroundRestorer implements IosForegroundRestorer {
       return warning;
     }
     try {
+      const list = await new SimulatorIosCrashBackend(this.deviceId, this.simctl).listProcesses(
+        options,
+      );
+      if (!findIosSimulatorAppProcess(list.stdout, appId)) {
+        const warning = `${appId} was not brought back to the front: it is no longer running; call launchApp to start it`;
+        logger.info(`[IosForegroundRestore] ${warning}`);
+        return warning;
+      }
       await this.simctl.executeCommandArgs(
         ["launch", this.deviceId, appId],
         options.timeoutMs,

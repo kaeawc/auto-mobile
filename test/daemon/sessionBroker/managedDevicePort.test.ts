@@ -208,8 +208,8 @@ describe("ManagedDevicePort preparation and release", () => {
           redriveBinding: async () => ({ kind: "clear", redriven: [] }),
         },
         disposableAppExpirySweeper: {
-          sweepExpired: async (deviceId: string, reportRemoval: (appId: string) => void) => {
-            calls.push(deviceId);
+          sweepExpired: async (deviceId, platform, reportRemoval) => {
+            calls.push(`${platform}:${deviceId}`);
             if (outcome === "deadline") {
               sweepSignal = getAbortSignal();
               timer.advanceTime(1000);
@@ -229,8 +229,8 @@ describe("ManagedDevicePort preparation and release", () => {
           preparationTimeoutMs: 1000,
         });
         expect(preparation.sessionId).toBe("session-1");
-        expect(calls).toEqual(outcome === "ios" ? [] : ["transport-1"]);
-        if (outcome === "removed" || outcome === "failure") {
+        expect(calls).toEqual([`${outcome === "ios" ? "ios" : "android"}:transport-1`]);
+        if (outcome === "removed" || outcome === "failure" || outcome === "ios") {
           expect(preparation).toMatchObject({ expiredDisposableAppsRemoved: ["expired-app"] });
           expect(warn).toHaveBeenCalledWith(expect.stringContaining("expired-app"));
         }

@@ -205,10 +205,10 @@ export async function openSessionBrokerService(
       timer: options.timer,
       leaseKeepalive: preparationLeaseKeepalive(options),
       disposableAppExpirySweeper: {
-        async sweepExpired(deviceId, reportRemoval) {
+        async sweepExpired(deviceId, platform, reportRemoval) {
           await defaultDisposableAppManager({ timer: options.timer }).sweepExpired(
             deviceId,
-            "android",
+            platform,
             reportRemoval,
           );
         },

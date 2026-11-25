@@ -77,6 +77,13 @@ describe("disposableAppDeclarations", () => {
     expect(declarations.ios).toEqual({ usageDescriptions: {}, backgroundModes: [] });
   });
 
+  test("a cast module declares ACCESS_NETWORK_STATE beside INTERNET for Google Cast", () => {
+    const declarations = disposableAppDeclarations({ requires: { platform: ["cast"] } });
+    expect(declarations.permissions).toEqual([]);
+    expect(declarations.android.permissions).toEqual([`${P}ACCESS_NETWORK_STATE`, `${P}INTERNET`]);
+    expect(declarations.ios).toEqual({ usageDescriptions: {}, backgroundModes: [] });
+  });
+
   test("modules without install-time permissions add none", () => {
     const declarations = disposableAppDeclarations({ requires: { platform: ["clipboard"] } });
     expect(declarations.android.permissions).toEqual([`${P}INTERNET`]);

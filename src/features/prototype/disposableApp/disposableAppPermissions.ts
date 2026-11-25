@@ -40,6 +40,8 @@ export const DISPOSABLE_APP_ANDROID_MODULE_PERMISSIONS: Readonly<
   Record<string, readonly string[]>
 > = {
   biometric: [`${ANDROID}USE_BIOMETRIC`],
+  // Google Cast needs INTERNET (always declared) and ACCESS_NETWORK_STATE (#14239).
+  cast: [`${ANDROID}ACCESS_NETWORK_STATE`],
 };
 
 /** Contract background kind → Android foreground-service type permissions. */

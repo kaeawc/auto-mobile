@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Request number-to-text vectors (JSON number literal and its JavaScript string form)",
+  "source": "commit 2c283d97d",
+  "reason": "authored vectors for number formatting logic shared by TS, Kotlin and Swift",
+}

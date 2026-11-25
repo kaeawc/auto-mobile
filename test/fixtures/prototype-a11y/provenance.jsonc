@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "One prototype spec per accessibility rule (clean, small touch target, low contrast, unlabeled controls)",
+  "source": "PR #15732",
+  "reason": "authored prototype specs for audit rule logic",
+}

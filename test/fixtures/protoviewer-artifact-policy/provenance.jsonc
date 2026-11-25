@@ -1,0 +1,18 @@
+{
+  "provenance": "captured",
+  "summary": "aapt2 manifest/resource dumps of release APKs and plutil/codesign/nm output of ProtoViewer simulator-app variants for the release-artifact policy gate",
+  "source": "PR #15386, scripts/release/capture-protoviewer-policy-fixtures.sh (recaptured by later manifest changes through #18799)",
+  "capturedOn": [
+    {
+      "device": "host (aapt2 dump on ProtoViewer and CtrlProxy release APKs)",
+      "os": "host OS not recorded",
+      "formFactor": "host",
+    },
+    {
+      "device": "macOS host (plutil, codesign, nm on the ProtoViewer simulator app)",
+      "os": "macOS, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-26",
+}

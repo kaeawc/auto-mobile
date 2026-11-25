@@ -1,0 +1,22 @@
+{
+  "provenance": "captured",
+  "summary": "xcrun simctl list devicetypes -j and list runtimes -j from Xcode 26.6",
+  "source": "README.md, PR #12310",
+  "capturedOn": [
+    {
+      "device": "macOS host (Xcode 26.6, 17F113)",
+      "os": "macOS, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-14",
+  "parts": {
+    "derived-oldest-first-devicetypes.json": {
+      "provenance": "derived",
+      "summary": "The device type list in oldest-first order",
+      "source": "README.md",
+      "derivedFrom": "xcode-26.6-devicetypes.json",
+      "edits": "stably sorted ascending by minRuntimeVersion; contents otherwise identical",
+    },
+  },
+}

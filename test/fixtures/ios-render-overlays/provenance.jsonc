@@ -1,0 +1,9 @@
+{
+  "provenance": "captured",
+  "summary": "osascript stdout and stderr from setting Core Animation debug options on a simulator",
+  "source": "PR #19106, test/utils/ios-cmdline-tools/SimulatorRenderOverlays.test.ts",
+  "capturedOn": [
+    { "device": "iPhone 17 Pro simulator (Xcode 27.2)", "os": "iOS 27.2", "formFactor": "phone" },
+  ],
+  "date": "2026-11-23",
+}

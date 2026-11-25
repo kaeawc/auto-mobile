@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "uiautomator dump --display 2 of an untracked overlay display",
+  "source": "PR #17137",
+  "capturedOn": [
+    {
+      "device": "Android emulator (l16969b-api35, google_apis arm64)",
+      "os": "Android 15 (API 35)",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-05",
+}

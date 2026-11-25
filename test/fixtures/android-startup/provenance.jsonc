@@ -1,0 +1,34 @@
+{
+  "provenance": "captured",
+  "summary": "am start -W, resolve-activity, logcat fully-drawn and SystemPerformanceHinter output for measureStartup",
+  "source": "README.md, PR #18746, PR #18917",
+  "capturedOn": [
+    {
+      "device": "API 35 google_apis arm64 emulator (Pixel 6 profile)",
+      "os": "Android API 35",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Pixel Tablet AVD (API 35 google_apis arm64, AE3A.240806.043)",
+      "os": "Android API 35",
+      "formFactor": "tablet",
+    },
+  ],
+  "date": "2026-11-19",
+  "parts": {
+    "am-start-W-cold-api28.txt": {
+      "provenance": "handWritten",
+      "summary": "am start -W cold launch output on API 28",
+      "source": "README.md",
+      "reason": "Reconstructed from the AOSP output format; no API 28 device was available",
+      "recapture": "#18722",
+    },
+    "logcat-fully-drawn-api28.txt": {
+      "provenance": "handWritten",
+      "summary": "logcat ActivityManager Fully drawn line on API 28",
+      "source": "README.md",
+      "reason": "Reconstructed from the AOSP output format; no API 28 device was available",
+      "recapture": "#18722",
+    },
+  },
+}

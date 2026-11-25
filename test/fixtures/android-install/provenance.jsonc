@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "daemon log record of an adb install that failed with INSTALL_FAILED_VERSION_DOWNGRADE",
+  "source": "PR #10214, test/helpers/androidInstallCapture.ts (manual-test batch 36)",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5600)",
+      "os": "Android, API level not recorded",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-06",
+}

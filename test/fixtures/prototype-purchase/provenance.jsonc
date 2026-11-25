@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Fake store purchase reducer corpus",
+  "source": "PR #16465",
+  "reason": "authored reducer cases shared by TS, Kotlin and Swift",
+}

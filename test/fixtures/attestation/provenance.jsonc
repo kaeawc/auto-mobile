@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "Key-attestation certificate chain exported from an emulator through CtrlProxy",
+  "source": "PR #16888",
+  "capturedOn": [
+    {
+      "device": "Android emulator (api35-l16868, google_apis arm64 userdebug)",
+      "os": "Android 15 (API 35)",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-04",
+}

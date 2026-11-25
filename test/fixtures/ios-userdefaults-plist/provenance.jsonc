@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "Host plutil XML output of UserDefaults-style plists, including binary round trips and non-finite reals",
+  "source": "README.md, PR #8653",
+  "capturedOn": [
+    {
+      "device": "macOS host (/usr/bin/plutil)",
+      "os": "macOS 26.6.2 (25G83)",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-01",
+}

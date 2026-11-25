@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "dumpsys activity processes record of a system-uid app of driver user 10 (u10s1000)",
+  "source": "PR #19069, test/utils/android-cmdline-tools/androidProcessState.test.ts",
+  "derivedFrom": "dumpsys activity processes on an API 34 ext9 Android Automotive emulator (PR #19069)",
+  "edits": "excerpted to the com.android.car.settings ProcessRecord block",
+}

@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "Bundle import corpus and differential fuzz corpus with the TypeScript verdicts",
+  "source": "PR #14867, PR #15369",
+  "generator": "scripts/prototype/generate-bundle-corpus.ts --write (corpus.json); scripts/prototype/generate-bundle-fuzz-corpus.ts --write (fuzz-corpus.json)",
+}

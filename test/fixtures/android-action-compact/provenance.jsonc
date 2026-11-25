@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "deviceId, backStack, freshness and gfxMetrics blocks of two consecutive tapOn responses",
+  "source": "PR #9892",
+  "derivedFrom": "two real consecutive tapOn responses on emulator-5600, manual-test batch 35 (issue #9886)",
+  "edits": "kept only the deviceId, backStack, freshness and gfxMetrics blocks; the rest was trimmed",
+}

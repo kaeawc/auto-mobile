@@ -1,0 +1,7 @@
+{
+  "provenance": "captured",
+  "summary": "log show NDJSON and simctl launch output for cold and warm app starts",
+  "source": "PR #18781",
+  "capturedOn": [{ "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" }],
+  "date": "2026-11-21",
+}

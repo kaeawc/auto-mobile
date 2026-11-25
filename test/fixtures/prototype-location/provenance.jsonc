@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "location.updated redaction cases (accuracy-only delivered data)",
+  "source": "PR #16623",
+  "reason": "authored reference vectors for host redaction logic replayed by Android and iOS",
+}

@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "dumpsys activity services and a Car App template content call during Android Auto projection",
+  "source": "test/helpers/androidAutoProjectionFixtures.ts, PR #17835",
+  "capturedOn": [
+    {
+      "device": "google_apis_playstore arm64 emulator, Android Auto 18.1 projecting to DHU 2.1",
+      "os": "Android API 36",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-10",
+}

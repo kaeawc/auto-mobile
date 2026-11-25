@@ -1,0 +1,15 @@
+{
+  "provenance": "derived",
+  "summary": "GitHub Actions API run and artifact-list responses for the coverage-badge run resolver",
+  "source": "PR #11489, test/bats/resolve-coverage-badge-run.bats",
+  "derivedFrom": "GitHub Actions API responses for kaeawc/auto-mobile",
+  "edits": "trimmed to the fields the resolver reads",
+  "parts": {
+    "workflow-duplication": {
+      "provenance": "synthetic",
+      "summary": "Two minimal workflow YAML files with shared and unique jobs",
+      "source": "PR #15559, test/bats/workflow-duplication-report.bats",
+      "reason": "authored input for the workflow duplication report script",
+    },
+  },
+}

@@ -1,0 +1,9 @@
+{
+  "provenance": "captured",
+  "summary": "Runner hierarchy of visionOS Settings with the shared General identifier",
+  "source": "PR #17405",
+  "capturedOn": [
+    { "device": "Apple Vision Pro simulator", "os": "visionOS 26.5", "formFactor": "xr-headset" },
+  ],
+  "date": "2026-11-08",
+}

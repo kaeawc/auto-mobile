@@ -1,0 +1,18 @@
+{
+  "provenance": "captured",
+  "summary": "emu sensor get/set console replies, CRLF normalised to LF",
+  "source": "README.md, PR #19014",
+  "capturedOn": [
+    {
+      "device": "Pixel 6 AVD (android-34;google_apis)",
+      "os": "Android API 34",
+      "formFactor": "phone",
+    },
+    {
+      "device": "TV 1080p AVD (android-36;android-tv)",
+      "os": "Android TV (API 36)",
+      "formFactor": "tv",
+    },
+  ],
+  "date": "2026-11-22",
+}

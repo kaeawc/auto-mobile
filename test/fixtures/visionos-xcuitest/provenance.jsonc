@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "Vision Pro XCUITest probe capture, an ornament window hierarchy and a kAXErrorAPIDisabled runner response",
+  "source": "PR #16883, PR #17458, PR #18043",
+  "capturedOn": [
+    {
+      "device": "Apple Vision Pro 4K simulator",
+      "os": "visionOS 26.5",
+      "formFactor": "xr-headset",
+    },
+  ],
+  "date": "2026-11-04",
+}

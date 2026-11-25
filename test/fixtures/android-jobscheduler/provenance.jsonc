@@ -1,0 +1,48 @@
+{
+  "provenance": "captured",
+  "summary": "dumpsys jobscheduler output per form factor and API level, plus Wellbeing and invalid-package cases",
+  "source": "README.md, PR #19014",
+  "capturedOn": [
+    {
+      "device": "Pixel 5 AVD (android-30;google_apis)",
+      "os": "Android API 30",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Pixel 6 AVD (android-33;google_apis)",
+      "os": "Android API 33",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Pixel 6 AVD (android-34;google_apis)",
+      "os": "Android API 34",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Pixel 6 AVD (android-35;google_apis)",
+      "os": "Android API 35",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Pixel 6 AVD (android-37.0;google_apis)",
+      "os": "Android API 37",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Wear OS small round AVD (android-37.0;android-wear-signed)",
+      "os": "Wear OS (API 37)",
+      "formFactor": "watch",
+    },
+    {
+      "device": "TV 1080p AVD (android-36;android-tv)",
+      "os": "Android TV (API 36)",
+      "formFactor": "tv",
+    },
+    {
+      "device": "Automotive 1024p landscape AVD (android-34-ext9;android-automotive)",
+      "os": "Android Automotive API 34 (android-34-ext9)",
+      "formFactor": "automotive",
+    },
+  ],
+  "date": "2026-11-22",
+}

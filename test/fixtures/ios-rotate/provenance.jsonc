@@ -1,0 +1,7 @@
+{
+  "provenance": "captured",
+  "summary": "observe and rotate outputs on the iPhone Duo inner panel",
+  "source": "PR #17075, PR #17107",
+  "capturedOn": [{ "device": "iPhone Duo simulator", "os": "iOS 27.1", "formFactor": "foldable" }],
+  "date": "2026-11-04",
+}

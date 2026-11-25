@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "XR headset window hierarchy with hidden systemui chrome (Environment, Recents) nodes",
+  "source": "PR #17844",
+  "capturedOn": [
+    {
+      "device": "Android XR headset AVD (system-images;android-34;google-xr;arm64-v8a)",
+      "os": "Android API 34 (google-xr)",
+      "formFactor": "xr-headset",
+    },
+  ],
+  "date": "2026-11-10",
+}

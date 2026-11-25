@@ -1,0 +1,27 @@
+{
+  "provenance": "captured",
+  "summary": "xcrun devicectl help, list devices and device info/motion output and JSON envelopes",
+  "source": "README.md, PR #17072, PR #17114",
+  "capturedOn": [
+    {
+      "device": "macOS host (Xcode 26.6, CoreDevice 651.13.4)",
+      "os": "macOS, version not recorded",
+      "formFactor": "host",
+    },
+    {
+      "device": "iPhone 18 Pro simulator (Xcode 27.1 beta devicectl)",
+      "os": "iOS 27.0",
+      "formFactor": "phone",
+    },
+    { "device": "iPhone Duo simulator", "os": "iOS 27.1", "formFactor": "foldable" },
+  ],
+  "date": "2026-10-01",
+  "parts": {
+    "manifest.json": {
+      "provenance": "synthetic",
+      "summary": "Expected classification counts for each list-devices capture",
+      "source": "README.md",
+      "reason": "Hand-authored test expectation metadata, not tool output",
+    },
+  },
+}

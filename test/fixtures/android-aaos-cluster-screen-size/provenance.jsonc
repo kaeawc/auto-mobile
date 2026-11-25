@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "dumpsys display and pre-fix observe output for an AAOS cluster display",
+  "source": "PR #17645",
+  "capturedOn": [
+    {
+      "device": "AAOS emulator (automotive_1024p_landscape, -multidisplay 1,1280,720,160,1)",
+      "os": "Android API 34 (android-34-ext9)",
+      "formFactor": "automotive",
+    },
+  ],
+  "date": "2026-11-09",
+}

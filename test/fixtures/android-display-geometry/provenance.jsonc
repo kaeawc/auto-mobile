@@ -1,0 +1,7 @@
+{
+  "provenance": "handWritten",
+  "summary": "cmd overlay list and wm size output for runtime screen size, navigation mode and cutout",
+  "source": "README.md, PR #14937",
+  "reason": "reconstructed from AOSP OverlayManagerShellCommand and WindowManagerShellCommand, not captured",
+  "recapture": "#18774",
+}

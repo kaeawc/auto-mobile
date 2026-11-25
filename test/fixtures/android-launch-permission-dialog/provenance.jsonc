@@ -1,0 +1,7 @@
+{
+  "provenance": "handWritten",
+  "summary": "launchApp result of a Contacts first launch behind the notification-permission dialog",
+  "source": "README.md, PR #17478",
+  "reason": "captured on AVD amverify-api37b (API 37), but the two grant buttons were reconstructed from platform ids and labels",
+  "recapture": "#18774",
+}

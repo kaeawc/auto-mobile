@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Media queue state-machine step cases for Kotlin and Swift",
+  "source": "PR #16483",
+  "reason": "authored state-machine vectors",
+}

@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "observe backStack objects after tapAt and swipeOn up on the XR headset with Settings open",
+  "source": "PR #17805, issues #17799 and #17800",
+  "derivedFrom": "tapAt and swipeOn tool results posted in issues #17799 and #17800 (xr_headset_device AVD, android-34 google-xr arm64, emulator-5558)",
+  "edits": "backStack object extracted from the result's observation",
+}

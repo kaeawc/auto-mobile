@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "CHANGELOG.md as of v0.0.82, whose release section exceeded GitHub's 125,000-character body limit",
+  "source": "PR #8950",
+  "derivedFrom": "the repository CHANGELOG.md at the failed 0.0.82 release",
+  "edits": "none; verbatim copy, excluded from the formatter",
+}

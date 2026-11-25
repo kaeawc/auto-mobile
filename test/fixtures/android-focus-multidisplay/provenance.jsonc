@@ -1,0 +1,62 @@
+{
+  "provenance": "captured",
+  "summary": "cmd display get-displays, cmd device_state state and dumpsys window focus lines on fold AVDs",
+  "source": "README.md (fold-open/closed 2026-10-07, fold-overlay-focus 2026-10-08), PR #10487, PR #10778",
+  "capturedOn": [
+    {
+      "device": "Pixel Fold-profile AVD (emulator-5602)",
+      "os": "Android API 36",
+      "formFactor": "foldable",
+    },
+    {
+      "device": "Pixel 10 Pro Fold AVD dv-fold10 (emulator-5660)",
+      "os": "Android API 36",
+      "formFactor": "foldable",
+    },
+  ],
+  "date": "2026-10-07",
+  "parts": {
+    "fold-open-ctrlproxy-windows.json": {
+      "provenance": "derived",
+      "summary": "CtrlProxy request_hierarchy reply (hierarchy_update) windows",
+      "source": "README.md",
+      "derivedFrom": "CtrlProxy websocket reply read over adb forward on the same fold AVD",
+      "edits": "removed data.hierarchy and each data.windows[n].hierarchy; other fields verbatim",
+    },
+    "fold-closed-ctrlproxy-windows.json": {
+      "provenance": "derived",
+      "summary": "CtrlProxy request_hierarchy reply (hierarchy_update) windows",
+      "source": "README.md",
+      "derivedFrom": "CtrlProxy websocket reply read over adb forward on the same fold AVD",
+      "edits": "removed data.hierarchy and each data.windows[n].hierarchy; other fields verbatim",
+    },
+    "fold-overlay-focus-inner-display0-ctrlproxy-windows.json": {
+      "provenance": "derived",
+      "summary": "CtrlProxy request_hierarchy reply (hierarchy_update) windows",
+      "source": "README.md",
+      "derivedFrom": "CtrlProxy websocket reply read over adb forward on the same fold AVD",
+      "edits": "removed data.hierarchy and each data.windows[n].hierarchy; other fields verbatim",
+    },
+    "fold-overlay-focus-inner-display7-ctrlproxy-windows.json": {
+      "provenance": "derived",
+      "summary": "CtrlProxy request_hierarchy reply (hierarchy_update) windows",
+      "source": "README.md",
+      "derivedFrom": "CtrlProxy websocket reply read over adb forward on the same fold AVD",
+      "edits": "removed data.hierarchy and each data.windows[n].hierarchy; other fields verbatim",
+    },
+    "fold-overlay-focus-overlay-display0-ctrlproxy-windows.json": {
+      "provenance": "derived",
+      "summary": "CtrlProxy request_hierarchy reply (hierarchy_update) windows",
+      "source": "README.md",
+      "derivedFrom": "CtrlProxy websocket reply read over adb forward on the same fold AVD",
+      "edits": "removed data.hierarchy and each data.windows[n].hierarchy; other fields verbatim",
+    },
+    "fold-overlay-focus-overlay-display7-ctrlproxy-windows.json": {
+      "provenance": "derived",
+      "summary": "CtrlProxy request_hierarchy reply (hierarchy_update) windows",
+      "source": "README.md",
+      "derivedFrom": "CtrlProxy websocket reply read over adb forward on the same fold AVD",
+      "edits": "removed data.hierarchy and each data.windows[n].hierarchy; other fields verbatim",
+    },
+  },
+}

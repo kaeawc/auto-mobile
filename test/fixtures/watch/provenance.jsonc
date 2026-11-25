@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "watchOS XCUI clockface dumps of the Smart Stack and its widget gallery (with/without Edit, empty names, long gallery scroll positions, missing app row)",
+  "source": "PR #17509, PR #17796, PR #17802, PR #17989, PR #18250, PR #18277",
+  "capturedOn": [
+    {
+      "device": "Apple Watch Series 11 42mm simulator",
+      "os": "watchOS 26.5",
+      "formFactor": "watch",
+    },
+  ],
+  "date": "2026-11-08",
+}

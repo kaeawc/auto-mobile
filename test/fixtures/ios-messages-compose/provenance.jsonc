@@ -1,0 +1,7 @@
+{
+  "provenance": "captured",
+  "summary": "Runner hierarchy_update captures of the Messages To: recipient token field",
+  "source": "PR #15423, PR #15425",
+  "capturedOn": [{ "device": "iPhone 18 Pro simulator", "os": "iOS 27.0", "formFactor": "phone" }],
+  "date": "2026-10-27",
+}

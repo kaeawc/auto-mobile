@@ -1,0 +1,18 @@
+{
+  "provenance": "captured",
+  "summary": "adb version, adb devices -l, dumpsys user and pm list users output",
+  "source": "README.md; adb-version.txt added in PR #9516, the rest in PR #12588",
+  "capturedOn": [
+    {
+      "device": "android-36 google_apis arm64 emulator (emulator-5556)",
+      "os": "Android API 36",
+      "formFactor": "phone",
+    },
+    {
+      "device": "macOS host (adb 37.0.1)",
+      "os": "macOS (Darwin 25.6.0, arm64)",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-15",
+}

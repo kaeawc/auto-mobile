@@ -1,0 +1,7 @@
+{
+  "provenance": "handWritten",
+  "summary": "am start output when Settings' finished enroll task is brought to the front",
+  "source": "PR #17391, issue #17380",
+  "reason": "the warning text is from issue #17380's prose; the Starting line was added by hand",
+  "recapture": "#19261",
+}

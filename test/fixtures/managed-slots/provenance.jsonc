@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "SQL dump of a pre-retirement managed-slot registry at schema 004",
+  "source": "README.md, SQL header, PR #12301",
+  "generator": "scripts/managed-slots/capture-registry-upgrade-fixture.sh at beae9ed4286b64b7dbd71df9a91208c85c0b4e37 (registry/journal APIs, no devices; the script is no longer in the tree)",
+}

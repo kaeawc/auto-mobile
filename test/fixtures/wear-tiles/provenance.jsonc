@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "cmd package query-services --components output listing the Wear tile providers",
+  "source": "PR #17508, issue #17496",
+  "capturedOn": [
+    {
+      "device": "Wear OS emulator (android-wear-signed)",
+      "os": "Wear OS 7.0 (API 37)",
+      "formFactor": "watch",
+    },
+  ],
+  "date": "2026-11-08",
+}

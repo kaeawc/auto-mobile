@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "setPosture/getDeviceState results and probe-app UIHinge sweeps on an iPhone Duo",
+  "source": "README.md, PR #17730",
+  "derivedFrom": "captures on one iPhone Duo simulator (iOS 27.1, Xcode 27.1 beta) for #17702 / #17726",
+  "edits": "host paths replaced; content otherwise verbatim",
+}

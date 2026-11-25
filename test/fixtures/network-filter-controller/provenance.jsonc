@@ -1,0 +1,27 @@
+{
+  "provenance": "generated",
+  "summary": "network-filter-controller result lines for contract versions 3, 4 and 5; ready, approval, timeout and rule results were not captured from an installed controller (recapture tracked in #18776)",
+  "source": "README.md, PR #10598, issue #18776",
+  "generator": "ios/network-filter ControllerContractTests (ControllerResult.encodedLine(), AUTOMOBILE_FIXTURE_OUT_DIR)",
+  "parts": {
+    "v3-app": {
+      "provenance": "captured",
+      "summary": "Released version-3 controller rejecting --contract-version for every command",
+      "source": "README.md, PR #12239",
+      "capturedOn": [
+        {
+          "device": "macOS host (released v3 controller built from 546da330ab, unsigned)",
+          "os": "macOS, version not recorded",
+          "formFactor": "host",
+        },
+      ],
+      "date": "2026-10-13",
+    },
+    "v4/unsupported-contract-version.json": {
+      "provenance": "generated",
+      "summary": "Historical shipped-v4 unsupported-version line, pinned verbatim and never regenerated",
+      "source": "README.md, PR #12194",
+      "generator": "the version-4 ControllerContractTests encoder at PR #12194",
+    },
+  },
+}

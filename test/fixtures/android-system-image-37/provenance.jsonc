@@ -1,0 +1,22 @@
+{
+  "provenance": "captured",
+  "summary": "source.properties of the android-37.0 google_apis arm64 system image",
+  "source": "PR #12799",
+  "capturedOn": [
+    {
+      "device": "Android SDK system image android-37.0 google_apis arm64-v8a",
+      "os": "host OS not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-16",
+  "parts": {
+    "build.prop.excerpt": {
+      "provenance": "derived",
+      "summary": "build id, SDK and release props of the API 37 image",
+      "source": "PR #12799",
+      "derivedFrom": "build.prop of the android-37.0 google_apis arm64 image",
+      "edits": "excerpted to the build id, version and ABI props",
+    },
+  },
+}

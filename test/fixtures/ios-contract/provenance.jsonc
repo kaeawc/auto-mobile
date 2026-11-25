@@ -1,0 +1,50 @@
+{
+  "provenance": "generated",
+  "summary": "SDK-encoded event batches and CtrlProxy runner response contract goldens, plus a few raw runner exchanges",
+  "source": "README.md",
+  "generator": "ios/auto-mobile-sdk ContractFixtureTests.testWritesSdkEventFixtures and ios/control-proxy ResponseContractFixtureTests (AUTOMOBILE_FIXTURE_OUT_DIR)",
+  "parts": {
+    "runner-0.0.88-sdk-capabilities.json": {
+      "provenance": "captured",
+      "summary": "Raw runner exchange from the pinned 0.0.88 runner",
+      "source": "README.md",
+      "capturedOn": [{ "device": "iOS simulator, model not recorded", "os": "iOS 26.5", "formFactor": "phone" }],
+      "date": "2026-11-01"
+    },
+    "runner-0.0.88-storage-capabilities.json": {
+      "provenance": "captured",
+      "summary": "Raw runner exchange from the pinned 0.0.88 runner",
+      "source": "README.md",
+      "capturedOn": [{ "device": "iOS simulator, model not recorded", "os": "iOS 26.5", "formFactor": "phone" }],
+      "date": "2026-11-01"
+    },
+    "runner-checkout-sdk-capabilities.json": {
+      "provenance": "captured",
+      "summary": "Raw runner exchange from a checkout-built runner",
+      "source": "README.md",
+      "capturedOn": [{ "device": "iOS simulator, model not recorded", "os": "iOS 26.5", "formFactor": "phone" }],
+      "date": "2026-11-01"
+    },
+    "runner-checkout-storage-capabilities.json": {
+      "provenance": "captured",
+      "summary": "Raw runner exchange from a checkout-built runner",
+      "source": "README.md",
+      "capturedOn": [{ "device": "iOS simulator, model not recorded", "os": "iOS 26.5", "formFactor": "phone" }],
+      "date": "2026-11-01"
+    },
+    "observation-localbuild3.json": {
+      "provenance": "captured",
+      "summary": "observe output from the SDK contract suite with a checkout-built runner",
+      "source": "PR #16210",
+      "capturedOn": [{ "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" }],
+      "date": "2026-11-01"
+    },
+    "observation-run4-input-nodes.json": {
+      "provenance": "derived",
+      "summary": "Two input elements from an SDK contract observe run",
+      "source": "PR #16210",
+      "derivedFrom": "observe output of SDK contract run 4 (iPhone 17 simulator, iOS 26.5)",
+      "edits": "excerpted to the two input elements"
+    }
+  }
+}

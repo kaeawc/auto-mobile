@@ -1,0 +1,10 @@
+{
+  "provenance": "captured",
+  "summary": "A focusedElement node with a 512-character value and a hierarchy with the keyboard slide-to-type introduction",
+  "source": "PR #16390, PR #18915",
+  "capturedOn": [
+    { "device": "iOS simulator, model not recorded", "os": "iOS 26.5", "formFactor": "phone" },
+    { "device": "iPhone 17 simulator (Xcode 27.2)", "os": "iOS 27.2", "formFactor": "phone" },
+  ],
+  "date": "2026-11-02",
+}

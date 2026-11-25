@@ -1,0 +1,18 @@
+{
+  "provenance": "captured",
+  "summary": "sqlite3 -json rows of the simulator TCC.db Photos entries and PhotoKit probe status per grant step",
+  "source": "README.md, PR #12469, PR #12490",
+  "capturedOn": [
+    {
+      "device": "iOS simulator, model not recorded (manual-test batch 20261015a)",
+      "os": "iOS 27.0",
+      "formFactor": "phone",
+    },
+    {
+      "device": "iOS simulator, model not recorded (manual-test batch 20261015b, Xcode 26.6)",
+      "os": "iOS 26.5",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-15",
+}

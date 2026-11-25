@@ -1,0 +1,89 @@
+{
+  "provenance": "handWritten",
+  "summary": "xctrace TOC and table exports, record output and export stderr read by the performanceTrace parsers",
+  "source": "README.md, PR #14353, PR #15357, PR #15787, PR #19009",
+  "reason": "The original xctrace-toc, time-profile, hitches, potential-hangs and life-cycle-period XML were synthetic shapes written for #14353, not captured exports",
+  "recapture": "#18775",
+  "parts": {
+    "xctrace-time-profile-macos-host.xml": {
+      "provenance": "derived",
+      "summary": "time-profile table export of a Time Profiler trace",
+      "source": "README.md",
+      "derivedFrom": "xctrace 16.0 (Xcode 26.6) Time Profiler recording of sleep 3 on a macOS host, 2026-10-25",
+      "edits": "host name and UUID scrubbed",
+    },
+    "xctrace-toc-time-profiler-macos-host.xml": {
+      "provenance": "derived",
+      "summary": "export --toc of a Time Profiler trace",
+      "source": "README.md",
+      "derivedFrom": "xctrace 16.0 (Xcode 26.6) Time Profiler recording of sleep 3 on a macOS host, 2026-10-25",
+      "edits": "host name and UUID scrubbed",
+    },
+    "xctrace-time-profile-xcode27-sim.xml": {
+      "provenance": "derived",
+      "summary": "time-profile table export from a simulator trace",
+      "source": "README.md, PR #15787",
+      "derivedFrom": "xctrace 27.1 (Xcode 27.1 beta, 27A9269) export on a booted iPhone 18 Pro iOS 27.0 simulator",
+      "edits": "truncated to the first 200 rows with all refs resolving; home path scrubbed to /Users/user/",
+    },
+    "xctrace-toc-empty-unfinalized-hitches-ios27.xml": {
+      "provenance": "derived",
+      "summary": "export --toc of an empty, unfinalized hitches trace",
+      "source": "README.md",
+      "derivedFrom": "the hitches trace the 0.0.88 smoke run stopped on an iOS 27.0 simulator",
+      "edits": "host name and UUID scrubbed",
+    },
+    "xctrace-record-hitches-unsupported-ipad-ios27.out.txt": {
+      "provenance": "captured",
+      "summary": "xctrace record stdout/stderr for Animation Hitches on an unsupported platform",
+      "source": "README.md, PR #19009",
+      "capturedOn": [
+        {
+          "device": "iPad Pro 11-inch (M5) simulator (Xcode 27.2)",
+          "os": "iOS 27.2",
+          "formFactor": "tablet",
+        },
+      ],
+      "date": "2026-11-22",
+    },
+    "xctrace-record-launch-bundle-id-path-not-found-ios27.out.txt": {
+      "provenance": "captured",
+      "summary": "xctrace record stdout/stderr for App Launch given a bundle id",
+      "source": "README.md, PR #19009",
+      "capturedOn": [
+        {
+          "device": "iPad Pro 11-inch (M5) simulator (Xcode 27.2)",
+          "os": "iOS 27.2",
+          "formFactor": "tablet",
+        },
+      ],
+      "date": "2026-11-22",
+    },
+    "xctrace-export-malformed.stderr.txt": {
+      "provenance": "captured",
+      "summary": "xctrace export --toc stderr for a trace that was never finalized",
+      "source": "README.md, PR #15357",
+      "capturedOn": [
+        {
+          "device": "macOS host (xctrace export)",
+          "os": "macOS, version not recorded",
+          "formFactor": "host",
+        },
+      ],
+      "date": "2026-10-25",
+    },
+    "xctrace-export-missing-template.stderr.txt": {
+      "provenance": "captured",
+      "summary": "xctrace export --toc stderr for a trace with no template document",
+      "source": "README.md, PR #15357",
+      "capturedOn": [
+        {
+          "device": "macOS host (xctrace export)",
+          "os": "macOS, version not recorded",
+          "formFactor": "host",
+        },
+      ],
+      "date": "2026-10-25",
+    },
+  },
+}

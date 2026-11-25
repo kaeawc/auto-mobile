@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "settings list system/secure at session start and after a keep-booted clean",
+  "source": "PR #15185 (round 4 broker run)",
+  "capturedOn": [
+    {
+      "device": "Android emulator from the round 4 broker run, profile not recorded",
+      "os": "Android, API level not recorded",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-24",
+}

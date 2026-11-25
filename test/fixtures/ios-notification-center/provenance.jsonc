@@ -1,0 +1,10 @@
+{
+  "provenance": "captured",
+  "summary": "observe viewHierarchy of Notification Center and the lock screen",
+  "source": "PR #13961, PR #16160, issue #13605",
+  "capturedOn": [
+    { "device": "iPhone 18 Pro simulator", "os": "iOS 27.0", "formFactor": "phone" },
+    { "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" },
+  ],
+  "date": "2026-10-20",
+}

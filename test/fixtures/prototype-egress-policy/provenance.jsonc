@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Egress policy address classes and daemon ports for the TS and Swift parity tests",
+  "source": "PR #14646",
+  "reason": "authored policy vectors for pure address classification",
+}

@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "Kotlin wire-contract descriptors and serializer-encoded CtrlProxy responses",
+  "source": "README.md",
+  "generator": "android/protocol/src/test/kotlin/dev/jasonpearson/automobile/protocol/WireContractFixtureTest.kt and ResponseContractFixtureTest.kt",
+}

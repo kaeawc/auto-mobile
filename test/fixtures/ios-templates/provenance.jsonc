@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "Host CPU samples during simulator template settle with steady background load",
+  "source": "PR #15353, test/features/iosTemplates/SettleDetector.test.ts",
+  "capturedOn": [
+    {
+      "device": "macOS host (round-6 template build)",
+      "os": "macOS, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-25",
+}

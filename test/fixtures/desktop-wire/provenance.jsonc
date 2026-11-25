@@ -1,0 +1,14 @@
+{
+  "provenance": "generated",
+  "summary": "Desktop-to-daemon wire-contract scenarios (requests, responses, UI state) recorded from a real Daemon started through startOn()",
+  "source": "PR #10747, PR #16957, $comment in each file",
+  "generator": "test/daemon/desktopWireContract.test.ts (UPDATE_CAPTURED_FIXTURES=1)",
+  "parts": {
+    "stateless-handshake.json": {
+      "provenance": "generated",
+      "summary": "Desktop McpHttpClient initialize/ping/prompts handshake answered by the real streamable-HTTP handler",
+      "source": "PR #13041",
+      "generator": "test/server/statelessWireParity.test.ts (UPDATE_CAPTURED_FIXTURES=1)",
+    },
+  },
+}

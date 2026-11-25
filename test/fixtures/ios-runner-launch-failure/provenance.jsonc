@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "CtrlProxy runner and xcodebuild stdout/stderr chunks from failed runner launches",
+  "source": "PR #15172 (round-3 logs)",
+  "capturedOn": [
+    {
+      "device": "macOS host (xcodebuild CtrlProxy runner launch)",
+      "os": "macOS; simulator runtime not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-23",
+}

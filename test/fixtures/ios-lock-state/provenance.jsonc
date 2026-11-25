@@ -1,0 +1,7 @@
+{
+  "provenance": "captured",
+  "summary": "notifyutil lockstate readings, observe results and tool errors on a locked and unlocked simulator",
+  "source": "README.md",
+  "capturedOn": [{ "device": "iPhone 18 Pro simulator", "os": "iOS 27.0 (24A434)", "formFactor": "phone" }],
+  "date": "2026-09-30"
+}

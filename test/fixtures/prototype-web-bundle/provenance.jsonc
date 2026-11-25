@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Browser entry module for the still renderer bundle size test",
+  "source": "PR #16571",
+  "reason": "test entry source, not data",
+}

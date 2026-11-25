@@ -1,0 +1,36 @@
+{
+  "provenance": "captured",
+  "summary": "iOS runner hierarchies, observe outputs, CtrlProxy golden exchanges, merger input pairs and watchOS log output from simulators",
+  "source": "keyboard-modes/README.txt, PR #9280, PR #10643, PR #10787, PR #10807, PR #10850, PR #10857, PR #18070, PR #18095, PR #18703, consuming test comments",
+  "capturedOn": [
+    { "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" },
+    { "device": "iPhone 18 Pro simulator", "os": "iOS 27.0", "formFactor": "phone" },
+    { "device": "iPad Pro 11-inch (M5) simulator", "os": "iOS 27.0", "formFactor": "tablet" },
+    {
+      "device": "iPhone simulator, 402x874 pt (nested-selection, semantic links)",
+      "os": "iOS version not recorded (semantic links: iOS 27)",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Apple Watch Series 11 (46mm) simulator",
+      "os": "watchOS 26.5",
+      "formFactor": "watch",
+    },
+  ],
+  "date": "2026-10-03",
+  "parts": {
+    "swipe-deadline-phases.json": {
+      "provenance": "generated",
+      "summary": "A request_swipe deadline error with per-phase perfTiming",
+      "source": "test/features/observe/ios/gesturePhaseDiagnostics.test.ts, PR #8639",
+      "generator": "production Swift PerfTiming/WebSocketResponse models (ios/control-proxy) encoded with JSONEncoder (.sortedKeys/.prettyPrinted); not a simulator response",
+    },
+    "issue17939TapMatchCount.ts": {
+      "provenance": "derived",
+      "summary": "TypeScript builder for a toolbar Add button and a Settings toggle row hierarchy",
+      "source": "PR #17966",
+      "derivedFrom": "issue #17939 observe and tapOn evidence (iPhone 17 simulator, iOS 26.5)",
+      "edits": "rebuilt as a minimal hierarchy from the issue's labels and bounds",
+    },
+  },
+}

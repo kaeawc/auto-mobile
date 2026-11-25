@@ -1,0 +1,9 @@
+{
+  "provenance": "captured",
+  "summary": "profiles status -type enrollment output from a Mac that is not MDM-enrolled",
+  "source": "PR #10606",
+  "capturedOn": [
+    { "device": "macOS host", "os": "macOS, version not recorded", "formFactor": "host" },
+  ],
+  "date": "2026-10-08",
+}

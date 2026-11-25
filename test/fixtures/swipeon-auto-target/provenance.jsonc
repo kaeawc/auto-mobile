@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "Hierarchies with a wide axis-neutral scrollable (foldable inner display, phone landscape) and a captured portrait scrollable element",
+  "source": "PR #9291, test/features/action/swipeon/AutoTargetSelectorUnit.test.ts",
+  "derivedFrom": "manual-test batch 15 captures on an Android foldable inner display (2076x2152) and a phone in landscape (2400x1080), API level not recorded",
+  "edits": "unrelated node subtrees removed; portrait-element.json is the parsed Element from a swipe result",
+}

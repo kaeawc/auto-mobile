@@ -1,0 +1,9 @@
+{
+  "provenance": "captured",
+  "summary": "CoreAudio HAL default devices and stream counts from a MacBook Pro host",
+  "source": "PR #15529",
+  "capturedOn": [
+    { "device": "MacBook Pro host", "os": "macOS, version not recorded", "formFactor": "host" },
+  ],
+  "date": "2026-10-26",
+}

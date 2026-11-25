@@ -1,0 +1,24 @@
+{
+  "provenance": "captured",
+  "summary": "watchOS runner hierarchies, text field, system alert and notification short/long look replies",
+  "source": "PR #16062, PR #16217, PR #17355, PR #17433, PR #19048",
+  "capturedOn": [
+    { "device": "Apple Watch SE 3 (44mm) simulator", "os": "watchOS 26.5", "formFactor": "watch" },
+    {
+      "device": "Apple Watch Series 11 (46mm) simulator",
+      "os": "watchOS 26.5",
+      "formFactor": "watch",
+    },
+    {
+      "device": "Apple Watch Series 11 (42mm) simulator",
+      "os": "watchOS 26.5",
+      "formFactor": "watch",
+    },
+    {
+      "device": "Apple Watch Series 11 (46mm) simulator (Xcode 27.2)",
+      "os": "watchOS 27.2",
+      "formFactor": "watch",
+    },
+  ],
+  "date": "2026-10-31",
+}

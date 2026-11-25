@@ -1,0 +1,9 @@
+{
+  "provenance": "captured",
+  "summary": "Toybox nc reachability probe output: open, closed by peer, refused, missing binary",
+  "source": "PR #17169",
+  "capturedOn": [
+    { "device": "Android emulator (google_apis)", "os": "Android API 35", "formFactor": "phone" },
+  ],
+  "date": "2026-11-05",
+}

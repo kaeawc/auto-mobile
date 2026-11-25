@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "observe raw:true results with CtrlProxy prototype overlay windows over the Playground",
+  "source": "README.txt, PR #10691, PR #11334, PR #13981",
+  "derivedFrom": "observe raw:true tool_outputs on emulator-5600 (AVD am-api36-ga-arm64, API 36), 2026-10-08",
+  "edits": "overlayPlacement/overlayOpaque renamed to prototypePlacement/prototypeOpaque in the floating capture (#11334); host-computed layoutWarnings regenerated in both files (#13981)",
+}

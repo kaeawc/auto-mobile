@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "hardware-qemu.ini heads from API 30, 35 and 37 AVDs configured with 2G",
+  "source": "PR #15481",
+  "derivedFrom": "real hardware-qemu.ini files of product AVDs at API 30, 35 and 37",
+  "edits": "kept the first 12 lines of each file",
+}

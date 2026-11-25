@@ -1,0 +1,7 @@
+{
+  "provenance": "captured",
+  "summary": "Health Access sheet observe skeletons and HealthKit probe app output",
+  "source": "PR #18809",
+  "capturedOn": [{ "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" }],
+  "date": "2026-11-19"
+}

@@ -1,0 +1,7 @@
+{
+  "provenance": "captured",
+  "summary": "MkDocs Material 404.html built without site_url (root-absolute assets) and with site_url set",
+  "source": "PR #13021, test/scripts/builtSiteCheck.test.ts",
+  "capturedOn": [{ "device": "host (mkdocs-1.6.1, mkdocs-material-9.7.7)", "os": "host OS not recorded", "formFactor": "host" }],
+  "date": "2026-10-17"
+}

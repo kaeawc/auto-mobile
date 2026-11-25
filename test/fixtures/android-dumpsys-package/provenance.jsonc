@@ -1,0 +1,29 @@
+{
+  "provenance": "captured",
+  "summary": "whole dumpsys package output for installed, hidden, suspended, disabled and uninstalled app states",
+  "source": "README.md, PR #9193 (manual-test batch 11)",
+  "capturedOn": [
+    {
+      "device": "AVD am-api36-ga-arm64, Pixel 7 profile (emulator-5600)",
+      "os": "Android API 36",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-03",
+  "parts": {
+    "dumpsys-package-shared-uid-maps.txt": {
+      "provenance": "derived",
+      "summary": "the Maps package section of dumpsys package with sharedUser runtime grants",
+      "source": "README.md, PR #16164",
+      "derivedFrom": "adb -s emulator-5590 shell dumpsys package com.google.android.apps.maps, Pixel 8 AVD, API 37",
+      "edits": "verbatim slice of lines 5349-5641 of the full dump",
+    },
+    "dumpsys-package-messaging-permissions-section.txt": {
+      "provenance": "derived",
+      "summary": "declared through runtime permissions lines of Messages' dumpsys package",
+      "source": "README.md, PR #10212",
+      "derivedFrom": "dumpsys package com.google.android.apps.messaging on emulator-5600, manual-test batch mt40, 2026-10-06 (API level not recorded)",
+      "edits": "kept only the permissions section; tests prepend a header line",
+    },
+  },
+}

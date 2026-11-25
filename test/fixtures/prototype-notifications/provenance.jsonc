@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Notifications module report reference cases (snapshot in, report out)",
+  "source": "PR #18368",
+  "reason": "authored reference vectors with Kotlin and Swift twins",
+}

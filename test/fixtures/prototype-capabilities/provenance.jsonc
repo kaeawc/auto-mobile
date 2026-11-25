@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "List of prototype spec capability names shared by the TS, Kotlin and Swift capability tests",
+  "source": "PR #13830",
+  "reason": "hand-maintained contract list, extended as capabilities are added",
+}

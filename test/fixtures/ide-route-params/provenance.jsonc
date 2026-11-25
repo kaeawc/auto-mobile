@@ -1,0 +1,6 @@
+{
+  "provenance": "generated",
+  "summary": "Golden outcomes (refusal text or PAST_CHECK step) of every ide/* route param case",
+  "source": "PR #12851, test/daemon/ideRouteParams.test.ts",
+  "generator": "case matrix in test/daemon/helpers/ideRouteParamCases.ts run against the pre-schema hand-written checks",
+}

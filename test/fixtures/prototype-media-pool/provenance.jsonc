@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Feed autoplay pool cases (visible fractions, resume position, decoder allocation)",
+  "source": "commit 0321e21e1",
+  "reason": "authored reference vectors for pool logic shared by Kotlin and Swift",
+}

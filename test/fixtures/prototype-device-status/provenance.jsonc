@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Device status reading and change-event reference cases (battery and other modules, debounce timing)",
+  "source": "PR #15863",
+  "reason": "authored reference vectors for debounce/override logic replayed by Kotlin and Swift",
+}

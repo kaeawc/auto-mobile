@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "raw sendKeys runs on an XR headset: auto mode failing with Gboard, a11y mode working",
+  "source": "README.md, issue #17801",
+  "capturedOn": [
+    {
+      "device": "Android XR headset AVD (xr_headset_device, system-images;android-34;google-xr;arm64-v8a), emulator-5558",
+      "os": "Android XR (API 34)",
+      "formFactor": "xr-headset",
+    },
+  ],
+  "date": "2026-11-10",
+}

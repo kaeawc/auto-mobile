@@ -1,0 +1,7 @@
+{
+  "provenance": "handWritten",
+  "summary": "emulator stdout/stderr excerpts for launch-failure classes, a normal startup and console ports",
+  "source": "README.md, PR #12841",
+  "reason": "reproduces each signature the classifiers match; no failing launch was captured",
+  "recapture": "#18776",
+}

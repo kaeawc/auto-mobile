@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Small Swift source files and a legacy .api baseline used as inputs to the iOS public API dump script",
+  "source": "PR #8677, test/bats/ios-api-dump.bats",
+  "reason": "Authored Swift inputs for a host source scanner; no device prints them",
+}

@@ -1,0 +1,22 @@
+{
+  "provenance": "captured",
+  "summary": "avdmanager list device/list avd and sdkmanager --list_installed output",
+  "source": "README.md, PR #8496, PR #16886",
+  "capturedOn": [
+    {
+      "device": "macOS host (cmdline-tools 23.0)",
+      "os": "macOS, version not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-09-30",
+  "parts": {
+    "sdkmanager-list-installed-wear.txt": {
+      "provenance": "derived",
+      "summary": "the installed Wear OS 7.0 system image row of sdkmanager --list_installed",
+      "source": "README.md, PR #16886",
+      "derivedFrom": "sdkmanager --list_installed capture supplied for #16823",
+      "edits": "only the Wear image row; the section header is omitted (tests prepend it)",
+    },
+  },
+}

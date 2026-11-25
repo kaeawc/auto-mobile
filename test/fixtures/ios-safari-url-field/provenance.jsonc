@@ -1,0 +1,7 @@
+{
+  "provenance": "captured",
+  "summary": "Runner hierarchies of Safari's URL field: compact, editing, typed and cleared",
+  "source": "PR #15038, PR #15132, PR #15191, issue #15175",
+  "capturedOn": [{ "device": "iPhone 18 Pro simulator", "os": "iOS 27.0", "formFactor": "phone" }],
+  "date": "2026-10-23",
+}

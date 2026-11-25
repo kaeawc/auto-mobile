@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Declarative mock backend specs with request steps and expected responses",
+  "source": "PR #15648",
+  "reason": "authored mock backend cases for pure engine logic",
+}

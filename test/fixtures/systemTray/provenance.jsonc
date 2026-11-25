@@ -1,0 +1,26 @@
+{
+  "provenance": "captured",
+  "summary": "systemTray observe hierarchies on iOS 26.5 and Android API 35, plus dumpsys notification --noredact",
+  "source": "PR #16387, PR #17396, PR #18419",
+  "capturedOn": [
+    { "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" },
+    { "device": "Android emulator", "os": "Android API 35", "formFactor": "phone" }
+  ],
+  "date": "2026-11-02",
+  "parts": {
+    "ios-26.5/full-tray-open-messages-grouped.json": {
+      "provenance": "derived",
+      "summary": "Notification Center over the home screen with a Messages row",
+      "source": "PR #17396",
+      "derivedFrom": "ios-26.5/full-tray-open-home.json",
+      "edits": "the single notification row's texts replaced by the row text from issue #17396's evidence"
+    },
+    "ios-26.5/simctl-listapps-messages.json": {
+      "provenance": "handWritten",
+      "summary": "simctl listapps record for Messages",
+      "source": "PR #17396",
+      "reason": "Written to follow the simctl listapps record shape; not captured",
+      "recapture": "#19262"
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "provenance": "derived",
+  "summary": "viewHierarchy members of observe results with a focused field, Leanback rows and sliders",
+  "source": "README.md",
+  "derivedFrom": "observe results on emulator-5600 API 36 (2026-10-03), an API 36 android-tv tv_1080p AVD (2026-11-08, 2026-11-13) and API 35 pixel_7 AVDs (2026-11-17, 2026-11-18)",
+  "edits": "kept only the viewHierarchy member; node data unedited; playground-control-shapes-slider-focused.json re-indented",
+}

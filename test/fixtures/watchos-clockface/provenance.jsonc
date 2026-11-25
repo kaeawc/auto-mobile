@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "com.apple.clockface XCUIApplication debugDescription dumps with the Smart Stack open",
+  "source": "PR #17502, issue #17482 comment",
+  "capturedOn": [
+    {
+      "device": "Apple Watch Series 11 (42mm) simulator",
+      "os": "watchOS 26.5",
+      "formFactor": "watch",
+    },
+  ],
+  "date": "2026-11-08",
+}

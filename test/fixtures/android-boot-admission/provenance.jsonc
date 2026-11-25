@@ -1,0 +1,41 @@
+{
+  "provenance": "captured",
+  "summary": "/proc/<pid>/status and cmdline reads from Alpine and Debian containers",
+  "source": "README.md, PR #12748, Linux Qualification run 38862794590",
+  "capturedOn": [
+    {
+      "device": "GitHub Actions runner, alpine:3 container",
+      "os": "Linux 6.17.0-1022-azure x86_64 (Alpine 3.24.2)",
+      "formFactor": "host",
+    },
+    {
+      "device": "GitHub Actions runner, debian:stable-slim container",
+      "os": "Linux 6.17.0-1022-azure x86_64 (Debian)",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-10-16",
+  "parts": {
+    "ps-snapshot-two-emulators-with-ports.txt": {
+      "provenance": "derived",
+      "summary": "ps -axo rows with two running emulators and their helpers",
+      "source": "README.md",
+      "derivedFrom": "one ps -axo pid=,ppid=,rss=,pcpu=,command= capture on macOS 26, 2026-10-13",
+      "edits": "kept selected rows only; user name replaced with dev",
+    },
+    "ps-snapshot-one-running-emulator.txt": {
+      "provenance": "derived",
+      "summary": "ps -axo rows with a daemon and the headless emulator it booted",
+      "source": "README.md",
+      "derivedFrom": "one ps -axo pid=,ppid=,rss=,pcpu=,command= capture on macOS 26, 2026-10-10",
+      "edits": "kept selected rows only; user name and checkout path redacted to dev",
+    },
+    "proc-status-upstream-man-proc_pid_status.txt": {
+      "provenance": "handWritten",
+      "summary": "/proc/<pid>/status example copied from the proc_pid_status(5) man page",
+      "source": "README.md",
+      "reason": "lines 23-54 of the upstream man page, not a read from a running host",
+      "recapture": "#18776",
+    },
+  },
+}

@@ -1,0 +1,16 @@
+{
+  "provenance": "handWritten",
+  "summary": "codesign -dvvv displays and an embedded.mobileprovision plist for the signing inspector",
+  "source": "README.md, PR #14349, PR #15688",
+  "reason": "codesign-dvvv-development.txt and embedded-mobileprovision-development.plist are transcribed in the tools' layout with placeholder identifiers, hashes, UDIDs and team id; they need a development-signed build on a physical device (#15062)",
+  "recapture": "#18775",
+  "parts": {
+    "codesign-dvvv-simulator-adhoc.txt": {
+      "provenance": "derived",
+      "summary": "codesign -dvvv of an ad-hoc signed Playground on a simulator",
+      "source": "README.md, PR #15688",
+      "derivedFrom": "codesign -dvvv of an Xcode-built Playground installed on an iOS 26.5 simulator",
+      "edits": "container path and UUIDs redacted",
+    },
+  },
+}

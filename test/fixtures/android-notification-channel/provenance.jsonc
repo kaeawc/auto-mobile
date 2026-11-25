@@ -1,0 +1,7 @@
+{
+  "provenance": "handWritten",
+  "summary": "am broadcast output for the SDK notification channel query and delete actions",
+  "source": "PR #17416",
+  "reason": "Written in the AOSP am broadcast output shape (Broadcasting: Intent / Broadcast completed: result=N), not captured from a device",
+  "recapture": "#19261",
+}

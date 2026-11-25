@@ -1,0 +1,6 @@
+{
+  "provenance": "synthetic",
+  "summary": "Sample and eject-sample prototype specs that the embedding sample generator reads",
+  "source": "PR #15058, scripts/prototype/generateEmbeddingSamples.ts",
+  "reason": "authored input specs; the generated Android/iOS samples live under samples/prototype-embedding",
+}

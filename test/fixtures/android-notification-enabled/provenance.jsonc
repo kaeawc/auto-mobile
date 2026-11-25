@@ -1,0 +1,75 @@
+{
+  "provenance": "captured",
+  "summary": "cmd appops get POST_NOTIFICATION after each appops mode, per API level",
+  "source": "README.md, PR #19014",
+  "capturedOn": [
+    {
+      "device": "Pixel 5 AVD (android-30;google_apis)",
+      "os": "Android API 30",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Pixel 6 AVD (android-33;google_apis)",
+      "os": "Android API 33",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Pixel 6 AVD (android-34;google_apis)",
+      "os": "Android API 34",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Pixel 6 AVD (android-35;google_apis)",
+      "os": "Android API 35",
+      "formFactor": "phone",
+    },
+    {
+      "device": "Automotive 1024p landscape AVD (android-34-ext9;android-automotive)",
+      "os": "Android Automotive API 34 (android-34-ext9)",
+      "formFactor": "automotive",
+    },
+  ],
+  "date": "2026-11-22",
+  "parts": {
+    "set-enabled-api37-stdout.txt": {
+      "provenance": "captured",
+      "summary": "stdout of cmd notification set_enabled (Unknown command: set_enabled)",
+      "source": "README.md, PR #15355",
+      "capturedOn": [
+        {
+          "device": "Android device, serial not recorded",
+          "os": "Android API 37",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-10-25",
+    },
+    "set-enabled-api37-exit-code.txt": {
+      "provenance": "captured",
+      "summary": "exit code (255) of cmd notification set_enabled",
+      "source": "README.md, PR #15355",
+      "capturedOn": [
+        {
+          "device": "Android device, serial not recorded",
+          "os": "Android API 37",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-10-25",
+    },
+    "api35-deskclock-granted-dumpsys-package.txt": {
+      "provenance": "derived",
+      "summary": "runtime permissions section of dumpsys package for deskclock with POST_NOTIFICATIONS granted",
+      "source": "README.md, PR #17106",
+      "derivedFrom": "dumpsys package com.google.android.deskclock on an API 35 google_apis arm64 emulator (PR #17106)",
+      "edits": "excerpted to the runtime permissions section",
+    },
+    "api35-deskclock-revoked-dumpsys-package.txt": {
+      "provenance": "derived",
+      "summary": "runtime permissions section of dumpsys package for deskclock with POST_NOTIFICATIONS revoked",
+      "source": "README.md, PR #17106",
+      "derivedFrom": "dumpsys package com.google.android.deskclock on an API 35 google_apis arm64 emulator (PR #17106)",
+      "edits": "excerpted to the runtime permissions section",
+    },
+  },
+}

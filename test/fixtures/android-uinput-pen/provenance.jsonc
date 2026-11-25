@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "getevent and dumpsys input captures of uinput pen taps, swipes, hover, tilt and long strokes",
+  "source": "README.md, PRs #16235, #16255, #16358, #16372, #16386",
+  "capturedOn": [
+    {
+      "device": "Android emulator (emulator-5610, AVD n4-13084b-userdebug-api37, 1080x2340)",
+      "os": "Android API 37 (google_apis userdebug)",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-11-01",
+}

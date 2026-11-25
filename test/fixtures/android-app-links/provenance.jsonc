@@ -1,0 +1,35 @@
+{
+  "provenance": "handWritten",
+  "summary": "pm get-app-links output for API 30-35 shapes",
+  "source": "README.md, PR #14628",
+  "reason": "reconstructed from AOSP DomainVerificationShell and published sample output; no emulator was available",
+  "recapture": "#18774",
+  "parts": {
+    "get-app-links-api37-system-configured.txt": {
+      "provenance": "captured",
+      "summary": "pm get-app-links for Calendar's system_configured domains",
+      "source": "README.md, PR #15356",
+      "capturedOn": [
+        {
+          "device": "Android AVD",
+          "os": "Android API 37",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-10-25",
+    },
+    "get-app-links-api37-after-restore-verified.txt": {
+      "provenance": "captured",
+      "summary": "pm get-app-links after approve then restore, domains drifted to verified",
+      "source": "README.md, PR #15356",
+      "capturedOn": [
+        {
+          "device": "Android AVD",
+          "os": "Android API 37",
+          "formFactor": "phone",
+        },
+      ],
+      "date": "2026-10-25",
+    },
+  },
+}

@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "xcrun simctl list pairs (text and JSON) and pair/pair_activate stderr for watch-iPhone simulator pairs",
+  "source": "PR #17427, PR #17453",
+  "capturedOn": [
+    {
+      "device": "macOS host (xcrun simctl) with Apple Watch and iPhone simulators",
+      "os": "watchOS 26.5 + iOS 26.5 (#17453 listing); #17427 runtimes not recorded",
+      "formFactor": "host",
+    },
+  ],
+  "date": "2026-11-07",
+}

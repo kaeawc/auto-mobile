@@ -1,0 +1,22 @@
+{
+  "provenance": "captured",
+  "summary": "Settings view hierarchies: Add network security Spinner and Open by default radio rows",
+  "source": "PR #14776, PR #10691",
+  "capturedOn": [
+    {
+      "device": "Android emulator, serial not recorded",
+      "os": "Android API 37",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-21",
+  "parts": {
+    "open-by-default-radio-rows.observe.json": {
+      "provenance": "derived",
+      "summary": "observe result for Settings > Open by default radio rows",
+      "source": "PR #10691, PR #13981",
+      "derivedFrom": "observe on emulator-5610 (API 36), manual test 0.0.83..main (PR #10691)",
+      "edits": "host-computed layoutWarnings regenerated (#13981)",
+    },
+  },
+}

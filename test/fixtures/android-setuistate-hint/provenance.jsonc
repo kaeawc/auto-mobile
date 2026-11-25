@@ -1,0 +1,13 @@
+{
+  "provenance": "captured",
+  "summary": "failing setUIState clear response and uiautomator text/hint ground truth in Settings search",
+  "source": "README.md, PR #15343 (int-r7 at 44eebb9481)",
+  "capturedOn": [
+    {
+      "device": "Android emulator, serial not recorded",
+      "os": "Android API 37",
+      "formFactor": "phone",
+    },
+  ],
+  "date": "2026-10-26",
+}

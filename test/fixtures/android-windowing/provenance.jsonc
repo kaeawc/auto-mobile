@@ -1,0 +1,7 @@
+{
+  "provenance": "handWritten",
+  "summary": "dumpsys activity activities in freeform, split-screen, PiP and desktop windowing",
+  "source": "README.md, PR #14373",
+  "reason": "Reconstructed from AOSP dump code (Task.toFullString, TaskFragment.dumpInner, ActivityRecord.dump) and trimmed; no emulator was available",
+  "recapture": "#18774",
+}

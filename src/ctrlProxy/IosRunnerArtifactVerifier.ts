@@ -108,6 +108,8 @@ export type IOSCtrlProxyBundleMetadata = {
   checksum: string | null;
   version: string;
   extractedAt: string;
+  /** Directory the bundle was extracted into; absent in metadata written before #19183. */
+  derivedDataPath?: string;
   appHashes?: Partial<Record<IOSCtrlProxyPlatform, string>>;
 };
 

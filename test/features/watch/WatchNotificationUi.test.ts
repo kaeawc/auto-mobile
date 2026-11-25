@@ -4,7 +4,7 @@ import { watchTapOn } from "../../../src/features/watch/WatchActions";
 import { normalizeWatchHierarchy } from "../../../src/features/watch/WatchHierarchy";
 import { watchRunners } from "../../../src/features/watch/WatchRunnerRegistry";
 import { DefaultElementParser } from "../../../src/features/utility/ElementParser";
-import { FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
+import { FakeSequencedWatchRunner, FakeWatchRunnerClient } from "../../fakes/FakeWatchRunnerClient";
 import permissionAlert from "../../fixtures/watchos-xcuitest/notification-permission-alert.json";
 import shortLook from "../../fixtures/watchos-xcuitest/notification-short-look.json";
 import longLook from "../../fixtures/watchos-xcuitest/notification-long-look.json";
@@ -69,24 +69,63 @@ test.each([
   },
 );
 
+/** The captured permission alert after a crown turn scrolled its content up by `dy` points. */
+function scrolledPermissionAlert(dy: number) {
+  const tree = structuredClone(permissionAlert.data);
+  const shift = (node: { bounds: { top: number; bottom: number }; children?: unknown }) => {
+    node.bounds.top -= dy;
+    node.bounds.bottom -= dy;
+    (node.children as (typeof node)[] | null | undefined)?.forEach(shift);
+  };
+  const [alert] = tree.root.children;
+  alert!.children?.forEach(shift);
+  return tree;
+}
+
+test("turns the crown to bring the captured permission choice Allow on screen, then taps it", async () => {
+  const client = new FakeSequencedWatchRunner([permissionAlert.data, scrolledPermissionAlert(82)]);
+  unregister = watchRunners.register(deviceId, client);
+  const button = elements(permissionAlert.data).find(
+    (element) => element.text === "Allow" && element.class === "XCUIElementType(75)",
+  );
+  expect(button).toMatchObject({ bounds: { left: 0, top: 250, right: 187, bottom: 298 } });
+  expect(permissionAlert.data.screenHeight).toBe(223);
+
+  const timer = new FakeTimer();
+  timer.enableAutoAdvance();
+  const result = await watchTapOn(deviceId, { action: "tap", text: "Allow" }, undefined, {
+    timer,
+  });
+
+  expect(result).toMatchObject({ success: true, element: { text: "Allow", bounds: { top: 168 } } });
+  expect(client.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+    { type: "face", op: "dump" },
+    { type: "crown", delta: 1, velocity: 1 },
+    { type: "tap", x: 93.5, y: 192 },
+  ]);
+});
+
 test.each([
-  { text: "Allow", bounds: { left: 73, top: 260, right: 113, bottom: 283 } },
-  { text: "Don’t Allow", bounds: { left: 51, top: 212, right: 135, bottom: 235 } },
+  { text: "Allow", tap: undefined },
+  { text: "Don’t Allow", tap: { type: "tap", x: 93.5, y: 213 } },
 ])(
-  "does not tap the captured permission choice $text until wholly on screen",
-  async ({ text, bounds }) => {
+  "taps only the visible part of the captured permission choice $text when the crown cannot scroll",
+  async ({ text, tap }) => {
     const client = new FakeWatchRunnerClient(permissionAlert.data);
     unregister = watchRunners.register(deviceId, client);
-    const button = elements(permissionAlert.data).find(
-      (element) => element.text === text && element.class === "XCUIElementType(9)",
-    );
-    expect(button).toMatchObject({ bounds });
-    expect(permissionAlert.data.screenHeight).toBe(223);
-    expect(bounds.bottom).toBeGreaterThan(permissionAlert.data.screenHeight);
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
 
-    await expect(watchTapOn(deviceId, { action: "tap", text })).rejects.toThrow(
-      "No watch element matched",
-    );
-    expect(client.commands).toEqual([{ type: "face", op: "dump" }, { type: "hierarchy" }]);
+    const action = watchTapOn(deviceId, { action: "tap", text }, undefined, { timer });
+    if (tap) {
+      await action;
+    } else {
+      await expect(action).rejects.toThrow(`The watch element "${text}" is off-screen`);
+    }
+    expect(client.commands.filter((command) => command.type !== "hierarchy")).toEqual([
+      { type: "face", op: "dump" },
+      { type: "crown", delta: 1, velocity: 1 },
+      ...(tap ? [tap] : []),
+    ]);
   },
 );

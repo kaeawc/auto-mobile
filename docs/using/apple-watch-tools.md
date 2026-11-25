@@ -13,7 +13,7 @@ Tap a compact banner's title to open its long look.
 
 - If AutoMobile cannot read the hierarchy, the result carries `hierarchyUnavailable` and no
   hierarchy fields.
-- When the target app is not in the foreground, the message says to call `launchApp`, or to post a notification and retry `observe`. Read the screenshot meanwhile.
+- When the target app is not in the foreground, the message says to call `launchApp`, or to post a notification and retry `observe`.
 - When the app `launchApp` started has exited or crashed, `hierarchyUnavailable` carries
   `appNotRunning: { bundleId }`. Read `getLogs` for the crash and call `launchApp` to start it again.
 - With a hierarchy, bounds and `screenSize` are in points and `screenshotImageSize` is in pixels. A
@@ -29,9 +29,10 @@ The watch refuses these options: `waitFor` with `for`, `posture`, `activeDisplay
 ## `tapOn` and `tapAt`
 
 `tapOn` takes a `selector` with an exact `elementId` or `text`, and an optional `index`. It supports
-only `action: "tap"`. Only elements wholly on screen match, including notification action buttons.
-The notification permission prompt scrolls: use `rotateCrown` to bring `Allow` wholly into view
-before you select it.
+only `action: "tap"`. A match past the screen edge is scrolled into view first, in up to 4 steps.
+The crown scrolls a system alert, such as the permission prompt's `Allow`; a swipe scrolls app
+content. A match still partly off screen is tapped on its visible part. One wholly off screen fails
+with a hint to scroll. `sendKeys` selectors behave the same.
 
 `tapAt` takes absolute coordinates in points from `observe`, within `screenSize`. A point outside
 the watch screen fails with `tap is outside the watch screen`.
@@ -66,9 +67,8 @@ shows its text about 2 seconds after the final Done tap, so wait before matching
 ## `swipeOn` and `pressButton`
 
 `swipeOn` swipes in a direction, including on the watch face after `pressButton` with `home`. With
-`lookFor`, it swipes until an exact `text` or `elementId` is on screen, up to `maxSwipes` (default
-10, maximum 100). Each `lookFor` step drags about one row, so reads overlap and miss nothing
-nearby. You cannot set coordinates or duration.
+`lookFor`, it swipes until an exact `text` or `elementId` is at least partly on screen, up to
+`maxSwipes` (default 10, maximum 100). Each `lookFor` step drags about one row, so reads overlap. You cannot set coordinates or duration.
 
 `pressButton` supports `home` only.
 
@@ -120,8 +120,7 @@ When a rotation changes nothing, the error says which case applies:
   content is at its limit. Tap the control first. For a `delta` between -1 and 1, the error also
   says the turn may be too small.
 
-Call `observe` after rotating. Retry only if it shows the turn had no effect, since a retry after a
-working turn can overshoot, and tap the control first.
+Call `observe` after rotating. Retry, after tapping the control, only if the turn had no effect.
 
 ## `sendKeys`
 
@@ -135,9 +134,8 @@ The watch refuses commands that clear, replace or press keys.
 ## `postNotification`
 
 `postNotification` sends a simulated push to the watch app named by `appId`. The simulator cannot
-pre-grant notification authorization, so the app must request it. Find Allow with `observe` and
-tap it with `tapOn`, scrolling with `rotateCrown` or `swipeOn` first if needed. A "CtrlProxyWatch"
-permission prompt may appear first.
+pre-grant notification authorization, so the app must request it. Tap Allow with `tapOn`, which
+scrolls it into view. A "CtrlProxyWatch" permission prompt may appear first.
 
 - If the watch dropped the push because the app's notifications are denied, `postNotification`
   returns `success: false`, after Don't Allow or when Allow was never reached.
@@ -166,8 +164,7 @@ permission prompt may appear first.
 
 To refresh a widget on demand, make the host app reload its widget timelines on a chosen launch
 argument. Then call `terminateApp` and `launchApp` with that argument, for example
-`launchArguments: ["-reload"]`. The widget shows the new content within about 2 seconds, with no
-host app tap.
+`launchArguments: ["-reload"]`. The widget updates within about 2 seconds.
 
 ## `getLogs`
 

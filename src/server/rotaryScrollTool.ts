@@ -3,10 +3,7 @@ import { PLAN_RELEVANT } from "./toolRegistryTypes";
 import { defineDeviceTool } from "./defineTool";
 import type { BootedDevice } from "../models";
 import { createStructuredToolResponse, withIsErrorOnFailure } from "../utils/toolUtils";
-import {
-  defaultAdbClientFactory,
-  type AdbClientFactory,
-} from "../utils/android-cmdline-tools/AdbClientFactory";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { defaultTimer } from "../utils/SystemTimer";
 import { hierarchyFingerprint } from "../utils/hierarchyFingerprint";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";

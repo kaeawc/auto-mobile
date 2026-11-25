@@ -6,6 +6,7 @@ import {
   type CarPlayProjectionProbe,
   requireCarPlayProjection,
 } from "./carPlayProjection";
+import type { CarPlayRuntimeReader } from "./carPlayRuntime";
 import { runCarPlayPowerHelper } from "./carPlayScreenPower";
 
 const tapResultSchema = z
@@ -63,6 +64,7 @@ export class DefaultCarPlayTapper implements CarPlayTapper {
 
 export interface CarPlayTapDependencies {
   probe: CarPlayProjectionProbe;
+  runtime: CarPlayRuntimeReader;
   tapper: CarPlayTapper;
 }
 
@@ -77,7 +79,7 @@ export async function tapCarPlayScreen(
   deps: CarPlayTapDependencies,
   signal?: AbortSignal,
 ): Promise<{ display: CarPlayProjectingState; tap: CarPlayTapResult["tapped"] }> {
-  const display = await requireCarPlayProjection(udid, deps.probe, {
+  const display = await requireCarPlayProjection(udid, deps, {
     signal,
     skipped: "No touch was sent.",
   });

@@ -10,6 +10,7 @@ import {
   requireCarPlayProjection,
 } from "../../../src/utils/ios/carPlayProjection";
 import { FakeCarPlayProjectionProbe } from "../../fakes/FakeCarPlayProjectionProbe";
+import { FakeCarPlayRuntimeReader } from "../../fakes/FakeCarPlayRuntimeReader";
 
 // Real projection probe captures from fresh iPhone 17 Pro simulators (#18728):
 // iOS 26.5 after boot: TVOut attached, untagged.
@@ -193,16 +194,28 @@ describe("CarPlay projection", () => {
 
   test("require probes the selected device and propagates refusal or probe failure", async () => {
     const fake = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(carJson));
-    const projecting = await requireCarPlayProjection("one", fake);
+    const deps = { probe: fake, runtime: new FakeCarPlayRuntimeReader() };
+    const projecting = await requireCarPlayProjection("one", deps);
     expect(projecting.identity).toBe("Car[2]");
     expect(projecting.displayId).toBe(2);
     fake.state = parseCarPlayProjectionState(airPlayJson);
-    await expect(requireCarPlayProjection("two", fake)).rejects.toThrow(
+    await expect(requireCarPlayProjection("two", deps)).rejects.toThrow(
       "not projecting (AirPlay[3])",
     );
     fake.error = new ActionableError("probe failed");
-    await expect(requireCarPlayProjection("three", fake)).rejects.toBe(fake.error);
+    await expect(requireCarPlayProjection("three", deps)).rejects.toBe(fake.error);
     expect(fake.calls).toEqual(["one", "two", "three"]);
+  });
+
+  test("require refuses an iOS 27 simulator before the probe runs (#19185)", async () => {
+    const fake = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(carJson));
+    fake.error = new ActionableError("projection probe helper missing");
+    const runtime = new FakeCarPlayRuntimeReader("27.2");
+    await expect(requireCarPlayProjection("udid", { probe: fake, runtime })).rejects.toThrow(
+      "[unsupported-runtime] Headless CarPlay needs an iOS 26.x runtime (found 27.2)",
+    );
+    expect(runtime.calls).toEqual(["udid"]);
+    expect(fake.calls).toEqual([]);
   });
 
   test("probe.m emits exactly the schema's keys in both branches, with a self-deadline", () => {

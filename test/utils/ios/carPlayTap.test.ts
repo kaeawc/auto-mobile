@@ -9,6 +9,7 @@ import {
   tapCarPlayScreen,
 } from "../../../src/utils/ios/carPlayTap";
 import { FakeCarPlayProjectionProbe } from "../../fakes/FakeCarPlayProjectionProbe";
+import { FakeCarPlayRuntimeReader } from "../../fakes/FakeCarPlayRuntimeReader";
 
 // carplay-power-helper tap 558 80 stdout, captured on a fresh iOS 26.5 iPhone 17 Pro simulator
 // after power-on; the tap opened CarPlay Settings.
@@ -87,7 +88,12 @@ describe("CarPlay tap", () => {
     const tapper = new FakeCarPlayTapper(parseCarPlayTapResult(tapJson));
     const { signal } = new AbortController();
 
-    const result = await tapCarPlayScreen("udid", { x: 558, y: 80 }, { probe, tapper }, signal);
+    const result = await tapCarPlayScreen(
+      "udid",
+      { x: 558, y: 80 },
+      { probe, runtime: new FakeCarPlayRuntimeReader(), tapper },
+      signal,
+    );
 
     expect(probe.calls).toEqual(["udid"]);
     expect(probe.options).toEqual([{ signal }]);
@@ -100,7 +106,11 @@ describe("CarPlay tap", () => {
     const probe = new FakeCarPlayProjectionProbe(parseCarPlayProjectionState(untaggedJson));
     const tapper = new FakeCarPlayTapper(parseCarPlayTapResult(tapJson));
 
-    const result = tapCarPlayScreen("udid", { x: 1, y: 1 }, { probe, tapper });
+    const result = tapCarPlayScreen(
+      "udid",
+      { x: 1, y: 1 },
+      { probe, runtime: new FakeCarPlayRuntimeReader(), tapper },
+    );
     await expect(result).rejects.toThrow("not projecting (Untagged[2]). No touch was sent.");
     await expect(result).rejects.toThrow("carplay-power-helper power-on");
     expect(tapper.calls).toEqual([]);

@@ -4,6 +4,7 @@ import {
   declaresDeviceSessionInvalid,
   getDeviceSessionIdFromResult,
   getDevicePlatformFromResult,
+  getAnyDevicePlatformFromResult,
   getDeviceIdFromResult,
   isDeviceSessionAcquisitionTool,
 } from "../deviceSessionResult";
@@ -15,6 +16,7 @@ import { SET_TOOL_ENABLED_TOOL_NAME } from "../../features/toolSelection/toolSel
 import { isDeviceInventoryTool } from "../daemonMcpProxy";
 import type { SessionReleaseSnapshot } from "../sessionManager/releaseTypes";
 import { DaemonBoundSessionExpiredError } from "./DaemonBoundSessionExpiredError";
+import { isAndroidOrIosPlatform, type NonIosApplePlatform } from "../../models/Platform";
 import type { ProxySessionState } from "./ProxySessionState";
 
 /**
@@ -54,6 +56,8 @@ export interface SessionBindingDependencies {
   state: ProxySessionState;
   ownedDeviceSessions: Set<string>;
   sessionPlatforms: Map<string, "android" | "ios">;
+  /** watchOS, tvOS and visionOS sessions, for the recovery prose of their loss (#19186). */
+  sessionApplePlatforms: Map<string, NonIosApplePlatform>;
   sessionDeviceIds: Map<string, string>;
   sessionBrokerSessions: ReadonlyMap<string, string>;
   plainRestartSessionLosses: Map<string, string>;
@@ -112,6 +116,7 @@ export class SessionBinding {
       this.deps.port.throwIfSessionReleasedSince(mintedSessionUuid, acquisitionReleaseEpoch);
     }
     const platform = getDevicePlatformFromResult(result);
+    this.rememberApplePlatform(mintedSessionUuid, result);
     if (mintedSessionUuid === this.deps.state.boundSessionUuid) {
       if (platform) {
         this.deps.sessionPlatforms.set(mintedSessionUuid, platform);
@@ -232,6 +237,14 @@ export class SessionBinding {
         forwardedArgs.deviceId,
       );
       this.bindRememberedSession(rememberedSessionUuid, selectsDefault);
+    }
+  }
+
+  /** Record a watchOS, tvOS or visionOS session's platform for its loss recovery (#19186). */
+  private rememberApplePlatform(sessionUuid: string, result: unknown): void {
+    const platform = getAnyDevicePlatformFromResult(result);
+    if (platform !== undefined && !isAndroidOrIosPlatform(platform)) {
+      this.deps.sessionApplePlatforms.set(sessionUuid, platform);
     }
   }
 

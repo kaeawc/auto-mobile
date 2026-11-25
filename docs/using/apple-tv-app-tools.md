@@ -62,3 +62,5 @@ the simulator's error; the others still apply.
 - The fields `notificationsEnabled`, `notificationPolicyAccess` and `scheduleExactAlarm` are refused.
 - The result reports a change as applied without reading it back, and `getAppPermissions` is not
   available.
+- A change terminates the app. The result then has `appTerminated: true`: relaunch the app with
+  `launchApp` before the next interaction.

@@ -34,6 +34,7 @@ import {
 import { DeviceCleanupWait } from "../proxy/DeviceCleanupWait";
 import { type ForwardedToolCall, type ToolCallForwardMode } from "../proxy/ToolCallForwarder";
 import { DaemonBoundSessionExpiredError, DaemonToolUnavailableError } from "../proxy/daemonErrors";
+import { withLostSessionPlatform } from "../proxy/lostSessionPlatform";
 import { DAEMON_STALLED_CODE, livenessResumedNotice } from "../proxyLivenessRecovery";
 import { isCreateTaskResult } from "../tasks/mcpTasksExtension";
 import type { TaskRelayFrame, TaskRelayMethod } from "../tasks/taskRelay";
@@ -75,6 +76,7 @@ type Runtime = Pick<
   | "livenessRecovery"
   | "mintedTaskOwnerKey"
   | "resumedStallNotices"
+  | "sessionApplePlatforms"
   | "staticToolDefinitionsProvider"
   | "terminalBoundSession"
   | "timer"
@@ -116,6 +118,22 @@ export class ProxyToolCalls {
       onProgress,
       ...options
     }: DaemonProxyToolCallOptions & { onProgress?: DaemonProxyProgressCallback } = {},
+  ): Promise<any> {
+    try {
+      return await this.callToolOnce(name, args, progressToken, { onProgress, ...options });
+    } catch (error) {
+      throw withLostSessionPlatform(error, this.runtime.sessionApplePlatforms);
+    }
+  }
+
+  private async callToolOnce(
+    name: string,
+    args: Record<string, unknown>,
+    progressToken: string | number | undefined,
+    {
+      onProgress,
+      ...options
+    }: DaemonProxyToolCallOptions & { onProgress?: DaemonProxyProgressCallback },
   ): Promise<any> {
     this.refuseBrokerGenericAcquisition(name);
     const signal = this.port.untilClosed(options.signal);

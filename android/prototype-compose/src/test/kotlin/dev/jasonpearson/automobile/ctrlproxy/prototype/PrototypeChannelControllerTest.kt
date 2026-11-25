@@ -70,8 +70,6 @@ class PrototypeChannelControllerTest {
   private class RecordingSink : PrototypeChannelSink {
     val states = mutableMapOf<String, JsonObject>()
     val events = mutableListOf<Pair<String, JsonObject>>()
-    val simulated = mutableListOf<Pair<String, JsonObject>>()
-    val warnings = mutableListOf<String>()
     val runs = mutableListOf<Triple<String, JsonArray, JsonElement>>()
 
     /** The first call this matches throws instead of landing. */
@@ -110,17 +108,9 @@ class PrototypeChannelControllerTest {
       events += name to data
     }
 
-    override suspend fun simulatedEvent(name: String, data: JsonObject) {
-      simulated += name to data
-    }
-
     override suspend fun run(channel: String, actions: JsonArray, event: JsonElement) {
       intercept(SinkCall("run", channel, null))
       runs += Triple(channel, actions, event)
-    }
-
-    override fun warn(message: String) {
-      warnings += message
     }
 
     fun statuses(channel: String = "chat") =
@@ -368,60 +358,6 @@ class PrototypeChannelControllerTest {
     assertEquals(Json.parseToJsonElement("""{"type":"ping"}"""), h.sink.runs[1].third)
     assertEquals(2L, h.sink.states.getValue("chat")["framesIn"]?.jsonPrimitive?.content?.toLong())
     assertEquals(2, h.sink.events.count { it.first == PrototypeChannelController.FRAME_EVENT })
-  }
-
-  @Test
-  fun `a simulated frame is decoded, counted and routed like a server frame without a connection`() =
-    runTest {
-      val h = Harness(this)
-      h.controller.update(
-        mapOf(
-          "chat" to
-            channel(
-              """{"kind":"websocket","url":"wss://e.com","connect":"manual","routes":[
-                {"when":{"pointer":"/type","equals":"message"},
-                 "actions":[{"type":"increment","key":"n"}]}]}""",
-            ),
-        ),
-      )
-      h.controller.show()
-      h.controller.simulateFrame("chat", """{"type":"message"}""", "chat-message", "7")
-      h.controller.simulateFrame("chat", "not json", null, null)
-      runCurrent()
-      advanceTimeBy(PrototypeChannelLimits.flushMs.toLong() + 1)
-      assertTrue("a manual channel opens nothing", h.host.opened.isEmpty())
-      assertEquals(
-        listOf("increment"),
-        h.sink.runs.map {
-          it.second.first().jsonObject.getValue("type").jsonPrimitive.content
-        },
-      )
-      val (name, frame) = h.sink.simulated.single()
-      assertEquals(PrototypeChannelController.FRAME_EVENT, name)
-      assertEquals(
-        Json.parseToJsonElement(
-          """{"channel":"chat","data":{"type":"message"},"event":"chat-message","id":"7"}""",
-        ),
-        frame,
-      )
-      assertTrue(h.sink.events.none { it.first == PrototypeChannelController.FRAME_EVENT })
-      val state = h.sink.states.getValue("chat")
-      assertEquals(1L, state["framesIn"]?.jsonPrimitive?.content?.toLong())
-      assertEquals(1L, state["framesDropped"]?.jsonPrimitive?.content?.toLong())
-      assertEquals("idle", h.sink.status())
-    }
-
-  @Test
-  fun `a simulated frame for an undeclared channel is dropped with a warning`() = runTest {
-    val h = Harness(this)
-    h.controller.update(mapOf("chat" to websocket))
-    h.controller.simulateFrame("other", "{}", null, null)
-    runCurrent()
-    assertTrue(h.sink.simulated.isEmpty())
-    assertEquals(
-      listOf("Simulated frame for undeclared channel other was dropped"),
-      h.sink.warnings,
-    )
   }
 
   @Test

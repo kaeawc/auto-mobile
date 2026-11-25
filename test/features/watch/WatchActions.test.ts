@@ -521,7 +521,7 @@ describe("watch actions", () => {
     ).rejects.toThrow("No watch element matched");
     expect(client.commands).toEqual([{ type: "face", op: "dump" }, { type: "hierarchy" }]);
   });
-  test("refuses offscreen text matches", async () => {
+  test("refuses an offscreen text match that scrolling does not move", async () => {
     unregister();
     const tree = structuredClone(hierarchy);
     tree.root.bounds.top = tree.screenHeight;
@@ -530,8 +530,13 @@ describe("watch actions", () => {
     unregister = watchRunners.register(device.deviceId, client);
     await expect(
       watchTapOn(device.deviceId, { action: "tap", text: "CtrlProxyWatch" }),
-    ).rejects.toThrow("No watch element matched");
-    expect(client.commands).toEqual([{ type: "face", op: "dump" }, { type: "hierarchy" }]);
+    ).rejects.toThrow('The watch element "CtrlProxyWatch" is off-screen');
+    expect(client.commands).toEqual([
+      { type: "face", op: "dump" },
+      { type: "hierarchy" },
+      { type: "swipe", direction: "up", distance: 0.4 },
+      { type: "hierarchy" },
+    ]);
   });
   test("swipeOn entry point sends direction and home entry point sends home", async () => {
     const timer = new FakeTimer();

@@ -1,5 +1,4 @@
 import { join } from "node:path";
-import { adbServerScope } from "../../adbServerScope";
 import {
   releaseExclusiveLock,
   tryAcquireExclusiveLock,
@@ -8,7 +7,7 @@ import {
 import { defaultIdGenerator } from "../../IdGenerator";
 import { defaultLockOwnerGenerationProbe } from "../../lockOwnerGeneration";
 import { nodeLockFileSystem } from "../../lockFileSystem";
-import { ensureSecureDirectorySync, getAdbServerScopedAutoMobileDir } from "../../tempDir";
+import { ensureSecureDirectorySync, getHostGlobalAutoMobileDir } from "../../tempDir";
 import type { EmulatorGrpcPortLease } from "../EmulatorPortReservations";
 
 export interface EmulatorGrpcPortOwner {
@@ -29,13 +28,21 @@ interface FileEmulatorGrpcPortRegistryDeps extends Pick<
   ensureDirectory?: (directory: string) => void;
 }
 
-/** Per-port exclusive locks shared by private daemons using the same ADB server. */
+/**
+ * Where gRPC port locks live. A gRPC port is a host TCP port, so every daemon of this OS user
+ * shares one directory whatever its ADB server or coordination directory; scoping it to either let
+ * two daemons lease 8554 together (#19188).
+ */
+export function defaultEmulatorGrpcLeaseDir(homeDir?: string): string {
+  return getHostGlobalAutoMobileDir("emulator-grpc", homeDir);
+}
+
+/** Per-port exclusive locks shared by every daemon of this OS user on the host. */
 export class FileEmulatorGrpcPortRegistry implements EmulatorGrpcPortRegistry {
   constructor(private readonly deps: FileEmulatorGrpcPortRegistryDeps = {}) {}
 
   claim(port: number, owner: EmulatorGrpcPortOwner): EmulatorGrpcPortLease | undefined {
-    const directory =
-      this.deps.directory?.() ?? getAdbServerScopedAutoMobileDir(adbServerScope(), "emulator-grpc");
+    const directory = this.deps.directory?.() ?? defaultEmulatorGrpcLeaseDir();
     (this.deps.ensureDirectory ?? ensureSecureDirectorySync)(directory);
     const lockPath = join(directory, `${port}.lock`);
     // The lock primitive backs off silently on unreadable samples. Surface I/O errors so the

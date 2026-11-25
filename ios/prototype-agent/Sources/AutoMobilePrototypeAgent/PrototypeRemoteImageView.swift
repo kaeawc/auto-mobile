@@ -9,6 +9,8 @@
         let url: String
         @Environment(\.prototypePalette) private var palette
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        /// ProtoViewer's network consent (shared with map tiles); a change reloads a refused image (#18666).
+        @Environment(\.prototypeMapNetworkAllowed) private var networkAllowed
         @State private var pixels: PrototypeRemoteImage?
         @State private var completedURL: String?
         @State private var failed = false
@@ -16,6 +18,7 @@
         private struct LoadKey: Hashable {
             let url: String
             let loader: ObjectIdentifier
+            let networkAllowed: Bool?
         }
 
         private var state: String {
@@ -33,7 +36,7 @@
             }
             .accessibilityElement(children: .ignore)
             .accessibilityValue(state)
-            .task(id: LoadKey(url: url, loader: ObjectIdentifier(model.remoteImages))) {
+            .task(id: LoadKey(url: url, loader: ObjectIdentifier(model.remoteImages), networkAllowed: networkAllowed)) {
                 completedURL = nil
                 pixels = nil
                 failed = false
@@ -42,7 +45,9 @@
                     let image = try await model.remoteImages.load(url, delivery: delivery)
                     if let obsolete = delivery.obsoleteFailure() { throw obsolete }
                     try Task.checkCancellation()
-                    withAnimation(node.crossfade == true && !reduceMotion ? .easeInOut(duration: 0.2) : nil) {
+                    let fade = PrototypeMotion(specMotion: model.spec?.motion, reduceMotion: reduceMotion)
+                        .remoteImageCrossfadeDuration(crossfade: node.crossfade, reduceMotion: reduceMotion)
+                    withAnimation(fade.map { Animation.easeInOut(duration: $0) }) {
                         pixels = image
                         completedURL = url
                     }

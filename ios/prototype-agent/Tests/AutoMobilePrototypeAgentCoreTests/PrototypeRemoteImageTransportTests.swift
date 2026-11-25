@@ -94,6 +94,28 @@ final class PrototypeRemoteImageTransportTests: XCTestCase {
         #endif
     }
 
+    func testDefaultLoaderRefusesImageLoopbackWithoutRuntimeCleartextOptIn() async throws {
+        let connector = FakePinnedConnector([FakePinnedConnection(address: "127.0.0.1")])
+        let client = PrototypePinnedHttpClient(
+            resolver: FakeHostResolver(["127.0.0.1"]), connector: connector,
+            deadlines: FakePinnedDeadline(), allowsCleartext: true, nowMs: { 0 }
+        )
+        // `shared` backs `.default` and the agent model; the egress preflight refuses before any transport.
+        let loaders = [
+            PrototypeRemoteImageLoader(client: client, memory: PrototypeRemoteImageMemory(), directory: nil),
+            PrototypeRemoteImageLoader.shared,
+        ]
+        for loader in loaders {
+            do {
+                _ = try await loader.load("http://localhost:8080/image")
+                XCTFail("Image loopback accepted without the runtime cleartext opt-in")
+            } catch {
+                XCTAssertEqual((error as? PrototypeRequestError)?.code, .blockedDestination)
+            }
+        }
+        XCTAssertTrue(connector.dials.isEmpty)
+    }
+
     #if !DEBUG && !PROTOVIEWER_ALLOW_CLEARTEXT && canImport(Network)
         @MainActor
         func testReleaseConfigurationsRefuseImageLoopbackEvenWithCleartextEnabled() async throws {
@@ -141,8 +163,18 @@ final class PrototypeRemoteImageTransportTests: XCTestCase {
         let loader = PrototypeRemoteImageLoader(
             client: client, memory: PrototypeRemoteImageMemory(), development: true, resolver: resolver, directory: nil
         )
-        let image = try await loader.load(url.absoluteString)
-        XCTAssertEqual(image.image.width, 1)
+        #if DEBUG || PROTOVIEWER_ALLOW_CLEARTEXT
+            let image = try await loader.load(url.absoluteString)
+            XCTAssertEqual(image.image.width, 1)
+        #else
+            do {
+                _ = try await loader.load(url.absoluteString)
+                XCTFail("Release image loopback accepted")
+            } catch {
+                XCTAssertEqual((error as? PrototypeRequestError)?.code, .blockedDestination)
+            }
+            XCTAssertTrue(StubProtocol.requests.isEmpty)
+        #endif
     }
 
     func testStreamCrossingEightMiBCancelsBeforeDecode() async throws {

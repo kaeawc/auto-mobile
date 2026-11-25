@@ -141,6 +141,14 @@ extension PrototypeMotion {
     }
 }
 
+extension PrototypeMotion {
+    /// Seconds a remote image with `crossfade: true` fades in over; nil shows it at once when motion
+    /// is off (spec `motion: "none"` or recording) or system Reduce Motion is on (#18666).
+    func remoteImageCrossfadeDuration(crossfade: Bool?, reduceMotion: Bool) -> Double? {
+        crossfade == true && enabled && !reduceMotion ? 0.2 : nil
+    }
+}
+
 extension PrototypeNode {
     /// Hidden, anchored and modal nodes take no stack slot; even an empty slot adds spacing (#10912).
     func drawsInPlace(holds: (Condition) -> Bool) -> Bool {

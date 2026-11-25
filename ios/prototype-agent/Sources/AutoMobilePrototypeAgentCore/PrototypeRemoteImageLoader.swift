@@ -42,7 +42,9 @@ final class PrototypeRemoteImage: NSObject, @unchecked Sendable {
 actor PrototypeRemoteImageLoader {
     enum Failure: Error { case invalidImage, disabled }
 
-    static let shared = PrototypeRemoteImageLoader(development: PrototypeRemoteImages.developmentLoopback)
+    /// Public-only: loopback development images also need the runtime cleartext opt-in, which only
+    /// `pinned(allowsCleartext:)` and the library configuration pass.
+    static let shared = PrototypeRemoteImageLoader()
     private let client: any PrototypeHttpClient
     private let egress: PrototypeRequestEgressCheck
     private let gate: PrototypeLibraryNetworkGate?

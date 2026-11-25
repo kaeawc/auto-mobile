@@ -50,6 +50,7 @@ describe("audio tools (#13628, #13629)", () => {
   let saved: Array<{ deviceId: string; bytes: Uint8Array }>;
   let readPaths: string[];
   let onCreateSession: () => void;
+  let configureSession: (session: FakeEmulatorAudioSession) => void;
   let deps: Parameters<typeof createInjectAudioInputHandler>[0];
 
   beforeEach(() => {
@@ -61,6 +62,7 @@ describe("audio tools (#13628, #13629)", () => {
     saved = [];
     readPaths = [];
     onCreateSession = () => {};
+    configureSession = () => {};
     guestCapture = new FakeGuestAudioCapture();
     emulatorAlive = true;
     service = new EmulatorAudioService({
@@ -81,6 +83,7 @@ describe("audio tools (#13628, #13629)", () => {
         onCreateSession();
         const session = new FakeEmulatorAudioSession(endpoint);
         session.captureSamples = sineTone({ durationMs: 500 }).samples;
+        configureSession(session);
         sessions.push(session);
         return session;
       },
@@ -265,6 +268,48 @@ describe("audio tools (#13628, #13629)", () => {
     );
     expect(withFile).toMatchObject({ path: "/outputs/emulator-5554.wav", sizeBytes: 48_044 });
     expect(parseWav(saved[0].bytes).samples.length).toBe(24_000);
+  });
+
+  test("a capture whose stream delivered no frames reports no silence verdict (#19182)", async () => {
+    configureSession = (session) => {
+      session.captureTimedOut = true;
+      session.captureSamples = new Int16Array(0);
+    };
+    const result = captureAudioResultSchema.parse(
+      structured(await createCaptureAudioHandler(deps)(emulator, { seconds: 2 })),
+    );
+    expect(result).toMatchObject({
+      success: true,
+      complete: false,
+      silent: null,
+      durationMs: 0,
+      requestedMs: 2000,
+      timedOut: true,
+    });
+    expect(result.message).toContain("delivered 0 of 2000 ms");
+  });
+
+  test("a partial capture that heard sound still reports silent: false", async () => {
+    configureSession = (session) => {
+      session.captureTimedOut = true;
+      session.captureSamples = sineTone({ durationMs: 400 }).samples;
+    };
+    const result = captureAudioResultSchema.parse(
+      structured(await createCaptureAudioHandler(deps)(emulator, { seconds: 3 })),
+    );
+    expect(result).toMatchObject({
+      complete: false,
+      silent: false,
+      durationMs: 400,
+      requestedMs: 3000,
+    });
+  });
+
+  test("a complete capture reports complete: true and its requested length", async () => {
+    const result = captureAudioResultSchema.parse(
+      structured(await createCaptureAudioHandler(deps)(emulator, { seconds: 0.5 })),
+    );
+    expect(result).toMatchObject({ complete: true, requestedMs: 500, timedOut: false });
   });
 
   test("the WAV saver gives captures in the same millisecond distinct files", async () => {

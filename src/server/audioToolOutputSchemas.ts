@@ -37,7 +37,11 @@ export const captureAudioResultSchema = z
     rmsDbfs: z.number(),
     peakDbfs: z.number(),
     activeRatio: z.number(),
-    silent: z.boolean(),
+    /** Null when a capture stopped short of its length without hearing sound (#19182). */
+    silent: z.boolean().nullable(),
+    /** False when the device delivered less audio than requested. */
+    complete: z.boolean(),
+    requestedMs: z.number(),
     timedOut: z.boolean(),
     route: captureRoute,
     path: z.string().optional(),

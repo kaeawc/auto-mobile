@@ -1,3 +1,4 @@
+import type { PrototypeMediaFileOpener } from "../../features/prototype/prototypeMediaUpload";
 import type { AndroidDisposableAppAttacher } from "../../features/prototype/disposableApp/android/AndroidDisposableAppAttacher";
 import type { DisposableAppRegistry } from "../../features/prototype/disposableApp/DisposableAppRegistry";
 import type { PrototypeDisposableApps } from "./disposableApps";
@@ -92,6 +93,8 @@ export interface PrototypeToolDependencies {
   protoViewerShareFiles?: ProtoViewerShareFiles;
   /** Reads local files named by `assets`; tests inject an in-memory reader. */
   assetFileReader?: PrototypeAssetFileReader;
+  /** Opens media files named by `assets` (#14254); tests inject in-memory files. */
+  mediaFileOpener?: PrototypeMediaFileOpener;
   /** Resolves `assets[].observation` URIs; defaults to the observation screenshot resource. */
   observationScreenshotReader?: PrototypeObservationScreenshotReader;
   clientFactory?: (device: BootedDevice) => PrototypeClient;
@@ -140,6 +143,8 @@ export interface AssetStage {
 export interface AssetReaders {
   env?: NodeJS.ProcessEnv;
   assetFileReader: PrototypeAssetFileReader;
+  /** Opens media files named by `assets` for the chunked upload; tests inject in-memory files. */
+  mediaFileOpener?: PrototypeMediaFileOpener;
   observationScreenshotReader: PrototypeObservationScreenshotReader;
 }
 

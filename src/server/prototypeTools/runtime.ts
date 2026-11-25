@@ -762,6 +762,7 @@ export function createPrototypeToolRuntime(
   const assetReaders: AssetReaders = {
     env: dependencies.env,
     assetFileReader: dependencies.assetFileReader ?? nodePrototypeAssetFileReader,
+    mediaFileOpener: dependencies.mediaFileOpener,
     observationScreenshotReader:
       dependencies.observationScreenshotReader ?? readObservationScreenshotBytes,
   };

@@ -8,12 +8,25 @@ import { ActionableError } from "../../models";
 import { PressButton, type PressButtonCollaborators } from "./PressButton";
 import type { SwipeOnDependencies } from "./swipeon/types";
 import { SwipeOn } from "./swipeon/SwipeOn";
-import type { IosScreenUnlocker, IosUnlockOptions } from "./WakeAndUnlock";
+import {
+  IOS_UNLOCK_POLL_INTERVAL_MS,
+  IOS_UNLOCK_POLL_MAX_MS,
+  type IosScreenUnlocker,
+  type IosUnlockOptions,
+} from "./WakeAndUnlock";
 import { isRunnerDeadlineCompletedLate } from "../observe/ios/runnerErrorCodes";
 
 const PRE_SWIPE_LOCK_PROBE_MAX_MS = 1_500;
 
 type HomePress = Pick<PressButton, "press">;
+
+type UnlockResult = {
+  success: boolean;
+  error?: string;
+  warning?: string;
+  stillLocked?: true;
+  rewoke?: boolean;
+};
 
 /**
  * The wake press. On a simulator it skips the HID helper (#19164): a hardware Home press on a
@@ -83,7 +96,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
   async wakeAndDismiss(
     options: IosUnlockOptions | (() => number) = () => Infinity,
     legacySignal?: AbortSignal,
-  ): Promise<{ success: boolean; error?: string; warning?: string }> {
+  ): Promise<UnlockResult> {
     const { remainingMs, signal, readUnlocked } =
       typeof options === "function"
         ? { remainingMs: options, signal: legacySignal, readUnlocked: undefined }
@@ -118,7 +131,7 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
     swipeBudget,
   }: IosUnlockOptions & {
     swipeBudget: number;
-  }): Promise<{ success: boolean; error?: string; warning?: string }> {
+  }): Promise<UnlockResult> {
     const swipeDeadline = this.timer.now() + swipeBudget;
     const fast = await this.swipe({
       timeoutMs: readUnlocked ? swipeBudget / 2 : swipeBudget,
@@ -141,15 +154,146 @@ export class IosLockScreenUnlocker implements IosScreenUnlocker {
       logger.info(
         "[IosLockScreenUnlocker] fast swipe left lock state locked or unknown; budget exhausted",
       );
-      return fast;
+      return unlocked === false && fast.success
+        ? this.rewakeAfterIneffectiveSwipe({ remainingMs, signal, readUnlocked }, fast, fast)
+        : fast;
     }
     const fallback = await this.swipe({ timeoutMs: fallbackBudget, signal });
-    // Confirmation/polling stays with WakeAndUnlock's existing bounded probe path.
     logger.info(`[IosLockScreenUnlocker] fallback swipe finished: ${fallback.error ?? "success"}`);
-    return {
+    if (!fallback.success) {
+      // WakeAndUnlock's bounded probe decides a failed swipe: it may still have landed.
+      return fallback;
+    }
+    const afterFallback = await awaitWhileRequestIsLive(
+      readUnlocked({ phase: "afterSwipe" }),
+      signal,
+    );
+    const fallbackUnlocked = {
       ...fallback,
       warning: "unlocked by the fallback swipe after the fast swipe had no effect",
     };
+    if (afterFallback === false) {
+      return this.rewakeAfterIneffectiveSwipe(
+        { remainingMs, signal, readUnlocked },
+        fallback,
+        fallbackUnlocked,
+      );
+    }
+    // Unlocked, or unknown: WakeAndUnlock's bounded probe confirms the final state.
+    return fallbackUnlocked;
+  }
+
+  /**
+   * A swipe reported success but the lock state still reads locked (#19167). The lock state can
+   * lag a swipe that did unlock, and a Home press on an unlocked device backgrounds the app under
+   * test, so first poll it briefly. If it still reads locked, the swipe landed on the lock screen
+   * without dismissing it: retry once with a second wake, then report failure.
+   */
+  private async rewakeAfterIneffectiveSwipe(
+    {
+      remainingMs,
+      signal,
+      readUnlocked,
+    }: IosUnlockOptions & {
+      readUnlocked: NonNullable<IosUnlockOptions["readUnlocked"]>;
+    },
+    swipe: { success: boolean; error?: string; warning?: string },
+    ifSettled: UnlockResult,
+  ): Promise<UnlockResult> {
+    if (await this.settleUnlocked(readUnlocked, remainingMs, signal)) {
+      logger.info("[IosLockScreenUnlocker] lock state caught up with the swipe; no second wake");
+      return ifSettled;
+    }
+    if (remainingMs() <= 0) {
+      logger.warn(
+        "[IosLockScreenUnlocker] swipe reported success but the device is still locked; no budget for a second wake",
+      );
+      return {
+        success: false,
+        stillLocked: true,
+        rewoke: false,
+        error:
+          "the lock-screen swipe reported success but did not dismiss the lock screen, and no budget remained for a second wake",
+      };
+    }
+    logger.warn(
+      "[IosLockScreenUnlocker] swipe reported success but the device is still locked; waking again",
+    );
+    await this.pressHomeBestEffort(remainingMs, signal);
+    throwIfAborted(signal);
+    const remaining = remainingMs();
+    if (remaining > 0) {
+      const unlocked = await this.readUnlockedAfterWake({
+        readUnlocked,
+        swipeBudget: Math.min(5_000, remaining),
+        signal,
+      });
+      if (unlocked === true) {
+        logger.info("[IosLockScreenUnlocker] second wake unlocked the device");
+        return {
+          success: true,
+          warning: `unlocked by a second wake after the lock-screen swipe had no effect${swipe.warning ? ` (${swipe.warning})` : ""}`,
+        };
+      }
+    }
+    return {
+      success: false,
+      stillLocked: true,
+      rewoke: true,
+      error:
+        "the lock-screen swipe reported success but did not dismiss the lock screen, and a second wake did not either",
+    };
+  }
+
+  /** Re-read the lock state every poll interval, within the settle window and the budget. */
+  private async settleUnlocked(
+    readUnlocked: NonNullable<IosUnlockOptions["readUnlocked"]>,
+    remainingMs: () => number,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const deadline = this.timer.now() + Math.min(IOS_UNLOCK_POLL_MAX_MS, remainingMs());
+    while (this.timer.now() < deadline) {
+      throwIfAborted(signal);
+      await awaitWhileRequestIsLive(
+        this.timer.sleep(Math.min(IOS_UNLOCK_POLL_INTERVAL_MS, deadline - this.timer.now())),
+        signal,
+      );
+      // Bound the read by the settle window and the overall budget; never start one past either.
+      const readBudget = Math.min(deadline - this.timer.now(), remainingMs());
+      if (readBudget <= 0) {
+        return false;
+      }
+      const probeAbort = new AbortController();
+      let unlocked: boolean | undefined;
+      try {
+        unlocked = await raceWithDeadline(
+          () =>
+            readUnlocked({
+              phase: "afterSwipe",
+              signal: signal ? AbortSignal.any([signal, probeAbort.signal]) : probeAbort.signal,
+            }),
+          {
+            timer: this.timer,
+            signal,
+            timeoutMs: readBudget,
+            label: "iOS post-swipe lock-state read",
+            onTimeout: () => probeAbort.abort(),
+          },
+        );
+      } catch (error) {
+        throwIfAborted(signal);
+        logger.warn(
+          `[IosLockScreenUnlocker] post-swipe lock-state read failed: ${errorMessage(error)}`,
+          error,
+        );
+        return false;
+      }
+      throwIfAborted(signal);
+      if (unlocked === true) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private async readUnlockedAfterWake({

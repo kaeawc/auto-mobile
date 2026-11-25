@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, spyOn, test, afterEach, mock } from "bun:test";
 import {
+  FRAME_TIMES_PREDATE_WINDOW,
   NO_FRAME_COUNT,
   NO_FRAMES_RENDERED,
   PerformanceAudit,
@@ -439,31 +440,33 @@ describe("PerformanceAudit windowed CPU and jank", () => {
     ).toEqual(["p99"]);
   });
 
+  // Verbatim gfxinfo header from #18802 (Pixel Tablet AVD, API 36): 4 launch frames, all janky.
+  // It prints no HISTOGRAM line, so the window's percentiles cannot be derived from it.
+  const launched = [
+    "Applications Graphics Acceleration Info:",
+    "Uptime: 436596 Realtime: 436596",
+    "",
+    "** Graphics info for pid 7183 [dev.jasonpearson.automobile.playground] **",
+    "",
+    "Stats since: 431717752663ns",
+    "Total frames rendered: 4",
+    "Janky frames: 4 (100.00%)",
+    "Janky frames (legacy): 4 (100.00%)",
+    "50th percentile: 900ms",
+    "90th percentile: 1250ms",
+    "95th percentile: 1250ms",
+    "99th percentile: 1250ms",
+    "Number Missed Vsync: 2",
+    "Number High input latency: 0",
+    "Number Slow UI thread: 2",
+    "Number Slow bitmap uploads: 0",
+    "Number Slow issue draw commands: 4",
+    "Number Frame deadline missed: 4",
+    "Number Frame deadline missed (legacy): 4",
+  ].join("\n");
+
   test("frame time: an idle app after launch passes; launch frames are outside the window (#18802)", async () => {
-    // Verbatim gfxinfo header from #18802 (Pixel Tablet AVD, API 36): 4 launch frames, all janky,
-    // and nothing rendered since. Read twice, the window holds no frames, matching its 0 counts.
-    const launched = [
-      "Applications Graphics Acceleration Info:",
-      "Uptime: 436596 Realtime: 436596",
-      "",
-      "** Graphics info for pid 7183 [dev.jasonpearson.automobile.playground] **",
-      "",
-      "Stats since: 431717752663ns",
-      "Total frames rendered: 4",
-      "Janky frames: 4 (100.00%)",
-      "Janky frames (legacy): 4 (100.00%)",
-      "50th percentile: 900ms",
-      "90th percentile: 1250ms",
-      "95th percentile: 1250ms",
-      "99th percentile: 1250ms",
-      "Number Missed Vsync: 2",
-      "Number High input latency: 0",
-      "Number Slow UI thread: 2",
-      "Number Slow bitmap uploads: 0",
-      "Number Slow issue draw commands: 4",
-      "Number Frame deadline missed: 4",
-      "Number Frame deadline missed (legacy): 4",
-    ].join("\n");
+    // Nothing rendered since launch. Read twice, the window holds no frames, matching its 0 counts.
     stubGfxDumps(launched, launched);
 
     const result = await audit.collectGfxMetrics("com.example", perf);
@@ -478,6 +481,48 @@ describe("PerformanceAudit windowed CPU and jank", () => {
     ]);
     expect(result.frameTimeUnmeasured).toBe(NO_FRAMES_RENDERED);
     expect(audit.validateMetrics({ ...baseMetrics, ...result }, thresholds)).toEqual([]);
+  });
+
+  test("frame time: without a histogram, launch frames in the printed percentiles are not judged (#18802)", async () => {
+    // One smooth frame renders in the window after the 4 janky launch frames. The printed
+    // percentiles (900/1250 ms) still describe the launch frames, while every window count is 0.
+    stubGfxDumps(
+      launched,
+      launched.replace("Total frames rendered: 4", "Total frames rendered: 5"),
+    );
+
+    const result = await audit.collectGfxMetrics("com.example", perf);
+
+    expect(result.jankCount).toBe(0);
+    expect(result.missedVsyncCount).toBe(0);
+    expect(result.slowUiThreadCount).toBe(0);
+    expect(result.frameDeadlineMissedCount).toBe(0);
+    expect([result.p50Ms, result.p90Ms, result.p95Ms, result.p99Ms]).toEqual([
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(result.frameTimeUnmeasured).toBe(FRAME_TIMES_PREDATE_WINDOW);
+    expect(audit.validateMetrics({ ...baseMetrics, ...result }, thresholds)).toEqual([]);
+  });
+
+  test("frame time: without a histogram, a stats reset in the window keeps the closing percentiles", async () => {
+    // A new `Stats since` means the closing reading counts only window frames, even though its
+    // total (6) is above the opening one (4).
+    const reset = launched
+      .replace("Stats since: 431717752663ns", "Stats since: 436000000000ns")
+      .replace("Total frames rendered: 4", "Total frames rendered: 6")
+      .replace("50th percentile: 900ms", "50th percentile: 9ms")
+      .replace("90th percentile: 1250ms", "90th percentile: 12ms")
+      .replace("95th percentile: 1250ms", "95th percentile: 14ms")
+      .replace("99th percentile: 1250ms", "99th percentile: 30ms");
+    stubGfxDumps(launched, reset);
+
+    const result = await audit.collectGfxMetrics("com.example", perf);
+
+    expect([result.p50Ms, result.p90Ms, result.p95Ms, result.p99Ms]).toEqual([9, 12, 14, 30]);
+    expect(result.frameTimeUnmeasured).toBeUndefined();
   });
 
   test("frame time: percentiles come from the window's histogram delta, not lifetime frames (#18802)", async () => {

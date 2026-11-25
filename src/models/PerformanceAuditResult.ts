@@ -11,7 +11,8 @@ export interface PerformanceMetrics {
   p99Ms: number | null;
   /**
    * Why p50Ms-p99Ms are null although gfxinfo was read: it rendered no frames, and the
-   * percentiles it prints then are histogram bucket bounds, not measurements (#17307).
+   * percentiles it prints then are histogram bucket bounds, not measurements (#17307); or it
+   * printed no histogram and its percentiles include frames from before the audit window (#18802).
    */
   frameTimeUnmeasured?: string;
 

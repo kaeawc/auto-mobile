@@ -34,6 +34,7 @@ import {
   counterDelta,
   parseJankyFrames,
   parseProcStat,
+  parseStatsSince,
   type CpuSample,
   type GfxCounterSample,
 } from "./PerformanceAuditWindow";
@@ -44,6 +45,8 @@ export const NO_FRAMES_RENDERED =
   "No frames were rendered in the audit window, so there are no frame times to check.";
 export const NO_FRAME_COUNT =
   "gfxinfo reported no rendered-frame count, so its frame times cannot be checked.";
+export const FRAME_TIMES_PREDATE_WINDOW =
+  "gfxinfo printed no frame-time histogram, and its percentiles include frames rendered before the audit window, so they are not checked.";
 
 type FrameTimeFields = Pick<
   PerformanceMetrics,
@@ -55,13 +58,31 @@ function unmeasuredFrameTime(reason: string): FrameTimeFields {
 }
 
 /**
+ * Frames rendered between two gfxinfo readings. A new `Stats since:` means the stats were reset
+ * between them, so every frame the closing reading counts lies inside the window.
+ */
+function framesInWindow(
+  opening: { stdout: string; counters: GfxCounterSample },
+  closing: { stdout: string; counters: GfxCounterSample },
+): number | null {
+  const openingEpoch = parseStatsSince(opening.stdout);
+  const closingEpoch = parseStatsSince(closing.stdout);
+  if (openingEpoch !== null && closingEpoch !== null && openingEpoch !== closingEpoch) {
+    return closing.counters.totalFrames;
+  }
+  return counterDelta(opening.counters.totalFrames, closing.counters.totalFrames);
+}
+
+/**
  * Frame-time percentiles over the audit window, the same window as the jank counters (#18802).
  * gfxinfo's printed percentiles cover every frame since its stats were last reset (launch frames
  * included), so they come from the delta of the two readings' histograms instead. With no frames
  * in the window gfxinfo's percentiles are not measurements of it, so they are reported as null
- * with the reason instead of failing an idle screen (#17307). A dump without a histogram falls
- * back to the closing reading's percentiles when the window rendered frames; a reading without a
- * frame count cannot tell an idle window from a busy one and is treated as unmeasured.
+ * with the reason instead of failing an idle screen (#17307). A dump without a histogram keeps
+ * the closing reading's percentiles only when every frame they cover lies in the window (stats
+ * reset at or after the opening reading); otherwise they would judge launch frames against the
+ * window's counts, so they are reported as unmeasured with the reason (#18802). A reading without
+ * a frame count cannot tell an idle window from a busy one and is treated as unmeasured.
  */
 function frameTimePercentiles(
   opening: { stdout: string; counters: GfxCounterSample },
@@ -75,12 +96,15 @@ function frameTimePercentiles(
     }
     return { p50Ms: window.p50Ms, p90Ms: window.p90Ms, p95Ms: window.p95Ms, p99Ms: window.p99Ms };
   }
-  const windowFrames = counterDelta(opening.counters.totalFrames, closing.counters.totalFrames);
+  const windowFrames = framesInWindow(opening, closing);
   if (windowFrames === null || !metrics.totalFrames) {
     return unmeasuredFrameTime(metrics.totalFrames === 0 ? NO_FRAMES_RENDERED : NO_FRAME_COUNT);
   }
   if (windowFrames === 0) {
     return unmeasuredFrameTime(NO_FRAMES_RENDERED);
+  }
+  if (windowFrames < metrics.totalFrames) {
+    return unmeasuredFrameTime(FRAME_TIMES_PREDATE_WINDOW);
   }
   return {
     p50Ms: metrics.percentile50th,

@@ -257,7 +257,28 @@ describe("prototype web page (#16346)", () => {
   });
 
   test("reports the unsupported nodes of the view shown first", () => {
-    expect(page.unsupportedNodes.map((node) => node.type)).toEqual(["menu"]);
+    // The reference checkout's only former placeholder, a closed menu, now draws as a layer.
+    expect(page.unsupportedNodes).toEqual([]);
+    const web = buildPrototypeWebPage({
+      ...input,
+      variants: [
+        {
+          id: "a",
+          label: "A",
+          revisions: [
+            {
+              revision: 1,
+              operation: "show",
+              spec: {
+                ...tiny("x"),
+                root: { type: "webView", id: "help", url: "https://example.com" },
+              },
+            },
+          ],
+        },
+      ],
+    });
+    expect(web.unsupportedNodes.map((node) => node.type)).toEqual(["webView"]);
   });
 
   test("drops older revisions to stay within the budget, keeping each variant's latest", () => {

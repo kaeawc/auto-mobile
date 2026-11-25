@@ -54,6 +54,7 @@ import { webMapRenderers } from "./webMap";
 import { webMediaRenderers } from "./webMedia";
 import { bindStillPlatformText } from "./webPlatformState";
 import { webModalLayers } from "./webModal";
+import { webAnchorNames } from "./webMenu";
 import { webRepeatInstances } from "./webRepeat";
 import { searchBarFillAxes, webSelectionRenderers } from "./webSelection";
 import { webSheetLayers } from "./webSheet";
@@ -152,6 +153,8 @@ export interface WebRenderScope {
   readonly stacks?: WebStackScreens[];
   /** What the window draws above the whole tree (an open sheet, dialog or snackbar), in tree order. */
   readonly layers: WebElement[];
+  /** Node ids a tooltip's `anchorTo` names, so those nodes carry an anchor name (#16536). */
+  readonly anchorTargets?: ReadonlySet<string>;
   /** Encoded assets the page may inline, by asset id, to the CSS slot that would hold them. */
   readonly imageSlots?: ReadonlyMap<string, number>;
   /** Collects every image drawn with a bound asset, so the page can size and inline it. */
@@ -1031,5 +1034,18 @@ export function renderWebNode(
     element.attrs["data-node"] === undefined
       ? element
       : withOverContentLayers(element, styled.style, own.style);
-  return withLaterMinStrut(layered, styled.style, own.style);
+  return withAnchorNames(withLaterMinStrut(layered, styled.style, own.style), styled, path, own);
+}
+
+/** A node a menu or tooltip anchors to, named for CSS anchor positioning (#16536). */
+function withAnchorNames(
+  element: WebElement,
+  node: Raw,
+  path: string,
+  scope: WebRenderScope,
+): WebElement {
+  const names = webAnchorNames(node, path, scope);
+  return names.length === 0
+    ? element
+    : { ...element, style: { ...element.style, "anchor-name": names.join(", ") } };
 }

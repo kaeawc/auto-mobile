@@ -25,6 +25,7 @@ import {
   type PrototypeWebViewSettings,
 } from "./webPageViews";
 import { FADE_EDGES_PAGE_CSS } from "./webStylePolish";
+import { ANCHORED_LAYERS_PAGE_CSS } from "./webMenu";
 import type { UnsupportedWebNode } from "./webRender";
 import {
   webImageBox,
@@ -128,6 +129,7 @@ const PAGE_CSS = [
   "@media (max-width:720px){[data-main]{flex-direction:column}[data-control=revisions]{width:auto;max-height:30vh;border-left:0;border-top:1px solid #ccc}}",
   "[hidden]{display:none!important}",
   FADE_EDGES_PAGE_CSS,
+  ANCHORED_LAYERS_PAGE_CSS,
   PROTOTYPE_WEB_3D_CSS,
 ].join("");
 

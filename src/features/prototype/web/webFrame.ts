@@ -343,6 +343,8 @@ interface ScreenPaint {
   readonly dark: boolean;
   readonly textColor: string;
   readonly background: string;
+  /** What a window's backdrop blurs, painted over the background (see WEB_BACKDROP_WALLPAPER). */
+  readonly wallpaper?: string;
   /** The content's base font size; 14px unless the system text size scales it. */
   readonly fontSize?: string;
 }
@@ -367,6 +369,7 @@ function screenStyle(
     // Both devices paint nothing behind a window, so the app below shows through; a still has no
     // app below, so the theme's background stands in for it.
     [BACKGROUND_COLOR]: options.background,
+    ...(options.wallpaper === undefined ? {} : { "background-image": options.wallpaper }),
     color: options.textColor,
     [FONT_FAMILY]: SYSTEM_FONT_STACK,
     [FONT_SIZE]: options.fontSize ?? "14px",

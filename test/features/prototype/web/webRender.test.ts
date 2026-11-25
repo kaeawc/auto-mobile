@@ -67,16 +67,24 @@ describe("prototype web still (#16346)", () => {
   });
 
   test("lists unsupported nodes with their paths and draws a labelled placeholder", () => {
-    expect(still.unsupportedNodes).toEqual([
+    // The reference checkout's closed menu draws nothing in its parent's flow (#16536).
+    expect(still.unsupportedNodes).toEqual([]);
+    const web = renderPrototypeStill(
       {
-        type: "menu",
-        id: "spend",
-        path: 'root.screens["cart"].children[5]',
-        reason: "unsupportedType",
+        id: "docs",
+        window: { placement: { type: "fullscreen" } },
+        root: {
+          type: "column",
+          children: [{ type: "webView", id: "help", url: "https://example.com" }],
+        },
       },
+      { frame: "pixel-9" },
+    );
+    expect(web.unsupportedNodes).toEqual([
+      { type: "webView", id: "help", path: "root.children[0]", reason: "unsupportedType" },
     ]);
     expect(
-      find(still.element, (element) => element.attrs["data-unsupported"] === "menu"),
+      find(web.element, (element) => element.attrs["data-unsupported"] === "webView"),
     ).toHaveLength(1);
   });
 

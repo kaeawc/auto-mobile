@@ -1,0 +1,20 @@
+{
+  "id": "backdrop-sheet",
+  "window": {
+    "placement": { "type": "sheet", "edge": "bottom", "height": 360 },
+    "backdrop": { "material": "regular", "tint": "surface" }
+  },
+  "root": {
+    "type": "column",
+    "style": { "padding": { "start": 24, "end": 24, "top": 24, "bottom": 24 }, "spacing": 12 },
+    "children": [
+      { "type": "text", "text": "Frosted sheet", "style": { "textStyle": "titleLarge" } },
+      {
+        "type": "text",
+        "text": "The app behind the window blurs under the tint.",
+        "style": { "textStyle": "bodyMedium" }
+      },
+      { "type": "button", "label": "Done" }
+    ]
+  }
+}

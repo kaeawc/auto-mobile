@@ -1,0 +1,33 @@
+{
+  "id": "drawer-open",
+  "window": { "placement": { "type": "fullscreen" } },
+  "theme": {
+    "colors": {
+      "light": { "surfaceContainerHigh": "#E3F2E1", "surfaceTint": "#2E7D32" }
+    }
+  },
+  "state": { "drawerOpen": true },
+  "root": {
+    "type": "column",
+    "style": { "width": "fill", "height": "fill" },
+    "safeAreaPadding": { "edges": ["top", "bottom"], "types": ["systemBars"] },
+    "children": [
+      { "type": "text", "text": "Library", "style": { "textStyle": "titleLarge" } },
+      {
+        "type": "drawer",
+        "edge": "start",
+        "openWhen": { "key": "drawerOpen", "equals": true },
+        "child": {
+          "type": "column",
+          "safeAreaPadding": { "edges": ["top", "bottom"], "types": ["systemBars"] },
+          "style": { "spacing": 8, "padding": { "start": 16, "end": 16, "top": 16, "bottom": 16 } },
+          "children": [
+            { "type": "text", "text": "Albums", "style": { "textStyle": "titleMedium" } },
+            { "type": "text", "text": "Artists" },
+            { "type": "text", "text": "Playlists" }
+          ]
+        }
+      }
+    ]
+  }
+}

@@ -61,6 +61,13 @@ export const WEB_SCREENSHOT_SPECS: Readonly<Record<string, string>> = {
   "status-bar-dark-content": "prototype-web/status-bar-dark-content.json",
   // Every button variant and two sliders: Material on pixel-9, the native iOS skin on iphone-16.
   "native-controls": "prototype-web/native-controls.json",
+  // An open menu anchored to its row and a spotlit tooltip above its target (#16536).
+  "menu-tooltip-open": "prototype-web/menu-tooltip-open.json",
+  // A sheet window frosting the wallpaper behind it: blur on iOS, regular material (#16536).
+  "backdrop-sheet": "prototype-web/backdrop-sheet.json",
+  // An open start drawer over a themed surfaceContainerHigh and surfaceTint: Android's tonal
+  // surface on pixel-9, the iOS renderer's surfaceContainerHigh on iphone-16 (#18451).
+  "drawer-open": "prototype-web/drawer-open.json",
 };
 
 /**

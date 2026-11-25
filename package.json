@@ -153,7 +153,7 @@
     "@jimp/plugin-blur": "1.6.1",
     "@jimp/plugin-circle": "1.6.1",
     "@jimp/plugin-color": "1.6.1",
-    "@jimp/plugin-contain": "1.6.1",
+    "@jimp/plugin-contain": "1.7.0",
     "@jimp/plugin-cover": "1.6.1",
     "@jimp/plugin-crop": "1.6.1",
     "@jimp/plugin-displace": "1.6.1",

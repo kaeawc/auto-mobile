@@ -38,7 +38,7 @@ import {
   sanitizeDeviceControlTransportFailure,
 } from "../daemon/deviceControlTransportFailure";
 import {
-  DEVICE_SESSION_RECOVERY_PROMPT,
+  deviceSessionRecoveryPrompt,
   noActiveDeviceSessionPayload,
   readTerminalSessionRefusal,
   sessionOwnershipLostPayload,
@@ -195,7 +195,7 @@ function boundSessionOwnershipLostPayload(error: DaemonBoundSessionExpiredError)
   return sessionOwnershipLostPayload({
     message:
       `Session ownership lost for ${error.sessionUuid}: ${error.reason}. ` +
-      DEVICE_SESSION_RECOVERY_PROMPT,
+      deviceSessionRecoveryPrompt(error.platform),
     sessionUuid: error.sessionUuid,
     reason: error.reason,
     release: error.release,
@@ -206,7 +206,7 @@ function sessionOwnershipLostMessage(error: DaemonBoundSessionExpiredError): str
   return JSON.stringify(boundSessionOwnershipLostPayload(error));
 }
 
-function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): CallToolResult {
+export function sessionOwnershipLostResult(error: DaemonBoundSessionExpiredError): CallToolResult {
   return {
     content: [
       {

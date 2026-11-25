@@ -5,7 +5,12 @@ import {
 } from "../models/deviceSessionRecovery";
 import { readToolEnvelopePayload } from "./toolEnvelopePayload";
 import { logger } from "../utils/logger";
-import { PLATFORM_LABELS, type Platform } from "../models/Platform";
+import {
+  isAndroidOrIosPlatform,
+  NON_IOS_APPLE_PLATFORM_LABELS,
+  PLATFORM_LABELS,
+  type Platform,
+} from "../models/Platform";
 import type { SessionReleaseSnapshot } from "./sessionManager";
 import {
   SESSION_OWNERSHIP_LOST_CODE,
@@ -44,6 +49,18 @@ export const DEVICE_SESSION_RECOVERY_PROMPT = `Call ${
     ? `${DEVICE_SESSION_RECOVERY_TOOLS.slice(0, -1).join(", ")}, or ${DEVICE_SESSION_RECOVERY_TOOLS[DEVICE_SESSION_RECOVERY_TOOLS.length - 1]}`
     : DEVICE_SESSION_RECOVERY_TOOLS.join(" or ")
 } to acquire a new device session.`;
+
+/**
+ * The recovery prose for a lost session on `platform` (#19186). getAndroid and getApple refuse
+ * watchOS, tvOS and visionOS simulators, so such a session is told to call startDevice with its
+ * platform; Android, iOS and an unknown platform keep {@link DEVICE_SESSION_RECOVERY_PROMPT}.
+ */
+export function deviceSessionRecoveryPrompt(platform?: Platform): string {
+  if (platform === undefined || isAndroidOrIosPlatform(platform)) {
+    return DEVICE_SESSION_RECOVERY_PROMPT;
+  }
+  return `Call startDevice with platform: "${platform}" to acquire a new ${NON_IOS_APPLE_PLATFORM_LABELS[platform]} device session.`;
+}
 
 /** Append the recorded heartbeat leash only when heartbeat expiry caused the release. */
 export function appendHeartbeatExpiryMessage(

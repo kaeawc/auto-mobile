@@ -115,6 +115,7 @@ type Runtime = Pick<
   | "sessionDaemonInstances"
   | "sessionDeviceIds"
   | "sessionPlatforms"
+  | "sessionApplePlatforms"
   | "stallHandovers"
   | "stallResumeProbe"
   | "structuredSessionNotFound"
@@ -969,6 +970,7 @@ export class ProxyConnection {
     this.runtime.daemonIdleReports.clear();
     this.runtime.sessionDeviceIds.clear();
     this.runtime.sessionPlatforms.clear();
+    this.runtime.sessionApplePlatforms.clear();
     this.runtime.stallHandovers.clear();
     this.runtime.resumedStallNotices.clear();
     this.runtime.pendingSessionLosses.clear();

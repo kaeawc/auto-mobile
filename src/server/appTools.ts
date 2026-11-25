@@ -296,9 +296,20 @@ export type AppPermissionsFactory = (device: BootedDevice) => AppPermissionsLike
 const defaultAppPermissionsFactory: AppPermissionsFactory = (device) => new AppPermissions(device);
 
 function describeSetPermissionsSuccess(appId: string, result: SetAppPermissionsResult): string {
-  const applied = describeAppliedPermissions(appId, result);
+  const applied = withAppTerminatedNotice(appId, result, describeAppliedPermissions(appId, result));
   const diagnostics = result.diagnostics?.map((diagnostic) => diagnostic.message) ?? [];
   return diagnostics.length > 0 ? `${applied}. Warning: ${diagnostics.join(" ")}` : applied;
+}
+
+/** A change that terminated the app says so, with the call that brings it back (#19186). */
+function withAppTerminatedNotice(
+  appId: string,
+  result: SetAppPermissionsResult,
+  message: string,
+): string {
+  return result.appTerminated
+    ? `${message}. The permission change terminated ${appId}; relaunch it with launchApp before the next interaction`
+    : message;
 }
 
 function describeAppliedPermissions(appId: string, result: SetAppPermissionsResult): string {
@@ -326,7 +337,11 @@ export const createSetAppPermissionsHandler =
     const response = createStructuredToolResponse({
       message: result.success
         ? describeSetPermissionsSuccess(args.appId, result)
-        : (result.error ?? `Failed to apply app permission changes for ${args.appId}`),
+        : withAppTerminatedNotice(
+            args.appId,
+            result,
+            result.error ?? `Failed to apply app permission changes for ${args.appId}`,
+          ),
       ...result,
     });
     // `result.success` requires every requested change to have applied, so a

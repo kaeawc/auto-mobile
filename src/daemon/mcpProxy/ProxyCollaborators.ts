@@ -274,6 +274,7 @@ type Runtime = Pick<
   | "sessionBinding"
   | "sessionDeviceIds"
   | "sessionPlatforms"
+  | "sessionApplePlatforms"
   | "sessionState"
   | "stallHandovers"
   | "stallResumeProbe"
@@ -693,6 +694,7 @@ export class ProxyCollaborators {
       state: this.runtime.sessionState,
       ownedDeviceSessions: this.runtime.ownedDeviceSessions,
       sessionPlatforms: this.runtime.sessionPlatforms,
+      sessionApplePlatforms: this.runtime.sessionApplePlatforms,
       sessionDeviceIds: this.runtime.sessionDeviceIds,
       sessionBrokerSessions: this.runtime.brokerSessions.sessions,
       plainRestartSessionLosses: this.runtime.plainRestartSessionLosses,

@@ -19991,7 +19991,7 @@
       "properties": {
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "sessionUuid": {
           "description": "Session used for inventory admission",
@@ -20525,7 +20525,7 @@
         },
         "platform": {
           "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
+          "enum": ["android", "ios", "watchos", "tvos", "visionos"]
         },
         "configuredInventory": {},
         "capabilityProfiles": {
@@ -47106,6 +47106,10 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "platform": {
+          "type": "string",
+          "enum": ["android", "ios", "tvos"]
+        },
         "appId": {
           "type": "string",
           "minLength": 1,
@@ -47135,10 +47139,6 @@
         },
         "scheduleExactAlarm": {
           "enum": ["allow", "deny"]
-        },
-        "platform": {
-          "type": "string",
-          "enum": ["android", "ios", "tvos", "visionos"]
         },
         "sessionUuid": {
           "type": "string"
@@ -47238,6 +47238,11 @@
           "items": {
             "type": "string"
           }
+        },
+        "appTerminated": {
+          "description": "tvOS: the change terminated the app; relaunch it with launchApp",
+          "type": "boolean",
+          "const": true
         },
         "diagnostics": {
           "type": "array",

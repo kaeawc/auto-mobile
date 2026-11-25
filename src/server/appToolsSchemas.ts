@@ -287,6 +287,8 @@ export const setAppPermissionsSchema = withJsonSchemaOverride(
     addDeviceTargetingToSchema(
       z
         .object({
+          // The platforms the tool can set permissions on: no visionOS (#19186).
+          platform: z.enum(["android", "ios", "tvos"]).optional(),
           appId: z.string().trim().min(1),
           action: appPermissionActionSchema
             .optional()

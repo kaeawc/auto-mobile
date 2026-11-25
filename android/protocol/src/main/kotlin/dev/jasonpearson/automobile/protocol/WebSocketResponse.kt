@@ -925,6 +925,10 @@ data class PrototypeResult(
    * the host can tell a full store from a corrupt stream.
    */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val mediaCode: String? = null,
+  /** Only the reply to a `notifications.push` simulate (#14285): whether a handler ran. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val pushHandled: Boolean? = null,
+  /** Only the reply to a `notifications.push` simulate: foreground, background or notification. */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val pushDelivery: String? = null,
 ) : WebSocketResponse(), CorrelatedResponse
 
 /**

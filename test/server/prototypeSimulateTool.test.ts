@@ -505,6 +505,44 @@ describe("prototype simulate and timer reports", () => {
     expect(proxy.advanceClockRequests).toEqual([]);
   });
 
+  test("simulate push uses a push-capable runtime as the connection route", async () => {
+    const push = { type: "message", data: { id: "m1", text: "Hi" } };
+    const input = { action: "simulate", id: "np", event: "notifications.push", data: push };
+    const capabilities = [
+      "prototype_platform_simulation_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_push_v1",
+    ];
+    proxy.setSupportedCommands(capabilities);
+    proxy.setSimulatePlatformResult({
+      success: true,
+      pushHandled: true,
+      pushDelivery: "foreground",
+    });
+    expect(await call(android, input)).toMatchObject({
+      success: true,
+      transport: "connection",
+      handled: true,
+      delivery: "foreground",
+    });
+    expect(proxy.simulatePlatformRequests).toEqual([
+      { id: "np", event: "notifications.push", data: push },
+    ]);
+
+    agent.handshake.capabilities.push(...capabilities, "simulate_prototype_platform");
+    agent.queueReplies({ pushHandled: false, pushDelivery: "background" });
+    expect(await call(ios, input)).toMatchObject({
+      success: true,
+      transport: "connection",
+      handled: false,
+      delivery: "background",
+    });
+    expect(agent.requests).toContainEqual({
+      type: "simulate_prototype_platform",
+      body: { id: "np", event: "notifications.push", data: push },
+    });
+  });
+
   test("simulate push refuses an oversized payload with invalid_args", async () => {
     const result = await call(android, {
       action: "simulate",

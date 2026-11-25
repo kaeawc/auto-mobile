@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { simulatePrototypePush } from "../../../src/features/prototype/prototypePushSimulate";
+import {
+  PROTOTYPE_PUSH_CONNECTION_CAPABILITIES,
+  prototypePushConnectionRoute,
+  simulatePrototypePush,
+  type PrototypePushRuntime,
+} from "../../../src/features/prototype/prototypePushSimulate";
 import { FakePrototypePushRoute } from "../../fakes/FakePrototypePushRoute";
 
 const push = { type: "message", data: { id: "m1", sender: "Ada", text: "Hi" } };
@@ -101,6 +106,100 @@ describe("simulatePrototypePush", () => {
       success: false,
       code: "platform_error",
       transport: "connection",
+    });
+  });
+});
+
+class FakePushRuntime implements PrototypePushRuntime {
+  readonly sent: { id: string; event: string; data: unknown; timeoutMs?: number }[] = [];
+  constructor(
+    readonly capabilities: readonly string[],
+    private readonly reply: Awaited<ReturnType<PrototypePushRuntime["simulatePlatformEvent"]>> = {
+      success: true,
+    },
+  ) {}
+  async supports(capability: string): Promise<boolean> {
+    return this.capabilities.includes(capability);
+  }
+  async simulatePlatformEvent(id: string, event: string, data: unknown, timeoutMs?: number) {
+    this.sent.push({ id, event, data, timeoutMs });
+    return this.reply;
+  }
+}
+
+describe("prototypePushConnectionRoute", () => {
+  test("needs platform simulation, the notifications module and the push capability", async () => {
+    expect(PROTOTYPE_PUSH_CONNECTION_CAPABILITIES).toEqual([
+      "prototype_platform_simulation_v1",
+      "prototype_platform_notifications_v1",
+      "prototype_platform_push_v1",
+    ]);
+    expect(
+      await prototypePushConnectionRoute(
+        new FakePushRuntime(PROTOTYPE_PUSH_CONNECTION_CAPABILITIES),
+      ).available(),
+    ).toBe(true);
+    for (const missing of PROTOTYPE_PUSH_CONNECTION_CAPABILITIES) {
+      const runtime = new FakePushRuntime(
+        PROTOTYPE_PUSH_CONNECTION_CAPABILITIES.filter((capability) => capability !== missing),
+      );
+      expect({
+        missing,
+        available: await prototypePushConnectionRoute(runtime).available(),
+      }).toEqual({ missing, available: false });
+    }
+  });
+
+  test("delivers the payload as notifications.push event data and keeps a typed reply", async () => {
+    const runtime = new FakePushRuntime(PROTOTYPE_PUSH_CONNECTION_CAPABILITIES, {
+      success: true,
+      pushHandled: true,
+      pushDelivery: "background",
+    });
+    const result = await simulatePrototypePush(
+      { connection: prototypePushConnectionRoute(runtime) },
+      { id: "np", data: push, timeoutMs: 250 },
+    );
+    expect(result).toEqual({
+      success: true,
+      transport: "connection",
+      handled: true,
+      delivery: "background",
+    });
+    expect(runtime.sent).toEqual([
+      { id: "np", event: "notifications.push", data: push, timeoutMs: 250 },
+    ]);
+  });
+
+  test("a malformed handled or delivery falls back to unhandled foreground", async () => {
+    const runtime = new FakePushRuntime(PROTOTYPE_PUSH_CONNECTION_CAPABILITIES, {
+      success: true,
+      pushHandled: "yes",
+      pushDelivery: "sideways",
+    });
+    expect(
+      await simulatePrototypePush(
+        { connection: prototypePushConnectionRoute(runtime) },
+        { id: "np", data: push },
+      ),
+    ).toEqual({ success: true, transport: "connection", handled: false, delivery: "foreground" });
+  });
+
+  test("a refused delivery is a platform_error naming the runtime's reason", async () => {
+    const runtime = new FakePushRuntime(PROTOTYPE_PUSH_CONNECTION_CAPABILITIES, {
+      success: false,
+      error: "no prototype np is shown",
+    });
+    expect(
+      await simulatePrototypePush(
+        { connection: prototypePushConnectionRoute(runtime) },
+        { id: "np", data: push },
+      ),
+    ).toEqual({
+      success: false,
+      code: "platform_error",
+      transport: "connection",
+      error: "no prototype np is shown",
     });
   });
 });

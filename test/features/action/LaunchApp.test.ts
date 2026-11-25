@@ -1195,6 +1195,43 @@ describe("LaunchApp", () => {
     expect(collapseCount).toBeLessThan(20);
   });
 
+  test("names a System UI ANR dialog instead of the notification shade (#19194)", async () => {
+    fakeTimer.enableAutoAdvance();
+    const anrObservation = {
+      ...createObserveResult(),
+      viewHierarchy: {
+        packageName: "com.android.systemui",
+        hierarchy: {
+          node: {
+            $: { bounds: "[0,0][1080,1920]" },
+            node: [
+              { $: { text: "System UI isn't responding", bounds: "[100,800][980,900]" } },
+              { $: { text: "Wait", bounds: "[100,1000][500,1100]" } },
+            ],
+          },
+        },
+      },
+      activeWindow: {
+        appId: "com.android.systemui",
+        activityName: "NotificationShade",
+        layoutSeqSum: 1,
+        systemOverlay: true,
+      },
+      deviceLock: { locked: false, keyguardShowing: false, secure: false },
+    };
+
+    fakeAdb.setForegroundApp({ packageName, userId: 0 });
+    fakeAdb.setCommandResponse("shell dumpsys activity processes", createExecResult("0\n", ""));
+    fakeObserveScreen.setObserveResult(() => anrObservation);
+
+    const result = await launchApp.execute(packageName, { clearAppData: false, coldBoot: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(`"System UI isn't responding" (ANR) dialog is covering the app`);
+    expect(result.error).toContain('tapOn { text: "Wait" }');
+    expect(result.error).not.toContain("(notification shade) is covering the app");
+  });
+
   test("reports a notification shade blocker after cold boot launch verification times out", async () => {
     fakeTimer.enableAutoAdvance();
     const notificationShadeObservation = {

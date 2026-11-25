@@ -186,6 +186,13 @@ public enum PrototypeSpecStrictValidator {
             return value["type"] == .string("textField") &&
                 (value["secure"] == .bool(true) || value["keyboardType"] == .string("password"))
         }.map { PrototypeLocatedValue(value: ["stateKey": $0.value["stateKey"] ?? .null], path: $0.path) }
+        // The device formats a derived field, so the host cannot name the secure key it expands to.
+        if let derived = secureNodes.first(where: { repeats.readsDerivedKey($0) }) {
+            throw PrototypeContractValidator.invalid(
+                "\(derived.path).stateKey",
+                "Secure state key cannot use a derived repeat field; key it by an item field or {index}"
+            )
+        }
         let secure = Set(repeats.bound(secureNodes).compactMap { $0.value["stateKey"]?.stringValue })
         guard !secure.isEmpty else { return }
         let derive = fields["derive"]?.objectFields ?? [:]

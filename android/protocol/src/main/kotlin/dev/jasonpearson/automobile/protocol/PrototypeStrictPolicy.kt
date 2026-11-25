@@ -58,7 +58,10 @@ internal object PrototypeStrictPolicy {
     context: PrototypeStateChecks.Context,
   ): PrototypeSpecError? {
     val scopes = PrototypeRepeatValidator.scopes(spec)
-    val secure = secureStateKeys(scopes, context)
+    PrototypeSecureStateKeys.derivedKeyError(scopes, context)?.let {
+      return it
+    }
+    val secure = PrototypeSecureStateKeys.keys(scopes, context)
     if (secure.isEmpty()) return null
     val channels = (spec["channels"] as? JsonObject).orEmpty()
     // A web view loads its url from the page host, so the url is a request sink (#16573).
@@ -113,25 +116,6 @@ internal object PrototypeStrictPolicy {
       )
     return persistedSecureError(spec, secure)
   }
-
-  private fun secureStateKeys(
-    scopes: List<PrototypeRepeatValidator.Scope>,
-    context: PrototypeStateChecks.Context,
-  ): Set<String> =
-    context.nodes
-      .filter {
-        it.value.text("type") == "textField" &&
-          (it.value["secure"] == JsonPrimitive(true) || it.value.text("keyboardType") == "password")
-      }
-      .flatMap { node ->
-        PrototypeRepeatValidator.keyInstances(
-            scopes,
-            JsonObject(mapOf("stateKey" to node.value.getValue("stateKey"))),
-            node.path,
-          )
-          .mapNotNull { (value, _) -> value.text("stateKey") }
-      }
-      .toSet()
 
   private fun requestFields(spec: JsonObject, context: PrototypeStateChecks.Context): List<Field> {
     val fields = mutableListOf<Field>()

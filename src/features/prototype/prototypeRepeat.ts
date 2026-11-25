@@ -7,6 +7,7 @@ import { effectUses } from "./prototypeEffects";
 import { imageUses } from "./prototypeImageUses";
 import { prototypeNodeChildren } from "./prototypeNodeChildren";
 import { PrototypeRepeatData, projectPrototypeDataItem } from "./prototypeData";
+import { derivedRepeatKeyError, innerDeriveCollisionError } from "./prototypeDerivedRepeatKeys";
 import contract from "../../../schemas/prototype-spec-contract.json";
 import {
   prototypeDataPathHasIndex,
@@ -558,7 +559,9 @@ function nestedTemplateErrors(
   }
   for (let index = 0; index < outer.items.length; index++) {
     const item = (outer.sourceItems ?? outer.items)[index];
-    const sourceError = innerSourceError(item, field, `${path}.repeat.items.field`, state);
+    const sourceError =
+      innerSourceError(item, field, `${path}.repeat.items.field`, state) ??
+      innerDeriveCollisionError(node, path, item[field]);
     if (sourceError) {
       return sourceError;
     }
@@ -587,61 +590,8 @@ function repeatIdentityError(
     return undefined;
   }
   return scope.derivedFields.has(key)
-    ? derivedKeyError(node, scope, key, `${path}.repeat.key`)
+    ? derivedRepeatKeyError(node, scope, key, `${path}.repeat.key`)
     : repeatKeyError(scope.items, key, `${path}.repeat.key`);
-}
-
-/**
- * A derived key's string is formatted on the device, but one entry formats equal inputs to equal
- * strings, so two rows that feed it the same input always share a key (#18665).
- */
-function derivedKeyError(
-  node: Raw,
-  scope: Scope,
-  key: string,
-  path: string,
-): RepeatError | undefined {
-  const of = record(record(record(record(node.repeat)?.derive)?.[key])?.of);
-  if (!of || scope.items.length < 2) {
-    return undefined;
-  }
-  const constant = Object.hasOwn(of, "value");
-  const field = of.item;
-  if (!constant && (typeof field !== "string" || scope.derivedFields.has(field))) {
-    return undefined;
-  }
-  const seen = new Map<string, number>();
-  for (const [index, item] of scope.items.entries()) {
-    const input = derivedKeyInput(constant, item, String(field));
-    if (input === undefined) {
-      continue;
-    }
-    const first = seen.get(input);
-    if (first !== undefined) {
-      return fail(
-        path,
-        `Derived repeat key ${JSON.stringify(key)} has the same input for items ${first} and ${index}`,
-      );
-    }
-    seen.set(input, index);
-  }
-  return undefined;
-}
-
-/** The row's input to a derived key, or `undefined` when it is not a comparable scalar. */
-function derivedKeyInput(
-  constant: boolean,
-  item: Readonly<Raw>,
-  field: string,
-): string | undefined {
-  if (constant) {
-    return "constant";
-  }
-  const value = Object.hasOwn(item, field) ? item[field] : undefined;
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-    ? // `String(-0)` is "0", but a formatter renders -0 as "-0": keep the sign apart.
-      `${typeof value}:${Object.is(value, -0) ? "-0" : String(value)}`
-    : undefined;
 }
 
 const MAX_REPEAT_ITEMS =
@@ -937,33 +887,12 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   located: T[],
   data = new PrototypeRepeatData(record(spec)?.data),
 ): KeyInstance<T>[] {
-  const parsedDerive = prototypeDeriveSchema.safeParse(record(spec)?.derive ?? {});
-  if (parsedDerive.success) {
-    data.derived = derivePrototypeValues(
-      parsedDerive.data,
-      record(spec)?.data,
-      record(record(spec)?.state) ?? {},
-    );
-  }
-  const root = record(record(spec)?.root);
-  const scopes: Scope[] = [];
-  if (root) {
-    collectScopes(root, "root", scopes, { data });
-  }
+  const scopes = keyScopes(spec, data);
   return located.flatMap((entry) => {
-    const matches = scopes.filter((candidate) =>
-      entry.path.startsWith(`${candidate.path}.children[`),
-    );
-    const deepest = Math.max(0, ...matches.map((candidate) => candidate.path.length));
-    const applicable = matches.filter((candidate) => candidate.path.length === deepest);
+    const applicable = applicableScopes(scopes, entry.path);
     return (applicable.length ? applicable : [undefined]).flatMap((scope) => {
       // A derived key cannot be bound to its device-local string during host validation.
-      if (
-        scope &&
-        checkedKeyValues(entry.value).some(
-          (key) => typeof key === "string" && hasDerivedField(key, scope),
-        )
-      ) {
+      if (scope && readsDerivedKey(entry.value, scope)) {
         return [];
       }
       const routeOperand =
@@ -990,6 +919,50 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
       }));
     });
   });
+}
+
+/**
+ * The entries `repeatKeyInstances` drops because a state key reads a repeat-derived field, whose
+ * string only the device formats. A check that must see every expanded key rejects these (#18665).
+ */
+export function repeatDerivedKeyEntries<T extends { value: Raw; path: string }>(
+  spec: unknown,
+  located: T[],
+): T[] {
+  const scopes = keyScopes(spec, new PrototypeRepeatData(record(spec)?.data));
+  return located.filter((entry) =>
+    applicableScopes(scopes, entry.path).some((scope) => readsDerivedKey(entry.value, scope)),
+  );
+}
+
+function keyScopes(spec: unknown, data: PrototypeRepeatData): Scope[] {
+  const parsedDerive = prototypeDeriveSchema.safeParse(record(spec)?.derive ?? {});
+  if (parsedDerive.success) {
+    data.derived = derivePrototypeValues(
+      parsedDerive.data,
+      record(spec)?.data,
+      record(record(spec)?.state) ?? {},
+    );
+  }
+  const root = record(record(spec)?.root);
+  const scopes: Scope[] = [];
+  if (root) {
+    collectScopes(root, "root", scopes, { data });
+  }
+  return scopes;
+}
+
+/** The innermost repeat scopes whose template holds `path`. */
+function applicableScopes(scopes: readonly Scope[], path: string): Scope[] {
+  const matches = scopes.filter((candidate) => path.startsWith(`${candidate.path}.children[`));
+  const deepest = Math.max(0, ...matches.map((candidate) => candidate.path.length));
+  return matches.filter((candidate) => candidate.path.length === deepest);
+}
+
+function readsDerivedKey(value: Raw, scope: Scope): boolean {
+  return checkedKeyValues(value).some(
+    (key) => typeof key === "string" && hasDerivedField(key, scope),
+  );
 }
 
 /** Validation needs the projected field types, without reading a clock or formatting values. */

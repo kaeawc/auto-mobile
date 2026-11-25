@@ -80,6 +80,65 @@ final class PrototypeNestedRepeatTests: XCTestCase {
         }
     }
 
+    func testSharedDuplicateKeyFixturesMatchOnStrictAndDeviceLoad() throws {
+        struct Case: Decodable {
+            struct Failure: Decodable {
+                let path: String
+                let message: String
+            }
+
+            let name: String
+            let spec: JSONValue
+            let error: Failure?
+        }
+        let cases = try JSONDecoder().decode([Case].self, from: Data(
+            contentsOf: PrototypeSpecFixtures.directory.appendingPathComponent("repeat/nested-duplicate-keys.json")
+        ))
+        XCTAssertFalse(cases.isEmpty)
+        for fixture in cases {
+            let data = try JSONEncoder().encode(fixture.spec)
+            guard let failure = fixture.error else {
+                XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: data), fixture.name)
+                continue
+            }
+            let expected = PrototypeLoadError.invalidSpec(path: failure.path, message: failure.message)
+            XCTAssertThrowsError(try PrototypeSpecStrictValidator.validate(data: data), fixture.name) { error in
+                XCTAssertEqual(error as? PrototypeLoadError, expected, fixture.name)
+            }
+            XCTAssertThrowsError(try JSONDecoder().decode(PrototypeSpec.self, from: data), fixture.name) { error in
+                XCTAssertEqual(error as? PrototypeLoadError, expected, fixture.name)
+            }
+        }
+    }
+
+    func testLazyRowRejectsDerivedInnerKeysThatFormatAlike() throws {
+        // Distinct inputs pass the load-time checks; only the device's formatter makes them collide.
+        let spec = try JSONDecoder().decode(PrototypeSpec.self, from: Data(#"""
+        {"id":"dates","window":{"placement":{"type":"fullscreen"}},
+         "data":{"orders":[{"id":"A","lines":[{"n":1},{"n":2}]},{"id":"B","lines":[{"n":3}]}]},
+         "root":{"type":"list","repeat":{"items":{"path":"/orders"},"as":"order","key":"id"},"children":[
+          {"type":"column","repeat":{"items":{"field":"lines"},"as":"line","key":"day","derive":{
+            "day":{"of":{"item":"n"},"format":{"date":{}},"locale":"en-US","timeZone":"UTC"}}},
+            "children":[{"type":"text","text":"{line.day}"}]}]}}
+        """#.utf8))
+        XCTAssertThrowsError(try PrototypeLazyList.row(node: spec.root, data: spec.data, index: 0)) { error in
+            XCTAssertEqual(error as? PrototypeLoadError, .invalidSpec(
+                path: "root.children[0].repeat.key",
+                message: #"Duplicate repeat key "Jan 1, 1970" (items 0 and 1)"#
+            ))
+        }
+        XCTAssertNotNil(try PrototypeLazyList.row(node: spec.root, data: spec.data, index: 1))
+    }
+
+    func testInnerDeriveNamesDistinctFromEveryRowFieldValidate() throws {
+        let url = PrototypeSpecFixtures.directory.appendingPathComponent("invalid/nested-repeat-derive-row-field.json")
+        let text = try String(contentsOf: url, encoding: .utf8)
+            .replacingOccurrences(of: #""sku": {"#, with: #""skuLabel": {"#)
+            .replacingOccurrences(of: "{line.sku} x{line.qty}", with: "{line.qty} {line.skuLabel}")
+        let fixture = try JSONDecoder().decode(PrototypeSpecFixtures.Invalid.self, from: Data(text.utf8))
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: JSONEncoder().encode(fixture.spec)))
+    }
+
     func testSharedCellFixtureReachesExactContractLimit() throws {
         func cells(_ spec: JSONValue) throws -> Int {
             let fields = try XCTUnwrap(spec.objectFields)

@@ -26,12 +26,19 @@ struct PrototypeListRepeat: Decodable {
 private enum RowShield {
     static let marker = "\u{E000}"
 
+    /// Recursive, so the raw rows a nested `repeat` reads from the item stay literal too (#18665).
     static func shield(_ value: JSONValue) -> JSONValue {
-        guard case let .string(text) = value else { return value }
-        return .string(
-            text.replacingOccurrences(of: "{data:", with: "{\(marker)data:")
-                .replacingOccurrences(of: "{platform:", with: "{\(marker)platform:")
-        )
+        switch value {
+        case let .string(text): .string(shieldText(text))
+        case let .array(items): .array(items.map(shield))
+        case let .object(fields): .object(fields.mapValues(shield))
+        default: value
+        }
+    }
+
+    private static func shieldText(_ text: String) -> String {
+        text.replacingOccurrences(of: "{data:", with: "{\(marker)data:")
+            .replacingOccurrences(of: "{platform:", with: "{\(marker)platform:")
     }
 
     static func unshield(_ value: JSONValue) -> JSONValue {
@@ -66,11 +73,12 @@ enum PrototypeLazyList {
         }
     }
 
-    /// The row's template with its item bound and data resolved, before decoding.
+    /// The row's template with its item bound and data resolved, before decoding. Throws when a
+    /// nested repeat's derived keys collide in this row, as eager expansion does (#18665).
     static func resolvedRow(
         node: PrototypeNode, data: [String: JSONValue]?, derived: [String: JSONValue] = [:], index: Int
     )
-        -> (key: String, json: JSONValue)?
+        throws -> (key: String, json: JSONValue)?
     {
         guard let spec = node.listRepeat, let raw = node.listRowTemplate,
               case let .array(items)? = spec.items.resolve(data),
@@ -78,14 +86,19 @@ enum PrototypeLazyList {
         let fields = PrototypeDataValues.project(items[index].objectFields ?? [:]).objectFields ?? [:]
         let projected = fields.mapValues(RowShield.shield)
         let instance = PrototypeRepeatInstance(
-            alias: spec.as, item: projected, index: index, sourceItem: items[index].objectFields,
+            alias: spec.as, item: projected, index: index,
+            sourceItem: items[index].objectFields?.mapValues(RowShield.shield),
             identity: fields[spec.key]?.displayString
         )
         // Row tokens bind first, so `{data:/rows/{index}/name}` is a complete pointer before it resolves.
         let sources = PrototypeDataResolver.resolveRepeatSources(raw, data: data)
-        let expanded = PrototypeRepeat.expand(
-            sources, outer: instance, formatter: FoundationPrototypeValueFormatter(), environment: .device()
+        let formatter = FoundationPrototypeValueFormatter()
+        let environment = PrototypeFormatEnvironment.device()
+        try PrototypeRepeat.validateDerivedRow(
+            sources, path: "\(node.nodePath).children[0]", listPath: node.nodePath, row: instance,
+            formatter: formatter, environment: environment
         )
+        let expanded = PrototypeRepeat.expand(sources, outer: instance, formatter: formatter, environment: environment)
         let bound = PrototypeDataResolver.resolveRoot(expanded, data: data, derived: derived, shield: true)
         // Interpolated text keeps its row and data values shielded until it is drawn (#18628).
         let drawn = PrototypeTextShield.unshieldDrawnFields(RowShield.unshield(bound))
@@ -97,7 +110,7 @@ enum PrototypeLazyList {
     )
         throws -> Row?
     {
-        guard let resolved = resolvedRow(node: node, data: data, derived: derived, index: index) else { return nil }
+        guard let resolved = try resolvedRow(node: node, data: data, derived: derived, index: index) else { return nil }
         let row = try JSONDecoder().decode(PrototypeNode.self, from: JSONEncoder().encode(resolved.json))
         return Row(key: resolved.key, index: index, node: row)
     }

@@ -59,6 +59,15 @@ extension PrototypeStrictRepeats {
                     sourcePath, "Inner repeat fields starting with \"outer.\" are reserved"
                 )
             }
+            // A derive name that is also an inner row field would replace it, as on an outer repeat (#18665).
+            for name in PrototypeContractValidator.sorted(derived)
+                where rows.contains(where: { $0.objectFields?[name] != nil })
+            {
+                throw PrototypeContractValidator.invalid(
+                    "\(path).repeat.derive.\(name)",
+                    "Derived name collides with an item field"
+                )
+            }
             let outerItem = outer.items[index]
             let items = rows.compactMap(\.objectFields).map { row in
                 var item = PrototypeDataValues.project(row).objectFields ?? [:]

@@ -118,6 +118,40 @@ class PrototypeNestedRepeatTest {
   }
 
   @Test
+  fun `inner derive names distinct from every row field validate`() {
+    val text =
+      File(directory, "invalid/nested-repeat-derive-row-field.json")
+        .readText()
+        .replace("\"sku\": {", "\"skuLabel\": {")
+        .replace("{line.sku} x{line.qty}", "{line.qty} {line.skuLabel}")
+    val spec = Json.parseToJsonElement(text).jsonObject.getValue("spec")
+    val result = PrototypeSpecValidator.validate(spec.toString())
+    assertTrue(result is PrototypeSpecValidation.Success, "$result")
+  }
+
+  @TestFactory
+  fun `shared nested duplicate key fixtures`(): List<DynamicTest> =
+    Json.parseToJsonElement(File(directory, "repeat/nested-duplicate-keys.json").readText())
+      .jsonArray
+      .map { raw ->
+        val case = raw.jsonObject
+        DynamicTest.dynamicTest(case.getValue("name").jsonPrimitive.content) {
+          val result = PrototypeSpecValidator.validate(case.getValue("spec").toString())
+          val error = case["error"] as? JsonObject
+          assertEquals(
+            error?.let {
+              PrototypeSpecError(
+                it.getValue("path").jsonPrimitive.content,
+                it.getValue("message").jsonPrimitive.content,
+              )
+            },
+            (result as? PrototypeSpecValidation.Failure)?.error,
+            "$result",
+          )
+        }
+      }
+
+  @Test
   fun `empty outer sources keep inner state key scopes`() {
     val child =
       Json.parseToJsonElement(

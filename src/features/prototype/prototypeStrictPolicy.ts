@@ -20,7 +20,12 @@ import { prototypeShaderFields } from "./prototypeShaders";
 import { PROTOTYPE_LARGE_BUDGET, type PrototypeRuntimeBudget } from "./prototypeRuntimeBudget";
 import { object, type Located, type PrototypeValidationError } from "./prototypeBindingValidation";
 import { walkPrototypeNodes } from "./prototypeNodeChildren";
-import { repeatErrors, repeatFieldReferences, repeatKeyInstances } from "./prototypeRepeat";
+import {
+  repeatDerivedKeyEntries,
+  repeatErrors,
+  repeatFieldReferences,
+  repeatKeyInstances,
+} from "./prototypeRepeat";
 import { stateKeyTaintIndex, stateKeysOverlap } from "./prototypeStateTaint";
 import { prototypeContractPatterns } from "./prototypeContractPatterns";
 import {
@@ -33,6 +38,8 @@ export const SECURE_COPY_CHECK_MESSAGE =
   "Secure copy taint analysis exceeds 4000000 overlap checks";
 export const SECURE_SCAN_BUDGET_MESSAGE =
   "Secure binding scan exceeds 4194304 expanded UTF-8 bytes";
+export const SECURE_DERIVED_KEY_MESSAGE =
+  "Secure state key cannot use a derived repeat field; key it by an item field or {index}";
 
 export interface PrototypeStrictOptions {
   supportedCapabilities?: readonly string[];
@@ -585,23 +592,37 @@ function secureScanBudgetError(
   return undefined;
 }
 
+/** Every secure text field's expanded state key, or an error when the host cannot name one. */
+function secureStateKeys(
+  spec: unknown,
+  nodes: readonly { value: Record<string, unknown>; path: string }[],
+): Set<string> | PrototypeValidationError {
+  const fields = nodes
+    .filter(
+      ({ value }) =>
+        value.type === "textField" && (value.secure === true || value.keyboardType === "password"),
+    )
+    .map(({ value, path }) => ({ value: { stateKey: value.stateKey }, path }));
+  // The device formats a derived field, so the host cannot name the secure key it expands to.
+  const derived = repeatDerivedKeyEntries(spec, fields)[0];
+  if (derived) {
+    return { path: `${derived.path}.stateKey`, message: SECURE_DERIVED_KEY_MESSAGE };
+  }
+  return new Set(repeatKeyInstances(spec, fields).map(({ value }) => String(value.stateKey)));
+}
+
 function secureLibraryError(spec: unknown): PrototypeValidationError | undefined {
   const nodes: { value: Record<string, unknown>; path: string }[] = [];
   walkPrototypeNodes(spec, (value, path) => nodes.push({ value, path }));
-  const secure = new Set(
-    repeatKeyInstances(
-      spec,
-      nodes
-        .filter(
-          ({ value }) =>
-            value.type === "textField" &&
-            (value.secure === true || value.keyboardType === "password"),
-        )
-        .map(({ value, path }) => ({ value: { stateKey: value.stateKey }, path })),
-    )
-      .map(({ value }) => value)
-      .map((node) => String(node.stateKey)),
-  );
+  const secure = secureStateKeys(spec, nodes);
+  return secure instanceof Set ? secureSinkError(spec, nodes, secure) : secure;
+}
+
+function secureSinkError(
+  spec: unknown,
+  nodes: { value: Record<string, unknown>; path: string }[],
+  secure: ReadonlySet<string>,
+): PrototypeValidationError | undefined {
   if (!secure.size) {
     return undefined;
   }

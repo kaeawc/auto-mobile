@@ -1,8 +1,13 @@
 import { z } from "zod/v4";
+import { defaultDaemonContext } from "../daemon/daemonContext";
+import type { Session } from "../daemon/sessionManager";
 import { SessionReleaseBroadcaster } from "../daemon/sessionReleaseBroadcast";
 import { getDaemonStreamDeviceLifecycleEmitter } from "../daemon/streams/streamDeviceLifecycleEvents";
 import { getDefaultPerformanceTraceManager } from "../features/performanceTrace/defaultPerformanceTraceManager";
-import type { PerformanceTraceManager } from "../features/performanceTrace/PerformanceTraceManager";
+import type {
+  PerformanceTraceManager,
+  PerformanceTraceResult,
+} from "../features/performanceTrace/PerformanceTraceManager";
 import {
   TRACE_CATEGORIES,
   TRACE_DEFAULT_BUFFER_MB,
@@ -15,10 +20,13 @@ import {
   PERFORMANCE_TRACE_TEMPLATES,
 } from "../features/performanceTrace/performanceTraceTemplates";
 import type { BootedDevice } from "../models";
+import { ActionableError } from "../models/ActionableError";
 import { runOutsideRequestContext } from "../utils/AbortContext";
+import { logger } from "../utils/logger";
 import { addDeviceTargetingToSchema } from "../utils/schemaHelpers";
 import { createStructuredToolResponse } from "../utils/toolUtils";
 import { registerPerformanceTraceResources } from "./performanceTraceResources";
+import { isLiveOn, type PowerSessionView, type SessionPowerHost } from "./sessionPower";
 import { ToolRegistry } from "./toolRegistry";
 
 const APP_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
@@ -161,26 +169,116 @@ function subscribeTraceCleanup(manager: PerformanceTraceManager): () => void {
 
 let unsubscribeTraceCleanup: (() => void) | undefined;
 
-export function createPerformanceTraceHandler(manager: PerformanceTraceManager) {
+/** The slice of the session manager a session-owned trace start needs (`SessionManager` fits). */
+export type PerformanceTraceSessionHost<S extends PowerSessionView = Session> = SessionPowerHost<S>;
+
+export interface PerformanceTraceToolDependencies<S extends PowerSessionView = Session> {
+  /** Resolved per start; defaults to the daemon's session manager. */
+  sessionHost?: () => PerformanceTraceSessionHost<S> | undefined;
+}
+
+type TraceStart = () => Promise<PerformanceTraceResult>;
+
+/** Who a start is for: the calling session, if any, and the device it targets. */
+interface TraceStartOwner {
+  sessionUuid?: string;
+  deviceId: string;
+}
+
+/**
+ * Start a session's trace as tracked session setup (#18698): refused on a session that is
+ * released, releasing, rebound or replaced, and drained by its release before the release
+ * cleanup looks for recorders. The drain is bounded, so a start can still finish after the
+ * session ended; that recorder is discarded as pending device cleanup, so the device's next
+ * owner waits for it, and the start is refused.
+ */
+async function startForSession<S extends PowerSessionView>(
+  manager: Pick<PerformanceTraceManager, "discard">,
+  host: PerformanceTraceSessionHost<S>,
+  { sessionUuid, deviceId }: Required<TraceStartOwner>,
+  start: TraceStart,
+): Promise<PerformanceTraceResult> {
+  const session = host.getSession(sessionUuid);
+  if (!session || !isLiveOn(host, sessionUuid, session, deviceId)) {
+    throw new ActionableError(
+      "Cannot start a performance trace: session is released, releasing, rebound, or replaced.",
+    );
+  }
+  let completed = false;
+  let started!: PerformanceTraceResult;
+  await host.trackSessionSetup(session, async () => {
+    started = await start();
+    completed = true;
+  });
+  if (!completed) {
+    throw new ActionableError(
+      "Session began releasing or rebinding before the trace started; nothing was recorded.",
+    );
+  }
+  if (isLiveOn(host, sessionUuid, session, deviceId)) {
+    return started;
+  }
+  const { traceId } = started;
+  logger.warn(
+    `[performanceTrace] Session ${sessionUuid} ended while ${traceId} was starting on ${deviceId}; discarding it`,
+  );
+  // Not part of this request: its abort must not cut the teardown short. Registered at once, so
+  // the device's next owner waits for it.
+  host.registerPendingDeviceCleanup(
+    deviceId,
+    runOutsideRequestContext(() => manager.discard(traceId)),
+    {
+      name: "discard a performance trace that started after its session ended",
+      leftover: "a perfetto or xctrace recorder the ended session started",
+    },
+  );
+  throw new ActionableError(
+    `The session was released or rebound while the performance trace was starting; ` +
+      `${traceId} was discarded. Start it again from a live session.`,
+  );
+}
+
+/** A sessionless start, or one outside the daemon (stdio), has no session to guard. */
+function startOwned<S extends PowerSessionView>(
+  manager: PerformanceTraceManager,
+  host: PerformanceTraceSessionHost<S> | undefined,
+  { sessionUuid, deviceId }: TraceStartOwner,
+  start: TraceStart,
+): Promise<PerformanceTraceResult> {
+  return host && sessionUuid
+    ? startForSession(manager, host, { sessionUuid, deviceId }, start)
+    : start();
+}
+
+export function createPerformanceTraceHandler<S extends PowerSessionView = Session>(
+  manager: PerformanceTraceManager,
+  deps: PerformanceTraceToolDependencies<S> = {},
+) {
   return async (
     device: BootedDevice,
     args: PerformanceTraceArgs,
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    const result =
-      args.action === "start"
-        ? await manager.start(device, {
-            template: args.template,
-            categories: args.categories,
-            bufferMb: args.bufferMb,
-            appId: args.appId,
-            timeLimitMs: args.timeLimitMs ?? PERFORMANCE_TRACE_DEFAULT_TIME_LIMIT_MS,
-            ownerSessionUuid: args.sessionUuid,
-            signal,
-          })
-        : await manager.stop(args.traceId!, signal);
-    return createStructuredToolResponse({ success: true, action: args.action, ...result });
+    if (args.action === "stop") {
+      const stopped = await manager.stop(args.traceId!, signal);
+      return createStructuredToolResponse({ success: true, action: args.action, ...stopped });
+    }
+    const start: TraceStart = () =>
+      manager.start(device, {
+        template: args.template,
+        categories: args.categories,
+        bufferMb: args.bufferMb,
+        appId: args.appId,
+        timeLimitMs: args.timeLimitMs ?? PERFORMANCE_TRACE_DEFAULT_TIME_LIMIT_MS,
+        ownerSessionUuid: args.sessionUuid,
+        signal,
+      });
+    const owner = { sessionUuid: args.sessionUuid, deviceId: device.deviceId };
+    const started = deps.sessionHost
+      ? await startOwned(manager, deps.sessionHost(), owner, start)
+      : await startOwned(manager, defaultDaemonContext.sessionManager(), owner, start);
+    return createStructuredToolResponse({ success: true, action: args.action, ...started });
   };
 }
 

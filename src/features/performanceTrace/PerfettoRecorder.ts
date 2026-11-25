@@ -65,7 +65,8 @@ function traceConfigFor(request: StartPerformanceTraceRequest): string {
  * Records a Perfetto trace on an Android device (#14102), shaped by a template or by typed
  * categories (#18688). The config is passed through stdin (base64, so no quoting can break it);
  * `duration_ms` bounds the recorder on the device itself, and stop sends SIGTERM so perfetto
- * flushes. Once signalled, the device copy is always removed, pulled or not.
+ * flushes. Once signalled, the device copy is always removed, pulled or not; discard skips the
+ * flush wait and the pull.
  */
 export class PerfettoRecorder implements PerformanceTraceRecorder {
   constructor(private readonly deps: PerfettoRecorderDependencies) {}
@@ -137,6 +138,22 @@ export class PerfettoRecorder implements PerformanceTraceRecorder {
           }
           throw error;
         } finally {
+          if (signalled) {
+            await this.removeRemote(adb, remotePath, request);
+          }
+        }
+      },
+      discard: async () => {
+        try {
+          await stopPerfettoRecorder(adb, this.deps.timer, pid, {
+            warnings,
+            poll: this.deps,
+            onSignalled: () => {
+              signalled = true;
+            },
+          });
+        } finally {
+          // Nothing was pulled; the device copy goes once no running recorder can still write it.
           if (signalled) {
             await this.removeRemote(adb, remotePath, request);
           }

@@ -151,6 +151,20 @@ describe("Perfetto recorder (#14102)", () => {
     expect(adb.calls.some((call) => call[0] === "pull")).toBe(false);
   });
 
+  test("discard stops the recorder and removes the device copy without pulling it (#18698)", async () => {
+    const adb = new RecordingAdb();
+    const recording = await perfetto(adb).recorder.start(androidRequest);
+
+    await recording.discard();
+
+    expect(adb.calls.slice(1).map((call) => call.join(" "))).toEqual([
+      "shell kill -TERM 31337 2>/dev/null; true",
+      "shell kill -0 31337 2>/dev/null && echo running || echo stopped",
+      "shell rm -f /data/misc/perfetto-traces/automobile-trace-1.perfetto-trace",
+    ]);
+    expect(recording.signalled).toBe(true);
+  });
+
   test("warns when perfetto never exits after SIGTERM", async () => {
     const adb = new RecordingAdb();
     adb.probesUntilStopped = 99;
@@ -294,6 +308,22 @@ describe("xctrace recorder (#14102)", () => {
 
     expect(signals).toEqual([]);
     expect(child.signalCode).toBeNull();
+  });
+
+  test("discard kills xctrace without finalising and deletes the trace bundle (#18698)", async () => {
+    const removed: string[] = [];
+    const { host, recorder } = xctrace(4321, {
+      removeArtifact: async (path) => {
+        removed.push(path);
+      },
+    });
+    const recording = await recorder.start(iosRequest);
+
+    await recording.discard();
+
+    expect(host.spawned[0]!.child.signalCode).toBe("SIGKILL");
+    expect(removed).toEqual([join("/artifacts", "trace-2.trace")]);
+    expect(recording.signalled).toBe(true);
   });
 
   test("fails typed and kills xctrace when it will not finalize after SIGINT (#14737)", async () => {

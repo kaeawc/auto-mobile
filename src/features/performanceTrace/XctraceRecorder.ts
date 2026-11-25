@@ -90,7 +90,11 @@ export interface XctraceRecorderDependencies {
   stopMaxMs?: number;
   /** Total artifact file bytes; missing paths return zero. */
   artifactBytes?: (path: string) => Promise<number>;
+  /** Delete a discarded `.trace` bundle; absence is not an error. */
+  removeArtifact?: (path: string) => Promise<void>;
 }
+
+const removeTraceBundle = (path: string) => rm(path, { recursive: true, force: true });
 
 const DEFAULT_START_TIMEOUT_MS = 60_000;
 const DEFAULT_STOP_TIMEOUT_MS = 60_000;
@@ -320,6 +324,27 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
           await stopChild();
         } finally {
           output.detach();
+        }
+      },
+      discard: async () => {
+        try {
+          // SIGKILL, not SIGINT: a discarded trace must not wait out finalisation.
+          if (child.exitCode === null && child.signalCode === null) {
+            child.kill("SIGKILL");
+          }
+          signalled = true;
+          await waitForDrain(exited, timer, EXITED_DRAIN_TIMEOUT_MS);
+        } finally {
+          output.detach();
+        }
+        try {
+          await (this.deps.removeArtifact ?? removeTraceBundle)(artifactPath);
+        } catch (error) {
+          // The recorder is gone either way; a stray host bundle only costs disk space.
+          logger.warn(
+            `[performanceTrace] failed to remove discarded trace ${artifactPath}: ${errorMessage(error)}`,
+            error,
+          );
         }
       },
       summarize: async (signal) => {

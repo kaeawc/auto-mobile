@@ -15,6 +15,7 @@ const tablet: BootedDevice = { deviceId: "emulator-5556", name: "Tablet", platfo
 class FakeRecorder implements PerformanceTraceRecorder {
   readonly started: StartPerformanceTraceRequest[] = [];
   readonly stops: string[] = [];
+  readonly discards: string[] = [];
   stopError?: Error;
   /** Fail the next stops before the recorder is signalled (adb gone before the SIGTERM). */
   unsignalledFailures = 0;
@@ -43,6 +44,10 @@ class FakeRecorder implements PerformanceTraceRecorder {
         if (this.stopError) {
           throw this.stopError;
         }
+      },
+      discard: async () => {
+        this.discards.push(request.traceId);
+        signalled = true;
       },
       summarize: async () => {
         this.summarizeStarted?.();
@@ -364,5 +369,32 @@ describe("PerformanceTraceManager categories (#18688)", () => {
     await expect(traces.start(pixel, hitches)).rejects.toThrow("still starting");
     await first;
     expect(recorder.started).toHaveLength(1);
+  });
+});
+
+describe("PerformanceTraceManager discard (#18698)", () => {
+  test("discard ends the recorder without stopping or summarising it and frees the device", async () => {
+    const { manager: traces, recorder } = manager();
+    await traces.start(pixel, { ...hitches, ownerSessionUuid: "s1" });
+
+    await traces.discard("trace-t-1");
+
+    expect(recorder.discards).toEqual(["trace-t-1"]);
+    expect(recorder.stops).toEqual([]);
+    expect(traces.activeTraceIds()).toEqual([]);
+    expect(traces.lookup("trace-t-1")).toBeUndefined();
+    await expect(traces.start(pixel, hitches)).resolves.toMatchObject({ traceId: "trace-t-2" });
+  });
+
+  test("discard leaves a trace a stop already took to that stop", async () => {
+    const { manager: traces, recorder } = manager();
+    await traces.start(pixel, hitches);
+    const stopping = traces.stop("trace-t-1");
+
+    await traces.discard("trace-t-1");
+    await stopping;
+
+    expect(recorder.discards).toEqual([]);
+    expect(recorder.stops).toEqual(["trace-t-1"]);
   });
 });

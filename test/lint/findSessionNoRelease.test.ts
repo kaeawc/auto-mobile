@@ -175,6 +175,8 @@ const RETAINED_SERVER_EXPIRY_READERS: Readonly<Record<string, number>> = {
   "deviceToolsAppleTvStart.ts#reusableAnonymousSessionId": 1,
   "deviceToolsAppleVisionProvision.ts#reusableAnonymousSessionId": 1,
   "deviceToolsBootPreparation.ts#callerMayReuse": 1,
+  // A trace start's admission: tracked setup and the isLiveOn re-check fence release (#18698).
+  "performanceTraceTools.ts#startForSession": 1,
   "pipeline/deviceCallDispatch.ts#refuseControlCallBeforeAdmission": 1,
   "pipeline/ingress/executeToolCall.ts#foreignOwnedExplicitSessionUuid": 1,
   "pipeline/ingress/routing.ts#admittedSessionDevice": 1,

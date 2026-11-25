@@ -1264,6 +1264,7 @@
     "neither-binding.json",
     "nested-repeat-alias-collision.json",
     "nested-repeat-cell-limit.json",
+    "nested-repeat-derive-row-field.json",
     "nested-repeat-inner-limit.json",
     "nested-repeat-inner-not-array.json",
     "nested-repeat-inner-object-field.json",

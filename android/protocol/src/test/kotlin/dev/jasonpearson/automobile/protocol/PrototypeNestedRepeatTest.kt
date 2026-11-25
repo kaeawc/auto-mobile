@@ -117,6 +117,18 @@ class PrototypeNestedRepeatTest {
     assertTrue(result is PrototypeSpecValidation.Success, "$result")
   }
 
+  @Test
+  fun `inner derive names distinct from every row field validate`() {
+    val text =
+      File(directory, "invalid/nested-repeat-derive-row-field.json")
+        .readText()
+        .replace("\"sku\": {", "\"skuLabel\": {")
+        .replace("{line.sku} x{line.qty}", "{line.qty} {line.skuLabel}")
+    val spec = Json.parseToJsonElement(text).jsonObject.getValue("spec")
+    val result = PrototypeSpecValidator.validate(spec.toString())
+    assertTrue(result is PrototypeSpecValidation.Success, "$result")
+  }
+
   @TestFactory
   fun `shared nested duplicate key fixtures`(): List<DynamicTest> =
     Json.parseToJsonElement(File(directory, "repeat/nested-duplicate-keys.json").readText())

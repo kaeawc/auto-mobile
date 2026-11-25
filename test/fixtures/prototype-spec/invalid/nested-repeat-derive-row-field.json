@@ -1,0 +1,75 @@
+{
+  "spec": {
+    "id": "nested",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": {
+          "path": "/orders"
+        },
+        "as": "order",
+        "key": "id"
+      },
+      "children": [
+        {
+          "type": "column",
+          "repeat": {
+            "items": {
+              "field": "lines"
+            },
+            "as": "line",
+            "derive": {
+              "sku": {
+                "of": {
+                  "item": "qty"
+                },
+                "format": {
+                  "number": {}
+                }
+              }
+            }
+          },
+          "children": [
+            {
+              "type": "text",
+              "text": "{line.sku} x{line.qty}"
+            }
+          ]
+        }
+      ]
+    },
+    "data": {
+      "orders": [
+        {
+          "id": "A",
+          "lines": [
+            {
+              "name": "Pad",
+              "qty": 1
+            }
+          ]
+        },
+        {
+          "id": "B",
+          "lines": [
+            {
+              "sku": "PEN",
+              "qty": 2
+            },
+            {
+              "sku": "INK",
+              "qty": 1
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "expectedPath": "root.children[0].repeat.derive.sku",
+  "expectedMessage": "Derived name collides with an item field"
+}

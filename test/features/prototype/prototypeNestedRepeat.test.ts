@@ -100,6 +100,17 @@ for (const file of readdirSync(invalidDir).filter((name) => name.startsWith("nes
   );
 }
 
+test("an inner derive name distinct from every row field is accepted", () => {
+  const fixture: { spec: Raw } = JSON.parse(
+    readFileSync(new URL("nested-repeat-derive-row-field.json", invalidDir), "utf8"),
+  );
+  const inner = record((record(fixture.spec.root)!.children as Raw[])[0])!;
+  const repeat = record(inner.repeat)!;
+  repeat.derive = { skuLabel: record(repeat.derive)!.sku };
+  inner.children = [{ type: "text", text: "{line.qty} {line.skuLabel}" }];
+  expect(validatePrototypeSpec(fixture.spec)).toMatchObject({ success: true });
+});
+
 const duplicateKeyFixtures: {
   name: string;
   spec: Raw;

@@ -5,6 +5,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeRepeatFields.text
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatTextChecks.RepeatState
 import dev.jasonpearson.automobile.protocol.PrototypeRepeatValidator.Scope
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
@@ -66,6 +67,23 @@ internal object PrototypeNestedRepeat {
     else null
   }
 
+  /**
+   * A derive name that is also a field of an inner row would replace that field, so it is rejected
+   * like an outer repeat's, once per outer row (#18665).
+   */
+  private fun deriveCollisionError(
+    node: JsonObject,
+    path: String,
+    rows: JsonElement?,
+  ): PrototypeSpecError? {
+    val array = rows as? JsonArray ?: return null
+    val names = ((node["repeat"] as? JsonObject)?.get("derive") as? JsonObject)?.keys.orEmpty()
+    val name =
+      names.firstOrNull { name -> array.any { (it as? JsonObject)?.containsKey(name) == true } }
+        ?: return null
+    return fail("$path.repeat.derive.$name", "Derived name collides with an item field")
+  }
+
   fun templateErrors(
     node: JsonObject,
     path: String,
@@ -88,6 +106,9 @@ internal object PrototypeNestedRepeat {
             ?.let {
               return it
             }
+          deriveCollisionError(node, path, outer.sourceItems[index][field])?.let {
+            return it
+          }
           innerScope(node, path, outer, index)
         }
       for (child in PrototypeRepeatTree.childrenOf(node, path)) {

@@ -130,6 +130,15 @@ final class PrototypeNestedRepeatTests: XCTestCase {
         XCTAssertNotNil(try PrototypeLazyList.row(node: spec.root, data: spec.data, index: 1))
     }
 
+    func testInnerDeriveNamesDistinctFromEveryRowFieldValidate() throws {
+        let url = PrototypeSpecFixtures.directory.appendingPathComponent("invalid/nested-repeat-derive-row-field.json")
+        let text = try String(contentsOf: url, encoding: .utf8)
+            .replacingOccurrences(of: #""sku": {"#, with: #""skuLabel": {"#)
+            .replacingOccurrences(of: "{line.sku} x{line.qty}", with: "{line.qty} {line.skuLabel}")
+        let fixture = try JSONDecoder().decode(PrototypeSpecFixtures.Invalid.self, from: Data(text.utf8))
+        XCTAssertNoThrow(try PrototypeSpecStrictValidator.validate(data: JSONEncoder().encode(fixture.spec)))
+    }
+
     func testSharedCellFixtureReachesExactContractLimit() throws {
         func cells(_ spec: JSONValue) throws -> Int {
             let fields = try XCTUnwrap(spec.objectFields)

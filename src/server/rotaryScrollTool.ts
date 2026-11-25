@@ -11,12 +11,8 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { hierarchyFingerprint } from "../utils/hierarchyFingerprint";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { hasUsableHierarchy } from "../features/observe/ActiveWindowAttribution";
-import {
-  defaultDeviceTraits,
-  isWatch,
-  type DeviceTraits,
-} from "../utils/android-cmdline-tools/deviceTraits";
-import { readTraitFormFactor } from "./bootedDeviceTraits";
+import { defaultDeviceTraits } from "../utils/android-cmdline-tools/deviceTraits";
+import { requireWatch, traitsFormFactorRead, type FormFactorRead } from "./requireWatch";
 import type { ObserveResult } from "../models";
 import {
   AdbRotaryScroller,
@@ -55,11 +51,6 @@ export const rotaryScrollResultSchema = z
       }),
     ),
     reason: z.string().optional(),
-    warningCode: z.enum(["not_watch", "traits_unavailable"]).optional(),
-    warning: z
-      .string()
-      .optional()
-      .describe("Set when the device is not confirmed to be a watch; the input is still sent"),
   })
   .passthrough();
 
@@ -100,44 +91,19 @@ const defaultRotaryScrollerFactory: RotaryScrollerFactory = (device) =>
     },
   });
 
+const defaultFormFactorRead = traitsFormFactorRead(
+  defaultDeviceTraits,
+  defaultAdbClientFactory,
+  "rotaryScroll",
+);
+
 /**
- * Whether the device announces a watch build (`ro.build.characteristics`, #14897); undefined
- * when the traits could not be read. Injectable so tests never touch adb.
+ * The swipe fallback moves a phone, tablet or foldable list and reports success (#19192), so
+ * anything not confirmed to be a watch is refused before any input is sent.
  */
-export type WatchCheck = (device: BootedDevice) => Promise<boolean | undefined>;
+const ROTARY_SCROLL_REFUSAL = { tool: "rotaryScroll", purpose: "rotary crown scrolling" };
 
-export function traitsWatchCheck(traits: DeviceTraits, adbFactory: AdbClientFactory): WatchCheck {
-  return async (device) => {
-    const formFactor = await readTraitFormFactor(traits, adbFactory, device, "rotaryScroll");
-    return formFactor === undefined ? undefined : isWatch({ formFactor });
-  };
-}
-
-const defaultWatchCheck = traitsWatchCheck(defaultDeviceTraits, defaultAdbClientFactory);
-
-/** Most phones ignore rotary events, so a scroll on one is worth flagging (#14902). */
-export function watchWarning(
-  watch: boolean | undefined,
-):
-  | Required<Pick<z.output<typeof rotaryScrollResultSchema>, "warningCode" | "warning">>
-  | undefined {
-  if (watch === true) {
-    return undefined;
-  }
-  return watch === false
-    ? {
-        warningCode: "not_watch",
-        warning:
-          "This device is not a Wear OS watch. Rotary input is sent, but phones usually ignore it. Use swipeOn for lists on this device, or run the test on a Wear OS image such as wearos_small_round.",
-      }
-    : {
-        warningCode: "traits_unavailable",
-        warning:
-          "Could not read the device traits, so the watch status is unknown. Check the device with observe or listDevices (formFactor) before trusting a rotary result.",
-      };
-}
-
-function payload(result: RotaryScrollResult, warning: ReturnType<typeof watchWarning>) {
+function payload(result: RotaryScrollResult) {
   return {
     success: result.success,
     message: result.success
@@ -147,14 +113,13 @@ function payload(result: RotaryScrollResult, warning: ReturnType<typeof watchWar
     ...(result.method ? { method: result.method } : {}),
     attempts: result.attempts,
     ...(result.reason ? { reason: result.reason } : {}),
-    ...warning,
   };
 }
 
 export const createRotaryScrollHandler =
   (
     makeScroller: RotaryScrollerFactory = defaultRotaryScrollerFactory,
-    checkWatch: WatchCheck = defaultWatchCheck,
+    readFormFactor: FormFactorRead = defaultFormFactorRead,
   ) =>
   async (
     device: BootedDevice,
@@ -162,18 +127,15 @@ export const createRotaryScrollHandler =
     _progress?: unknown,
     signal?: AbortSignal,
   ) => {
-    const warning = watchWarning(await checkWatch(device));
+    await requireWatch(device, readFormFactor, ROTARY_SCROLL_REFUSAL);
     const result = await makeScroller(device).scroll({ delta: args.delta, signal });
-    return withIsErrorOnFailure(
-      createStructuredToolResponse(payload(result, warning)),
-      result.success,
-    );
+    return withIsErrorOnFailure(createStructuredToolResponse(payload(result)), result.success);
   };
 
 const rotaryScrollTool = defineDeviceTool({
   name: "rotaryScroll",
   description:
-    "Wear OS: scroll with the rotary crown. Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/how-it-works/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged. On a device that does not announce a watch build the input is still sent and the result carries a warning.",
+    "Wear OS: scroll with the rotary crown. Wear OS watches only (other form factors are refused without sending input). Tries `input rotaryencoder scroll`, the emulator console and finally a vertical swipe, in that order, and after each reads the screen back; success means the screen changed. Returns the method that worked and every attempt. The commands are unconfirmed on real images (see docs/how-it-works/plat/android/form-factors.md), so check attempts. A screen that does not move when scrolled (already at the end) reports unchanged.",
   input: rotaryScrollInput,
   handler: createRotaryScrollHandler(),
   options: {

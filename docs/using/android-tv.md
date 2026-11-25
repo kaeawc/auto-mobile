@@ -261,6 +261,10 @@ Use `prototype` with `dismiss` to close the overlay.
 
 `rotate`, `recentApps` and `glassesInput` fail at once on a TV and change nothing.
 
+`openLink` fails without opening anything when no app on the TV handles the URL, or when only
+the system's placeholder browser does. Many TV images ship no browser, so web URLs fail. Use a
+deep link an installed TV app handles, or `launchApp`.
+
 ## Out of scope
 
 - Physical TVs and Chromecast hardware.

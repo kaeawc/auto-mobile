@@ -28,7 +28,12 @@ import { sequenceBackoff } from "../../utils/Backoff";
 import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { OBSERVED_INTERACTION_PROFILES, SETTLE_BUDGET_MS } from "./observedInteractionProfiles";
 import { resolveSignalCall, type ActionCall } from "./ActionCall";
-import { amStartFailureText, wearUriRedirectError } from "./OpenUrlUnsupportedError";
+import {
+  amStartFailureText,
+  refuseOpenUrlWithoutHandler,
+  wearUriRedirectError,
+  type OpenUrlFormFactorOptions,
+} from "./OpenUrlUnsupportedError";
 
 const SAFARI_BUNDLE_ID = "com.apple.mobilesafari";
 const FOREGROUND_CHANGE_TIMEOUT_MS = 5_000;
@@ -174,12 +179,15 @@ export interface OpenURLOptions {
   devicectl?: DeviceUrlLauncher | null;
   timer?: Timer;
   iosOpenUrlBackend?: IosOpenUrlBackend;
+  /** Android TV / XR glasses predicates asked before a VIEW intent starts (#19233). */
+  formFactors?: OpenUrlFormFactorOptions;
 }
 
 export class OpenURL extends BaseVisualChange {
   private readonly simctl: Pick<SimCtlClient, "executeCommandArgs"> | null;
   private readonly devicectl: DeviceUrlLauncher | null;
   private readonly iosOpenUrlBackend?: IosOpenUrlBackend;
+  private readonly formFactors: OpenUrlFormFactorOptions;
 
   constructor(
     device: BootedDevice,
@@ -189,9 +197,11 @@ export class OpenURL extends BaseVisualChange {
       devicectl = null,
       timer = defaultTimer,
       iosOpenUrlBackend,
+      formFactors = {},
     }: OpenURLOptions = {},
   ) {
     super(device, { adb, timer });
+    this.formFactors = formFactors;
     this.iosOpenUrlBackend = iosOpenUrlBackend;
     this.device = device;
     this.simctl = simctl;
@@ -297,6 +307,15 @@ export class OpenURL extends BaseVisualChange {
 
     // Handle regular URLs (http, https, mailto, tel, etc.)
     logger.info(`[OpenURL] Processing as regular URL: ${trimmedUrl}`);
+    if (this.device.platform === "android") {
+      await refuseOpenUrlWithoutHandler(
+        { device: this.device, adb: this.adb, url: trimmedUrl, signal },
+        this.formFactors,
+      ).catch((error: unknown) => {
+        perf.end();
+        throw error;
+      });
+    }
 
     return this.observedInteraction(
       async (previousObservation) => {

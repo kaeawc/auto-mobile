@@ -9,16 +9,21 @@ import {
   defaultAndroidTvDetector,
   type AndroidTvDetector,
 } from "../../utils/android-cmdline-tools/androidTvDevice";
+import {
+  defaultXrGlassesDetector,
+  type XrGlassesDetector,
+} from "../../utils/android-cmdline-tools/xrGlassesDevice";
 
 /** The form-factor predicates `recentApps` asks before it presses anything (tests pass fakes). */
 export interface RecentAppsFormFactorOptions {
   wearOsDetector?: WearOsDetector;
   tvDetector?: AndroidTvDetector;
+  glassesDetector?: XrGlassesDetector;
 }
 
 /**
  * `recentApps` targeted an Android device with no launcher recents overview to verify: a Wear OS
- * watch or an Android TV (#19180). Refused before any press, instead of pressing Recents and
+ * watch or an Android TV (#19180), or Android XR glasses (#19233). Refused before any press, instead of pressing Recents and
  * failing after the verification window. Typed so callers can tell an unsupported target from an
  * overview that did not open.
  */
@@ -34,7 +39,8 @@ function refusal(deviceId: string, formFactor: string): RecentAppsUnsupportedErr
 
 /**
  * Throw {@link RecentAppsUnsupportedError} when the Wear OS predicate says the device is a watch,
- * or the Android TV predicate says it is a TV, before any key or global action is sent.
+ * the Android TV predicate says it is a TV, or the XR glasses predicate says it is glasses, before
+ * any key or global action is sent.
  */
 export async function refuseRecentAppsWithoutOverview(
   device: BootedDevice,
@@ -42,6 +48,7 @@ export async function refuseRecentAppsWithoutOverview(
   {
     wearOsDetector = defaultWearOsDetector,
     tvDetector = defaultAndroidTvDetector,
+    glassesDetector = defaultXrGlassesDetector,
   }: RecentAppsFormFactorOptions = {},
   signal?: AbortSignal,
 ): Promise<void> {
@@ -54,5 +61,10 @@ export async function refuseRecentAppsWithoutOverview(
   signal?.throwIfAborted();
   if (tv) {
     throw refusal(device.deviceId, "Android TV");
+  }
+  const glasses = await glassesDetector.isXrGlasses({ device, adb, signal });
+  signal?.throwIfAborted();
+  if (glasses) {
+    throw refusal(device.deviceId, "Android XR glasses");
   }
 }

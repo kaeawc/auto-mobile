@@ -81,6 +81,7 @@ class PrototypeCapabilityAdvertisementTest {
         "prototype_platform_haptics_v1",
         "prototype_platform_links_v1",
         "prototype_platform_location_v1",
+        "prototype_platform_media_v1",
         "prototype_platform_power_v1",
         "prototype_platform_sensors_v1",
         "prototype_platform_settings_v1",

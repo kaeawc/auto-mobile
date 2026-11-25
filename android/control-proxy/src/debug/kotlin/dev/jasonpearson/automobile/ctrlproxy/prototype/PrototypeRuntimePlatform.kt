@@ -7,7 +7,7 @@ import dev.jasonpearson.automobile.prototype.*
 
 /**
  * The haptics, sound, connectivity, links and settings modules, the clipboard, and the contract
- * test module debug builds carry.
+ * test module and fake media player module (#14257) debug builds carry.
  */
 internal fun prototypeRuntimePlatform(
   context: Context,
@@ -16,7 +16,11 @@ internal fun prototypeRuntimePlatform(
   PrototypePlatform(
     PrototypeCaptureModules.retain(
       prototypeFeedbackModules(context) +
-        listOfNotNull(TestPlatformModule(), clipboard?.let { PrototypeClipboardModule(it) }) +
+        listOfNotNull(
+          TestPlatformModule(),
+          FakeMediaPlatformModule(),
+          clipboard?.let { PrototypeClipboardModule(it) },
+        ) +
         listOfNotNull(
           (context as? Activity)?.let { PrototypeBiometricModule(AndroidBiometricSource(it)) },
           (context as? Activity)?.let { PrototypeSecureStorageModule.fileBacked(it) },

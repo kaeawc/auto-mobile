@@ -1,8 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
   renderPlatformModules,
+  renderPlatformRuntimes,
   renderPrototypeGuide,
 } from "../../../src/features/prototype/prototypeGuide";
+import {
+  PROTOTYPE_CTRLPROXY_APP_ONLY_MODULES,
+  PROTOTYPE_IOS_AGENT_EXCLUDED_MODULES,
+  PROTOTYPE_IOS_VIEWER_ONLY_MODULES,
+} from "../../../src/features/prototype/prototypeRuntimeRefusal";
 import { PROTOTYPE_PLATFORM_MODULES } from "../../../src/features/prototype/prototypePlatform";
 import { validatePrototypeSpec } from "../../../src/features/prototype/prototypeValidation";
 import { prototypeGateCapabilities } from "../../../src/features/prototype/prototypeCapabilityGates";
@@ -44,6 +50,24 @@ describe("platform guide section", () => {
   test("names the notification blocked key under its declared channel", () => {
     expect(guide).toContain("`/notifications/channels/<id>/blocked`");
     expect(guide).not.toContain("`/notifications/blocked`");
+  });
+
+  test("names the modules each runtime lacks, matching the host refusals", () => {
+    const runtimes = renderPlatformRuntimes();
+    expect(guide).toContain(runtimes);
+    for (const modules of [
+      PROTOTYPE_CTRLPROXY_APP_ONLY_MODULES,
+      PROTOTYPE_IOS_AGENT_EXCLUDED_MODULES,
+      PROTOTYPE_IOS_VIEWER_ONLY_MODULES,
+    ]) {
+      expect(modules.size).toBeGreaterThan(0);
+      for (const name of modules) {
+        expect(PROTOTYPE_PLATFORM_MODULES[name]).toBeDefined();
+        expect(runtimes).toContain(`\`${name}\``);
+      }
+    }
+    expect(runtimes).toContain('`prototype {action:"installApp"}`');
+    expect(runtimes).toContain("`prototype save`");
   });
 
   test("keeps the test placeholder out of the guide", () => {

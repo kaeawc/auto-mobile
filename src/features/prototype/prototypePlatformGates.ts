@@ -2,7 +2,12 @@ import { expandPrototypeComponents } from "./prototypeComponents";
 import { prototypeRealtimeFields } from "./prototypeChannels";
 import { prototypeMediaQueueFields } from "./prototypeMediaQueue";
 import type { PrototypeRuntimeKind } from "./prototypePlatformReport";
-import { prototypeRuntimeRefusalGuidance } from "./prototypeRuntimeRefusal";
+import {
+  PROTOTYPE_CTRLPROXY_APP_ONLY_MODULES,
+  PROTOTYPE_IOS_AGENT_EXCLUDED_MODULES,
+  PROTOTYPE_IOS_VIEWER_ONLY_MODULES,
+  prototypeRuntimeRefusalGuidance,
+} from "./prototypeRuntimeRefusal";
 import { record } from "./prototypeTemplate";
 import { PROTOTYPE_PLATFORM_CAPABILITY } from "../observe/android/ctrlProxyProtocol";
 import {
@@ -159,15 +164,11 @@ function unsupported(
   return `The ${device} does not advertise ${capability}, so it cannot run ${what} at ${fields[0]}${more}. Nothing was shown. ${appAdvice ?? advice}, or use a spec without it.`;
 }
 
-// CtrlProxy runs without an Activity; the disposable shell and ProtoViewer register these modules.
-const CTRLPROXY_APP_ONLY_MODULES = new Set(["biometric", "permissions", "secureStorage"]);
-
 function platformModuleAppAdvice(name: string, runtime?: PrototypeRuntimeKind): string | undefined {
-  if (runtime === "ctrlproxy" && CTRLPROXY_APP_ONLY_MODULES.has(name)) {
+  if (runtime === "ctrlproxy" && PROTOTYPE_CTRLPROXY_APP_ONLY_MODULES.has(name)) {
     return 'Install the spec as a disposable app with prototype action "installApp"';
   }
-  // The injected agent excludes the permission prompt module; the saved Viewer enables it.
-  if (runtime === "iosAgent" && name === "permissions") {
+  if (runtime === "iosAgent" && PROTOTYPE_IOS_AGENT_EXCLUDED_MODULES.has(name)) {
     return 'Save and open the spec in the iOS Prototype Viewer with prototype action "save"';
   }
   return undefined;
@@ -279,8 +280,8 @@ const PROTOTYPE_PLATFORM_MODULE_ONLY_GATES = Object.entries(PROTOTYPE_PLATFORM_M
         platform: "android" | "ios",
         runtime?: PrototypeRuntimeKind,
       ) =>
-        platform === "ios" && name === "notifications"
-          ? `The notifications platform module at ${fields[0]} needs ${definition.capability}, which only the standalone iOS Prototype Viewer advertises. Use prototype save with an icon to install the per-prototype Viewer app.`
+        platform === "ios" && PROTOTYPE_IOS_VIEWER_ONLY_MODULES.has(name)
+          ? `The ${name} platform module at ${fields[0]} needs ${definition.capability}, which only the standalone iOS Prototype Viewer advertises. Use prototype save with an icon to install the per-prototype Viewer app.`
           : unsupported(fields, platform, definition.capability, {
               what: `the ${name} platform module`,
               runtime,

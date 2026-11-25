@@ -46,6 +46,11 @@ import {
 import { MAX_PROTOTYPE_SPEC_REVISIONS } from "./prototypeSpecRevisions";
 import { PROTOTYPE_PLATFORM_MODULES, type PrototypePlatformModule } from "./prototypePlatform";
 import { renderPlatformDrivingTools } from "./prototypePlatformDrivingTools";
+import {
+  PROTOTYPE_CTRLPROXY_APP_ONLY_MODULES,
+  PROTOTYPE_IOS_AGENT_EXCLUDED_MODULES,
+  PROTOTYPE_IOS_VIEWER_ONLY_MODULES,
+} from "./prototypeRuntimeRefusal";
 
 import { ICON_LOOKUP_LIMIT, PROTOTYPE_ICONS_URI } from "./prototypeGuideUris";
 
@@ -307,6 +312,12 @@ export function renderPlatformModules(
   ].join("\n");
 }
 
+/** Which runtime registers which module (#14292), from the sets the host refusals use. */
+export function renderPlatformRuntimes(): string {
+  const names = (modules: ReadonlySet<string>) => code([...modules]);
+  return `**Which runtime.** A runtime advertises only the modules it registers, so a spec that one runtime runs can be refused by another before show; the refusal names the missing capability and what to do. The Android CtrlProxy overlay runs without an Activity and lacks ${names(PROTOTYPE_CTRLPROXY_APP_ONLY_MODULES)}: install such a spec as a disposable app with \`prototype {action:"installApp"}\`. On iOS, the agent loaded by \`launchApp prototype: true\` lacks ${names(PROTOTYPE_IOS_AGENT_EXCLUDED_MODULES)}, and only the per-prototype Viewer that \`prototype save\` installs with an icon registers ${names(PROTOTYPE_IOS_VIEWER_ONLY_MODULES)}.`;
+}
+
 /** Media state is per declared player (#14253); notification `blocked` is per channel (#14280). */
 function platformStateScope(module: string, key: string): string {
   if (module === "media") {
@@ -370,6 +381,8 @@ export function renderPrototypeGuide(): string {
     `${GUIDE_PLATFORM}
 
 ${renderPlatformModules()}
+
+${renderPlatformRuntimes()}
 
 ${renderPlatformDrivingTools()}
 

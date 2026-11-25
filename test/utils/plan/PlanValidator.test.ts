@@ -396,6 +396,73 @@ describe("PlanValidator", () => {
       expect(() => PlanValidator.validate(plan)).toThrow("step 1.steps[1] (sendKeys)");
     });
 
+    test("accepts criticalSection sub-steps that declare device in the flat form (#19171)", () => {
+      const plan = {
+        name: "Flat Critical Section Plan",
+        devices: ["a"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "a",
+              lock: "cs1",
+              deviceCount: 1,
+              steps: [{ tool: "tapOn", device: "a", selector: { text: "Discover" } }],
+            },
+          },
+        ],
+      };
+      expect(() => PlanValidator.validateUntrusted(plan)).not.toThrow();
+    });
+
+    test("checks flat-form criticalSection sub-step devices against the plan (#19171)", () => {
+      const plan = {
+        name: "Flat Critical Section Plan",
+        devices: ["a", "b"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "a",
+              lock: "cs1",
+              deviceCount: 1,
+              steps: [
+                { tool: "tapOn", device: "z", selector: { text: "One" } },
+                { tool: "tapOn", device: "b", selector: { text: "Two" } },
+              ],
+            },
+          },
+        ],
+      };
+      expect(() => PlanValidator.validateUntrusted(plan)).toThrow(
+        'step 0.steps[0] (tapOn): device="z"',
+      );
+      expect(() => PlanValidator.validateUntrusted(plan)).toThrow(
+        'step 0.steps[1] (tapOn): device="b" differs from criticalSection owner device="a"',
+      );
+    });
+
+    test("imports a YAML plan whose criticalSection sub-steps use the flat form (#19171)", () => {
+      const yamlContent = [
+        "name: flat-critical-section",
+        "devices:",
+        "  - label: a",
+        "    platform: ios",
+        "steps:",
+        "  - tool: criticalSection",
+        "    device: a",
+        "    lock: cs1",
+        "    deviceCount: 1",
+        "    steps:",
+        "      - tool: tapOn",
+        "        device: a",
+        "        selector:",
+        "          text: Discover",
+      ].join("\n");
+      const plan = new YamlPlanSerializer().importPlanFromYaml(yamlContent);
+      expect(plan.steps[0].tool).toBe("criticalSection");
+    });
+
     test("throws naming the device when a criticalSection sub-step uses an undeclared device", () => {
       const plan: Plan = {
         name: "Invalid Critical Section Plan",

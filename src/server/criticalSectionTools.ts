@@ -28,10 +28,34 @@ import {
   getToolSelectionContext,
 } from "../features/toolSelection/toolSelectionContext";
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Accept a flat sub-step (`device:` beside `tool:`) like a top-level plan step
+ * (#19171) by lifting only its inline `device` into `params`. Every other key
+ * stays where it was, so the handler's migratePlanStep + PlanNormalizer pass
+ * still sees the authored shape (e.g. a legacy step-level `description`). An
+ * explicit `params.device` wins, matching PlanNormalizer's merge.
+ */
+function liftInlineSubstepDevice(value: unknown): unknown {
+  if (!isPlainRecord(value) || !Object.hasOwn(value, "device")) {
+    return value;
+  }
+  const params = isPlainRecord(value.params) ? value.params : {};
+  if (Object.hasOwn(params, "device")) {
+    return value;
+  }
+  const { device, ...rest } = value;
+  return { ...rest, params: { ...params, device } };
+}
+
 // Schema for steps inside critical section.
-// Every sub-step MUST declare a `device` matching the section owner label.
-// Sub-steps execute on that owner device; they never route to another label.
-const criticalSectionStepSchema = z
+// Every sub-step MUST declare a `device` matching the section owner label, either
+// beside `tool` or under `params`. Sub-steps execute on that owner device; they
+// never route to another label.
+const criticalSectionStepObjectSchema = z
   .object({
     tool: z.string().describe("Tool name"),
     params: z.record(z.string(), z.any()).describe("Tool params; must include device"),
@@ -48,6 +72,11 @@ const criticalSectionStepSchema = z
       });
     }
   });
+
+const criticalSectionStepSchema = z.preprocess(
+  liftInlineSubstepDevice,
+  criticalSectionStepObjectSchema,
+);
 
 // Critical section tool schema
 const criticalSectionSchema = addDeviceTargetingToSchema(

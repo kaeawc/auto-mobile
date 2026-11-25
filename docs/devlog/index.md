@@ -15,6 +15,7 @@ regenerates the table below.
 
 | Date | Kind | Entry |
 | --- | --- | --- |
+| 2026-11-25 | decision | [An incomplete audio capture gives no silence verdict](2026-11-25-incomplete-audio-capture-verdict.md) |
 | 2026-11-24 | decision | [Stable wait timeout is a result, not an error](2026-11-24-stable-wait-timeout-not-error.md) |
 | 2026-11-24 | decision | [Launch-time libraries load through a gate on a shaped simulator](2026-11-24-simulator-launch-gate.md) |
 | 2026-11-24 | decision | [`getAndroid` without an identifier selects a phone](2026-11-24-getandroid-bare-call-selects-phone.md) |

@@ -37,6 +37,7 @@ import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ActionableError } from "../../../src/models/ActionableError";
+import { AndroidSystemServerRestartError } from "../../../src/features/device/postureCommands";
 import { displayInventoryOutcome } from "../../../src/models/DeviceInfo";
 import { parseAndroidCommittedStateIdentifier } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 
@@ -48,6 +49,10 @@ const closedState = fixture("foldpf-5-after-reset-state.txt");
 const openedState = fixture("foldpf-1-default-state.txt");
 const hingeAngleReadBack = fixture("hinge-angle0-get.txt");
 const rearState = fixture("foldpf-2-rear-display-override-state.txt");
+const brokenPipeState = fixture("api37-fold-rear-display-broken-pipe.txt");
+const restartingState = fixture("api37-fold-restarting-device-state.txt");
+const adbFailure = (command: string, stdout: string): Error =>
+  new Error(`Command failed: adb -s emulator-5554 ${command}\nstdout: ${stdout}`);
 import { logger } from "../../../src/utils/logger";
 import { loadDuoEnumerate } from "../../fixtures/loadDuoEnumerate";
 import {
@@ -75,6 +80,8 @@ function makeDevice(
     name: "Test foldable",
     platform: "android",
     deviceId,
+    // The foldpf fixtures come from an API 36 emulator.
+    apiLevel: 36,
     displays: { panels: [], postures },
   };
 }
@@ -742,6 +749,86 @@ describe("SetPosture", () => {
       "Posture 'rear_display' is not supported by this device. Supported postures: none.",
     );
     expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states"]);
+  });
+
+  test.each([
+    [
+      "the device apiLevel",
+      (device: BootedDevice, _adb: FakeAdbExecutor) => (device.apiLevel = 37),
+    ],
+    [
+      "the getprop probe",
+      (device: BootedDevice, adb: FakeAdbExecutor) => {
+        delete device.apiLevel;
+        adb.setAndroidApiLevel(37);
+      },
+    ],
+  ])("refuses rear display on an API 37 emulator from %s (#19190)", async (_source, configure) => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    const device = makeDevice();
+    configure(device, adb);
+    const { feature } = makeFeature(device, adb);
+    const attempt = feature.execute("rear_display");
+    await expect(attempt).rejects.toBeInstanceOf(ActionableError);
+    await expect(attempt).rejects.toThrow(
+      "Posture 'rear_display' is refused on API 37 emulators: this system image declares the rear display state but its system process crashes and restarts when it is requested. Nothing was changed. Supported postures on this device: closed, half_opened, opened, flipped, tent.",
+    );
+    expect(adb.getExecutedCommands()).toEqual(["shell cmd device_state print-states"]);
+  });
+
+  test("still sends rear display to an API 37 physical device", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state", createExecResult(rearState, ""));
+    const device = makeDevice("R5CT123");
+    device.apiLevel = 37;
+    const { feature } = makeFeature(device, adb);
+    await feature.execute("rear_display");
+    expect(adb.getExecutedCommands()).toContain("shell cmd device_state state 3");
+  });
+
+  test("maps a system_server crash during rear display to a typed restart error (#19190)", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandResponse("shell cmd device_state print-states", createExecResult(foldStates, ""));
+    adb.setCommandResponse("shell cmd device_state state 3", createExecResult("", ""));
+    adb.setCommandError(
+      "shell cmd device_state state",
+      adbFailure("shell cmd device_state state", brokenPipeState),
+    );
+    const { feature } = makeFeature(makeDevice(), adb);
+    const attempt = feature.execute("rear_display");
+    await expect(attempt).rejects.toBeInstanceOf(AndroidSystemServerRestartError);
+    await expect(attempt).rejects.toThrow(
+      "The Android system process crashed while applying posture 'rear_display' ('Broken pipe (32)') and the device is restarting its system services. The posture was not applied. Wait until the device finishes booting (observe succeeds) before retrying, and request another posture: this device cannot enter rear_display.",
+    );
+  });
+
+  test("maps a missing device_state service mid-restart to the typed restart error", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError(
+      "shell cmd device_state",
+      adbFailure("shell cmd device_state state reset", restartingState),
+    );
+    const { feature } = makeFeature(makeDevice(), adb);
+    const attempt = feature.execute("opened");
+    await expect(attempt).rejects.toBeInstanceOf(AndroidSystemServerRestartError);
+    await expect(attempt).rejects.toThrow(
+      "crashed while applying posture 'opened' ('Can't find service: device_state')",
+    );
+  });
+
+  test("keeps a missing device_state service untyped when the device never reported it", async () => {
+    const adb = new FakeAdbExecutor();
+    adb.setCommandError(
+      "shell cmd device_state",
+      adbFailure("shell cmd device_state state reset", restartingState),
+    );
+    const device = makeDevice("R5CT123");
+    delete device.displays;
+    const { feature } = makeFeature(device, adb);
+    const attempt = feature.execute("opened");
+    await expect(attempt).rejects.not.toBeInstanceOf(AndroidSystemServerRestartError);
   });
 
   test("parses physical print-states and sets the matching state identifier", async () => {

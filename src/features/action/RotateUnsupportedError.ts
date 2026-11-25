@@ -6,6 +6,10 @@ import {
   type AndroidXrDetector,
 } from "../../utils/android-cmdline-tools/androidXrDevice";
 import {
+  defaultXrGlassesDetector,
+  type XrGlassesDetector,
+} from "../../utils/android-cmdline-tools/xrGlassesDevice";
+import {
   defaultWearOsDetector,
   type WearOsDetector,
 } from "../../utils/android-cmdline-tools/wearOsDevice";
@@ -17,6 +21,8 @@ import {
 /** The rotate options that inject the shared XR, Wear OS and Android TV predicates (tests pass fakes). */
 export interface RotateXrOptions {
   xrDetector?: AndroidXrDetector;
+  /** AI glasses declare no spatial XR feature, so they are asked about separately (#19196). */
+  glassesDetector?: XrGlassesDetector;
   wearOsDetector?: WearOsDetector;
   tvDetector?: AndroidTvDetector;
 }
@@ -61,7 +67,7 @@ export function androidTvRotateUnsupportedError(deviceId: string): RotateUnsuppo
 
 /**
  * Throw {@link RotateUnsupportedError} when the shared XR predicate says the device is Android XR,
- * the Wear OS predicate says it is a watch, or the Android TV predicate says it is a TV, before any rotation setting is written or a
+ * the glasses predicate says it is Android XR glasses, the Wear OS predicate says it is a watch, or the Android TV predicate says it is a TV, before any rotation setting is written or a
  * rotation wait starts.
  */
 export async function refuseRotateOnFixedOrientationDevice(
@@ -69,24 +75,25 @@ export async function refuseRotateOnFixedOrientationDevice(
   adb: AdbCommandRunner,
   {
     xrDetector = defaultAndroidXrDetector,
+    glassesDetector = defaultXrGlassesDetector,
     wearOsDetector = defaultWearOsDetector,
     tvDetector = defaultAndroidTvDetector,
   }: RotateXrOptions = {},
   signal?: AbortSignal,
 ): Promise<void> {
-  const xr = await xrDetector.isAndroidXr({ device, adb, signal });
-  signal?.throwIfAborted();
-  if (xr) {
-    throw androidXrRotateUnsupportedError(device.deviceId);
-  }
-  const watch = await wearOsDetector.isWearOs({ device, adb, signal });
-  signal?.throwIfAborted();
-  if (watch) {
-    throw wearOsRotateUnsupportedError(device.deviceId);
-  }
-  const tv = await tvDetector.isAndroidTv({ device, adb, signal });
-  signal?.throwIfAborted();
-  if (tv) {
-    throw androidTvRotateUnsupportedError(device.deviceId);
+  const evidence = { device, adb, signal };
+  const checks: Array<[() => Promise<boolean>, (deviceId: string) => RotateUnsupportedError]> = [
+    [() => xrDetector.isAndroidXr(evidence), androidXrRotateUnsupportedError],
+    [() => glassesDetector.isXrGlasses(evidence), androidXrRotateUnsupportedError],
+    [() => wearOsDetector.isWearOs(evidence), wearOsRotateUnsupportedError],
+    [() => tvDetector.isAndroidTv(evidence), androidTvRotateUnsupportedError],
+  ];
+  // Asked in order, so an earlier refusal never pays for a later probe.
+  for (const [unsupported, refusal] of checks) {
+    const refuse = await unsupported();
+    signal?.throwIfAborted();
+    if (refuse) {
+      throw refusal(device.deviceId);
+    }
   }
 }

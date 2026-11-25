@@ -21,6 +21,7 @@ import { type InteractionToolDependencies } from "../../src/server/interactionTo
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeAndroidXrDetector } from "../fakes/FakeAndroidXrDetector";
 import { FakeWearOsDetector } from "../fakes/FakeWearOsDetector";
+import { FakeXrGlassesDetector } from "../fakes/FakeXrGlassesDetector";
 import { FakeAndroidTvDetector } from "../fakes/FakeAndroidTvDetector";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
@@ -289,6 +290,7 @@ describe("registered interaction handlers honor cancellation", () => {
         timer,
         options: {
           xrDetector: new FakeAndroidXrDetector(),
+          glassesDetector: new FakeXrGlassesDetector(),
           wearOsDetector: new FakeWearOsDetector(),
           tvDetector: new FakeAndroidTvDetector(),
         },

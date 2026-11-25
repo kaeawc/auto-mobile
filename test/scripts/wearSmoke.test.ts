@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   assertRoundObservation,
+  assertUnplugged,
   assertWatchDevice,
   buildWearSmokePlan,
   expectNoText,
@@ -67,13 +68,22 @@ function fixtureObserves(): Payload[] {
   ];
 }
 
+/** What setDeviceState reports once the fake charger is unplugged. */
+const UNPLUGGED = envelope({
+  success: true,
+  power: { supported: true, battery: { level: 100, charging: "none", faked: true } },
+});
+
 class FakeClient implements DriveClient {
   calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
   closed = false;
+  private readonly replies: Record<string, unknown>;
   constructor(
-    private readonly replies: Record<string, unknown>,
+    replies: Record<string, unknown>,
     private readonly observes: Payload[],
-  ) {}
+  ) {
+    this.replies = { setDeviceState: UNPLUGGED, ...replies };
+  }
   callTool(tool: string, args: Record<string, unknown>): Promise<unknown> {
     this.calls.push({ tool, args });
     if (tool === "observe") {
@@ -105,13 +115,13 @@ function deps(client: DriveClient): SmokeDeps {
 }
 
 describe("buildWearSmokePlan", () => {
-  test("boots the named AVD as a watch with rotaryScroll and ambient enabled", () => {
+  test("boots the named AVD as a watch with rotaryScroll, ambient and setDeviceState enabled", () => {
     const [start] = buildWearSmokePlan({ avdName: "wear-smoke" });
     expect(start.tool).toBe("startDevice");
     expect(start.args).toMatchObject({
       formFactor: "watch",
       avdName: "wear-smoke",
-      enableTools: ["rotaryScroll", "ambient"],
+      enableTools: ["rotaryScroll", "ambient", "setDeviceState"],
     });
     expect(start.args.createIfMissing).toBeUndefined();
   });
@@ -139,6 +149,20 @@ describe("buildWearSmokePlan", () => {
     ]) {
       expect(tools).toContain(tool);
     }
+  });
+
+  test("unplugs the watch before anything is launched, so no charging screen covers it (#16829)", () => {
+    for (const plan of [buildWearSmokePlan({ fixtureApkPath: "/f.apk" }), buildWearSmokePlan()]) {
+      const ids = plan.map((step) => step.id);
+      const unplug = plan.find((step) => step.id === "unplug");
+      expect(unplug).toMatchObject({
+        tool: "setDeviceState",
+        args: { platform: "android", power: { battery: { charging: "none" } } },
+      });
+      expect(ids.indexOf("unplug")).toBe(ids.indexOf("observe-initial") + 1);
+    }
+    const ids = buildWearSmokePlan({ fixtureApkPath: "/f.apk" }).map((step) => step.id);
+    expect(ids.indexOf("unplug")).toBeLessThan(ids.indexOf("launch"));
   });
 
   test("installs the fixture with its permissions granted, so posting needs no dialog", () => {
@@ -224,6 +248,13 @@ describe("assertions", () => {
     );
   });
 
+  test("unplug needs setDeviceState to report no charger", () => {
+    const power = (charging: string) => ({ power: { battery: { charging } } });
+    expect(assertUnplugged(power("none"))).toBeUndefined();
+    expect(assertUnplugged(power("ac"))).toContain("reported charging ac");
+    expect(assertUnplugged({ success: true })).toContain("reported charging unknown");
+  });
+
   test("text checks require the fixture in the foreground", () => {
     expect(expectText(APP, "Hello")(screen(APP, "Hello"))).toBeUndefined();
     expect(expectText(APP, "Hello")(screen(APP, "Bye"))).toContain('"Hello" is not on screen');
@@ -244,6 +275,24 @@ describe("runSmoke with the Wear plan", () => {
     expect(result.ok).toBe(true);
     expect(client.calls[1].args.sessionUuid).toBe("s-1");
     expect(client.closed).toBe(true);
+  });
+
+  test("a watch still on its charger fails the unplug step before the launch (#16829)", async () => {
+    const client = new FakeClient(
+      {
+        startDevice: START,
+        setDeviceState: envelope({ success: true, power: { battery: { charging: "ac" } } }),
+      },
+      fixtureObserves(),
+    );
+    const result = await runSmoke(
+      buildWearSmokePlan({ fixtureApkPath: "/f.apk", avdName: "w" }),
+      deps(client),
+    );
+    const failed = result.steps.find((step) => step.status === "failed");
+    expect(failed).toMatchObject({ id: "unplug" });
+    expect(failed?.detail).toContain("reported charging ac");
+    expect(client.calls.map((call) => call.tool)).not.toContain("launchApp");
   });
 
   test("a broken fixture assertion fails readably and still wakes the watch", async () => {

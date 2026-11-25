@@ -3,11 +3,11 @@
  * Advisory nightly Wear OS emulator smoke (#16829).
  *
  * Drives one persistent MCP session through a fixed plan on a round x86_64 Wear OS emulator:
- * start the watch, observe (hierarchy and `isScreenRound`), then, when the Wear fixture APK
- * (#16828) is supplied, install and launch it, scroll to a list row, tap it, go back, move the
- * rotary picker with `rotaryScroll`, post the fixture notification, go home, find the
- * notification and tap one of its actions with `systemTray`, check the app reports that action,
- * and finally enter and exit ambient. Without the fixture only the device-level steps run and the
+ * start the watch, observe (hierarchy and `isScreenRound`), report the watch unplugged, then, when
+ * the Wear fixture APK (#16828) is supplied, install and launch it, scroll to a list row, tap it,
+ * go back, move the rotary picker with `rotaryScroll`, post the fixture notification, go home,
+ * find the notification and tap one of its actions with `systemTray`, check the app reports that
+ * action, and finally enter and exit ambient. Without the fixture only the device-level steps run and the
  * summary says why. The plan runs on the shared emulator smoke runner
  * (`scripts/ci/emulator-smoke/smokeRunner.ts`).
  */
@@ -151,12 +151,35 @@ function startStep(options: WearSmokePlanOptions): SmokeStep {
       formFactor: "watch",
       ...target,
       timeoutMs: START_TIMEOUT_MS,
-      enableTools: ["rotaryScroll", "ambient"],
+      enableTools: ["rotaryScroll", "ambient", "setDeviceState"],
     },
     options.avdName
       ? `the ${options.avdName} watch boots`
       : "a round watch AVD is created or reused and boots",
     { assert: assertWatchDevice },
+  );
+}
+
+/** setDeviceState must confirm the fake charger is gone. */
+export function assertUnplugged(payload: Payload): string | undefined {
+  const power = payload.power as { battery?: { charging?: unknown } } | undefined;
+  const charging = power?.battery?.charging;
+  return charging === "none"
+    ? undefined
+    : `expected the battery unplugged, setDeviceState reported charging ${String(charging ?? "unknown")}`;
+}
+
+/**
+ * A booted emulator reports a charger, and Wear SystemUI raises its charging screen over whatever
+ * is in front, which can win the race with launchApp (#16829). On battery it is never raised.
+ */
+function unplugStep(): SmokeStep {
+  return step(
+    "unplug",
+    "setDeviceState",
+    { power: { battery: { charging: "none" } } },
+    "the watch reports it runs on battery, so the charging screen cannot cover the app",
+    { assert: assertUnplugged },
   );
 }
 
@@ -303,6 +326,7 @@ export function buildWearSmokePlan(options: WearSmokePlanOptions = {}): SmokeSte
       assertRoundObservation,
       { retry: WEAR_SETUP_RETRY },
     ),
+    unplugStep(),
     ...(options.fixtureApkPath
       ? fixtureSteps(options.fixtureApkPath, breakAssertion)
       : deviceOnlySteps(breakAssertion)),

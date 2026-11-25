@@ -9,7 +9,13 @@ import {
 } from "./notificationDumpsys";
 import { prepareWatchSystemTray, openWatchSystemTray } from "./helpers/watchOpening";
 import { readActiveNotificationKeysForApp } from "./helpers/listing";
-import { restoreWatchStream, unrestoredDismissal } from "./helpers/watchRestore";
+import { awaitWatchExpandedTarget } from "./helpers/watchExpandedTarget";
+import {
+  restoreWatchStream,
+  resumedPackage,
+  unrestoredDismissal,
+  type WatchRestoreState,
+} from "./helpers/watchRestore";
 import {
   assertSingleWordReply,
   MAX_SETTLE_READS,
@@ -30,14 +36,12 @@ import {
 import {
   watchCardMatches,
   watchClearAll,
-  watchExpandedTarget,
   watchNotifications,
   watchCardClipEdges,
   watchCardClipped,
   watchRevealedDismiss,
   watchStreamRoot,
   watchStreamScroll,
-  watchHasExpandedCard,
   type WatchNotification,
 } from "./helpers/watchHierarchy";
 import type { SystemTrayOutcome } from "./SystemTray";
@@ -316,6 +320,7 @@ interface WatchScope {
 /** Dispatched only for Android devices whose existing formFactor signal is watch. */
 export class WatchSystemTray {
   private expandedByUs = false;
+  private handOffFrom: WatchRestoreState["handOffFrom"];
   constructor(
     private readonly device: BootedDevice,
     private readonly signal?: AbortSignal,
@@ -442,6 +447,7 @@ export class WatchSystemTray {
             initiallyOpen,
             initiallyOnAppList: watchAwaySurface(initial) === "app list",
             expandedByUs: this.expandedByUs,
+            handOffFrom: this.handOffFrom,
             deadline: restoreDeadline,
           },
           controller.signal,
@@ -782,28 +788,20 @@ export class WatchSystemTray {
     }
     await this.tap(card.element, observation);
     this.expandedByUs = true;
-    const text = watchTapLabel(args.notification ?? {}, card);
-    // The card expands over a few hundred ms and its actions only appear once it has, so re-read
-    // until the labelled target shows up (bounded).
-    let expanded = observation;
-    let target: Element | undefined;
-    for (let attempt = 0; attempt < MAX_SETTLE_READS && text && !target; attempt++) {
-      await sleep(POLL_MS, this.signal);
-      expanded = await this.read();
-      target = watchExpandedTarget(expanded.viewHierarchy, text);
-      // The expanded card grows past the bottom edge and the stream does not follow it, so its
-      // action rows are off screen until the stream is scrolled up (#17317).
-      if (!target && watchHasExpandedCard(expanded.viewHierarchy)) {
-        const { width, height } = expanded.screenSize;
-        await this.command(
-          `shell input swipe ${Math.floor(width / 2)} ${Math.floor(height * 0.7)} ${Math.floor(width / 2)} ${Math.floor(height * 0.35)} 400`,
-        );
-      }
-    }
-    if (!target) {
-      throw new ActionableError(
-        "Watch notification expanded target is not available. Re-observe the expanded notification and use an explicit clickable content or action label.",
-      );
+    const { expanded, target } = await awaitWatchExpandedTarget(
+      observation,
+      watchTapLabel(args.notification ?? {}, card),
+      {
+        read: () => this.read(),
+        command: (command) => this.command(command),
+        sleep,
+        signal: this.signal,
+      },
+    );
+    // Content and action intents can open an app; cleanup must leave one the tap resumed in front.
+    // A reply ends back on the stream, which cleanup closes as before.
+    if (replyText === undefined) {
+      this.handOffFrom = { resumed: resumedPackage(expanded) };
     }
     await this.tap(target, expanded);
     if (replyText !== undefined) {

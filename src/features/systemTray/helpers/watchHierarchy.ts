@@ -420,13 +420,63 @@ export function watchExpandedTarget(
   return targets.length === 1 ? targets[0] : undefined;
 }
 
-function uniqueTarget(root: ViewHierarchyNode, text: string): Element | undefined {
-  const result = new ResolverElementSelector().select(
+function selectTarget(root: ViewHierarchyNode, text: string) {
+  return new ResolverElementSelector().select(
     createSubHierarchy(root),
     { text },
     { ...ignoreCasePolicy(false) },
   );
+}
+
+function uniqueTarget(root: ViewHierarchyNode, text: string): Element | undefined {
+  const result = selectTarget(root, text);
   return result.totalMatches === 1 ? (result.element ?? undefined) : undefined;
+}
+
+const MAX_DIAGNOSED_ROWS = 6;
+const MAX_ROW_LABEL_CHARS = 40;
+
+/** A clickable row's label: its first shown text, cut to a bounded length. */
+function rowLabel(row: ViewHierarchyNode): string {
+  const text =
+    watchNodes(row)
+      .map((node) => toSearchable(getNodeProperties(node) ?? {}).shownText?.trim())
+      .find((shown) => !!shown) ?? "(unlabelled)";
+  return text.length > MAX_ROW_LABEL_CHARS ? `${text.slice(0, MAX_ROW_LABEL_CHARS - 1)}…` : text;
+}
+
+/**
+ * Why {@link watchExpandedTarget} found no `text` target in a read, for the error a tap reports
+ * when the target never appears: no stream, no or several expanded cards, or the one expanded
+ * card's clickable rows (bounded), so a failure on a remote watch can be told apart afterwards.
+ */
+export function watchExpandedTargetDiagnosis(
+  hierarchy: ViewHierarchyResult | undefined,
+  text: string,
+): string {
+  if (!hierarchy) {
+    return "the last read had no view hierarchy";
+  }
+  if (!watchStreamRoot(hierarchy)) {
+    const front = hierarchy.packageName ? ` (${hierarchy.packageName} in front)` : "";
+    return `the last read showed no notification stream${front}`;
+  }
+  const cards = expandedCardNodes(hierarchy);
+  if (cards.length !== 1) {
+    return cards.length === 0
+      ? "the last read showed the stream with no expanded card"
+      : `the last read showed ${cards.length} expanded cards`;
+  }
+  const isClickable = (node: ViewHierarchyNode) =>
+    isClickableElementProperties(getNodeProperties(node) ?? {});
+  const rows = watchNodes(cards[0]).filter((node) => node !== cards[0] && isClickable(node));
+  const labels = rows.slice(0, MAX_DIAGNOSED_ROWS).map(rowLabel);
+  const more =
+    rows.length > MAX_DIAGNOSED_ROWS ? ` and ${rows.length - MAX_DIAGNOSED_ROWS} more` : "";
+  const matches = selectTarget(cards[0], text).totalMatches;
+  const target =
+    matches > 1 ? `${matches} targets labelled "${text}"` : `no target labelled "${text}"`;
+  return `the last read showed one expanded card with ${target}; its clickable rows: ${labels.join(", ")}${more}`;
 }
 
 /** Gboard's remote-input field, rather than an arbitrary editable notification node. */

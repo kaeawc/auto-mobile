@@ -95,8 +95,6 @@ property is preserved verbatim. Lines use CRLF, and lines fold at
 No Contacts permission is needed. Each string is bounded by `MAX_PROTOTYPE_SHARE_TEXT_BYTES`
 (65536); literal and resolved arguments use the same rules. Library imports refuse secure
 state in every share string, including nested contact/file values and follow-up handlers.
-A library secure text field's `stateKey` cannot read a `repeat.derive` field: only the device
-formats that value, so the host cannot name the key to protect.
 The library secure-value scan guard caps total expanded bytes at 4,194,304 bytes, measured as
 authored UTF-8 sink bytes charged per repeat row before allocating repeated strings; zero-row
 templates are charged once. It charges literal spans even when substitution would shorten them.

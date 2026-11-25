@@ -841,15 +841,7 @@ internal object PrototypeRepeatValidator {
     return applicableScopes(scopes, path)
       .ifEmpty { listOf(null) }
       .flatMap { scope ->
-        if (
-          scope != null &&
-            checkedKeys(value).any { key ->
-              PrototypeRepeatTemplate.fieldReferences(key, scope.alias, scope.outerAlias).any {
-                it in scope.derivedNames
-              }
-            }
-        )
-          emptyList()
+        if (scope != null && readsDerivedKey(scope, value)) emptyList()
         else if (
           scope == null ||
             checkedKeys(value).none {
@@ -862,6 +854,20 @@ internal object PrototypeRepeatValidator {
         else scope.items.mapIndexed { index, item -> bindKeys(value, scope, item, index) to index }
       }
   }
+
+  /**
+   * True when a state key of the entry at [path] reads a repeat-derived field, whose string only
+   * the device formats, so [keyInstances] cannot list its expanded keys (#18665).
+   */
+  fun readsDerivedKey(scopes: List<Scope>, value: JsonObject, path: String): Boolean =
+    applicableScopes(scopes, path).any { readsDerivedKey(it, value) }
+
+  private fun readsDerivedKey(scope: Scope, value: JsonObject): Boolean =
+    checkedKeys(value).any { key ->
+      PrototypeRepeatTemplate.fieldReferences(key, scope.alias, scope.outerAlias).any {
+        it in scope.derivedNames
+      }
+    }
 
   fun applicableScopes(scopes: List<Scope>, path: String): List<Scope> {
     val matches = scopes.filter { path.startsWith("${it.path}.children[") }

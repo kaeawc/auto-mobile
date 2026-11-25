@@ -444,6 +444,22 @@ struct PrototypeStrictRepeats {
         return Set([fields["light"], fields["dark"]].compactMap { $0?.stringValue.map { Array($0.utf16) } }).count
     }
 
+    /// True when a state key of `entry` reads a derived field of its innermost repeat, whose string only
+    /// the device formats, so `bound` cannot list the keys it expands to (#18665).
+    func readsDerivedKey(_ entry: PrototypeLocatedValue) -> Bool {
+        let matches = scopes.filter { entry.path.hasPrefix("\($0.path).children[") }
+        let deepest = matches.map { $0.path.count }.max()
+        let keys = PrototypeStrictBindings.boundKeys(entry.value)
+        return matches.filter { $0.path.count == deepest }.contains { scope in
+            keys.contains { key in
+                PrototypeRepeat.segments(key, alias: scope.alias, outerAlias: scope.outerAlias).contains {
+                    if case let .field(name) = $0 { return scope.derived.contains(name) }
+                    return false
+                }
+            }
+        }
+    }
+
     func bound(_ entries: [PrototypeLocatedValue], actions: Bool = false) -> [PrototypeLocatedValue] {
         entries
             .filter { entry in

@@ -2230,6 +2230,7 @@
     "strict-library-secure-channel-header.json",
     "strict-library-secure-channel-platform-args.json",
     "strict-library-secure-channel-url.json",
+    "strict-library-secure-derived-repeat-key.json",
     "strict-library-secure-emit-context.json",
     "strict-library-secure-empty-repeat-request.json",
     "strict-library-secure-empty-repeat-storage.json",

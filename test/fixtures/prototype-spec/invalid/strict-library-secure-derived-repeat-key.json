@@ -1,0 +1,67 @@
+{
+  "spec": {
+    "id": "secure",
+    "window": {
+      "placement": {
+        "type": "fullscreen"
+      }
+    },
+    "state": {
+      "password_1": ""
+    },
+    "root": {
+      "type": "column",
+      "repeat": {
+        "items": [
+          {
+            "id": 1
+          }
+        ],
+        "as": "line",
+        "derive": {
+          "sid": {
+            "of": {
+              "item": "id"
+            },
+            "format": {
+              "number": {}
+            }
+          }
+        }
+      },
+      "children": [
+        {
+          "type": "row",
+          "children": [
+            {
+              "type": "textField",
+              "stateKey": "password_{line.sid}",
+              "secure": true
+            },
+            {
+              "type": "button",
+              "label": "Send",
+              "onTap": [
+                {
+                  "type": "request",
+                  "via": "device",
+                  "url": "https://example.com",
+                  "query": {
+                    "token": {
+                      "state": "password_1"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "options": {
+    "library": true
+  },
+  "expectedPath": "root.children[0].children[0].stateKey",
+  "expectedMessage": "Secure state key cannot use a derived repeat field; key it by an item field or {index}"
+}

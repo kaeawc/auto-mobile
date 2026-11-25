@@ -5,6 +5,9 @@ import kotlinx.serialization.json.*
 
 /** Additional unprivileged-import and negotiated-capability checks after full validation. */
 internal object PrototypeStrictPolicy {
+  private const val SECURE_DERIVED_KEY_MESSAGE =
+    "Secure state key cannot use a derived repeat field; key it by an item field or {index}"
+
   fun error(
     spec: JsonObject,
     supported: Set<String>?,
@@ -58,6 +61,9 @@ internal object PrototypeStrictPolicy {
     context: PrototypeStateChecks.Context,
   ): PrototypeSpecError? {
     val scopes = PrototypeRepeatValidator.scopes(spec)
+    derivedSecureKeyError(scopes, context)?.let {
+      return it
+    }
     val secure = secureStateKeys(scopes, context)
     if (secure.isEmpty()) return null
     val channels = (spec["channels"] as? JsonObject).orEmpty()
@@ -114,23 +120,33 @@ internal object PrototypeStrictPolicy {
     return persistedSecureError(spec, secure)
   }
 
-  private fun secureStateKeys(
-    scopes: List<PrototypeRepeatValidator.Scope>,
+  /** Each secure text field, reduced to its state key. */
+  private fun secureFields(
     context: PrototypeStateChecks.Context,
-  ): Set<String> =
+  ): List<PrototypeStateChecks.Located> =
     context.nodes
       .filter {
         it.value.text("type") == "textField" &&
           (it.value["secure"] == JsonPrimitive(true) || it.value.text("keyboardType") == "password")
       }
-      .flatMap { node ->
-        PrototypeRepeatValidator.keyInstances(
-            scopes,
-            JsonObject(mapOf("stateKey" to node.value.getValue("stateKey"))),
-            node.path,
-          )
-          .mapNotNull { (value, _) -> value.text("stateKey") }
-      }
+      .map { it.copy(value = JsonObject(mapOf("stateKey" to it.value.getValue("stateKey")))) }
+
+  /** The device formats a derived field, so the host cannot name the secure key it expands to. */
+  private fun derivedSecureKeyError(
+    scopes: List<PrototypeRepeatValidator.Scope>,
+    context: PrototypeStateChecks.Context,
+  ): PrototypeSpecError? =
+    secureFields(context)
+      .firstOrNull { PrototypeRepeatValidator.readsDerivedKey(scopes, it.value, it.path) }
+      ?.let { PrototypeSpecError("${it.path}.stateKey", SECURE_DERIVED_KEY_MESSAGE) }
+
+  private fun secureStateKeys(
+    scopes: List<PrototypeRepeatValidator.Scope>,
+    context: PrototypeStateChecks.Context,
+  ): Set<String> =
+    secureFields(context)
+      .flatMap { PrototypeRepeatValidator.keyInstances(scopes, it.value, it.path) }
+      .mapNotNull { (value, _) -> value.text("stateKey") }
       .toSet()
 
   private fun requestFields(spec: JsonObject, context: PrototypeStateChecks.Context): List<Field> {

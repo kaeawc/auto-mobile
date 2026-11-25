@@ -887,33 +887,12 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
   located: T[],
   data = new PrototypeRepeatData(record(spec)?.data),
 ): KeyInstance<T>[] {
-  const parsedDerive = prototypeDeriveSchema.safeParse(record(spec)?.derive ?? {});
-  if (parsedDerive.success) {
-    data.derived = derivePrototypeValues(
-      parsedDerive.data,
-      record(spec)?.data,
-      record(record(spec)?.state) ?? {},
-    );
-  }
-  const root = record(record(spec)?.root);
-  const scopes: Scope[] = [];
-  if (root) {
-    collectScopes(root, "root", scopes, { data });
-  }
+  const scopes = keyScopes(spec, data);
   return located.flatMap((entry) => {
-    const matches = scopes.filter((candidate) =>
-      entry.path.startsWith(`${candidate.path}.children[`),
-    );
-    const deepest = Math.max(0, ...matches.map((candidate) => candidate.path.length));
-    const applicable = matches.filter((candidate) => candidate.path.length === deepest);
+    const applicable = applicableScopes(scopes, entry.path);
     return (applicable.length ? applicable : [undefined]).flatMap((scope) => {
       // A derived key cannot be bound to its device-local string during host validation.
-      if (
-        scope &&
-        checkedKeyValues(entry.value).some(
-          (key) => typeof key === "string" && hasDerivedField(key, scope),
-        )
-      ) {
+      if (scope && readsDerivedKey(entry.value, scope)) {
         return [];
       }
       const routeOperand =
@@ -940,6 +919,50 @@ export function repeatKeyInstances<T extends { value: Raw; path: string }>(
       }));
     });
   });
+}
+
+/**
+ * The entries `repeatKeyInstances` drops because a state key reads a repeat-derived field, whose
+ * string only the device formats. A check that must see every expanded key rejects these (#18665).
+ */
+export function repeatDerivedKeyEntries<T extends { value: Raw; path: string }>(
+  spec: unknown,
+  located: T[],
+): T[] {
+  const scopes = keyScopes(spec, new PrototypeRepeatData(record(spec)?.data));
+  return located.filter((entry) =>
+    applicableScopes(scopes, entry.path).some((scope) => readsDerivedKey(entry.value, scope)),
+  );
+}
+
+function keyScopes(spec: unknown, data: PrototypeRepeatData): Scope[] {
+  const parsedDerive = prototypeDeriveSchema.safeParse(record(spec)?.derive ?? {});
+  if (parsedDerive.success) {
+    data.derived = derivePrototypeValues(
+      parsedDerive.data,
+      record(spec)?.data,
+      record(record(spec)?.state) ?? {},
+    );
+  }
+  const root = record(record(spec)?.root);
+  const scopes: Scope[] = [];
+  if (root) {
+    collectScopes(root, "root", scopes, { data });
+  }
+  return scopes;
+}
+
+/** The innermost repeat scopes whose template holds `path`. */
+function applicableScopes(scopes: readonly Scope[], path: string): Scope[] {
+  const matches = scopes.filter((candidate) => path.startsWith(`${candidate.path}.children[`));
+  const deepest = Math.max(0, ...matches.map((candidate) => candidate.path.length));
+  return matches.filter((candidate) => candidate.path.length === deepest);
+}
+
+function readsDerivedKey(value: Raw, scope: Scope): boolean {
+  return checkedKeyValues(value).some(
+    (key) => typeof key === "string" && hasDerivedField(key, scope),
+  );
 }
 
 /** Validation needs the projected field types, without reading a clock or formatting values. */

@@ -14,8 +14,10 @@ import { createExecResult } from "../../../src/utils/execResult";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
+import { FakeXrGlassesDetector } from "../../fakes/FakeXrGlassesDetector";
 import { FakeWearOsDetector } from "../../fakes/FakeWearOsDetector";
 import { FakeAndroidTvDetector } from "../../fakes/FakeAndroidTvDetector";
+import { FakeAndroidAutomotiveDetector } from "../../fakes/FakeAndroidAutomotiveDetector";
 import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -54,8 +56,10 @@ function setup() {
       timer,
       options: {
         xrDetector: new FakeAndroidXrDetector(),
+        glassesDetector: new FakeXrGlassesDetector(),
         wearOsDetector: new FakeWearOsDetector(),
         tvDetector: new FakeAndroidTvDetector(),
+        automotiveDetector: new FakeAndroidAutomotiveDetector(),
       },
     }),
   };
@@ -184,8 +188,10 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
       timer,
       options: {
         xrDetector: new FakeAndroidXrDetector(),
+        glassesDetector: new FakeXrGlassesDetector(),
         wearOsDetector: new FakeWearOsDetector(),
         tvDetector: new FakeAndroidTvDetector(),
+        automotiveDetector: new FakeAndroidAutomotiveDetector(),
       },
     });
     const observe = new FakeObserveScreen();

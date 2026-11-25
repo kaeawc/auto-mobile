@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import {
   parseCliArgs,
   runCliCommand,
@@ -76,6 +76,11 @@ describe("an explicit but empty --session-uuid is not silently dropped", () => {
 });
 
 describe("parseCliArgs --session-uuid", () => {
+  // The first parse loads the tool registry; pay that once here, outside the 100 ms per-test budget.
+  beforeAll(() => {
+    parseCliArgs(["observe"]);
+  });
+
   test.each([[""], ["   "], ["\t"]])("rejects the blank value %j", (value) => {
     expect(() => parseCliArgs(["--session-uuid", value, "observe"])).toThrow(
       "--session-uuid requires a non-empty value",

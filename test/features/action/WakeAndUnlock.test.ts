@@ -69,11 +69,13 @@ class FakeCredentialStore implements LockCredentialStore {
   }
 }
 
+type IosUnlockResult = Awaited<ReturnType<IosScreenUnlocker["wakeAndDismiss"]>>;
+
 class FakeIosUnlocker implements IosScreenUnlocker {
   calls = 0;
-  result: { success: boolean; error?: string } = { success: true };
-  results?: Array<{ success: boolean; error?: string }>;
-  async wakeAndDismiss(): Promise<{ success: boolean; error?: string }> {
+  result: IosUnlockResult = { success: true };
+  results?: IosUnlockResult[];
+  async wakeAndDismiss(): Promise<IosUnlockResult> {
     this.calls++;
     return this.results?.shift() ?? this.result;
   }
@@ -1357,7 +1359,143 @@ describe("iOS two-stage unlock", () => {
     });
   }
 
-  test("stage-1 probe consumes swipe budget: no fallback and existing still-locked failure", async () => {
+  test("swipes that report success but leave the lock screen up fail after one more wake (#19167)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const lock = new FakeIosLockProbe();
+    lock.state = LOCKED_SWIPE;
+    const calls: string[] = [];
+    const actions: IosUnlockActions = {
+      async pressHome() {
+        calls.push("home");
+        return { success: true };
+      },
+      async swipeUp() {
+        calls.push("swipe");
+        return { success: true };
+      },
+    };
+    await expect(
+      new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+        timer,
+        iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+        iosLockStateProbe: lock,
+      }).execute(),
+    ).rejects.toThrow(
+      "wakeAndUnlock: iOS lock screen is still showing (the lock-screen swipe reported success but did not dismiss the lock screen, and a second wake did not either); re-observe the device and call wakeAndUnlock again",
+    );
+    expect(calls).toEqual(["home", "swipe", "swipe", "home"]);
+    // No gesture is pending, so only the two short settle polls run (before the second wake and
+    // after it), not the whole unlock budget.
+    expect(timer.now()).toBe(5_000);
+  });
+
+  test("a lock screen that dismisses late after the second wake is trusted from the lock state", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const lock = new FakeIosLockProbe();
+    // initial, afterWake, afterSwipe, afterSwipe (fallback), 10 settle reads, afterWake (second
+    // wake), then the final settle poll
+    lock.states = [...Array<DeviceLockState>(15).fill(LOCKED_SWIPE), UNLOCKED];
+    const actions: IosUnlockActions = {
+      async pressHome() {
+        return { success: true };
+      },
+      async swipeUp() {
+        return { success: true };
+      },
+    };
+    const result = await new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+      timer,
+      iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+      iosLockStateProbe: lock,
+    }).execute();
+    expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+    expect(result.warning).toBe(
+      "the lock screen dismissed late, after a second wake; the device is unlocked",
+    );
+  });
+
+  test("a second wake after ineffective swipes is a verified unlock", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const lock = new FakeIosLockProbe();
+    // initial, afterWake, afterSwipe, afterSwipe (fallback), 9 settle reads, afterWake (second wake)
+    lock.states = [...Array<DeviceLockState>(13).fill(LOCKED_SWIPE), UNLOCKED];
+    const actions: IosUnlockActions = {
+      async pressHome() {
+        return { success: true };
+      },
+      async swipeUp() {
+        return { success: true };
+      },
+    };
+    const result = await new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+      timer,
+      iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+      iosLockStateProbe: lock,
+    }).execute();
+    expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+    expect(result.warning).toBe(
+      "unlocked by a second wake after the lock-screen swipe had no effect",
+    );
+    expect(lock.reads).toBe(14);
+  });
+
+  test("a lock state that lags the fallback swipe is waited for, with no second wake (#19167)", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const lock = new FakeIosLockProbe();
+    // initial, afterWake, afterSwipe, afterSwipe (fallback), then two locked settle reads
+    lock.states = [...Array<DeviceLockState>(6).fill(LOCKED_SWIPE), UNLOCKED];
+    const calls: string[] = [];
+    const actions: IosUnlockActions = {
+      async pressHome() {
+        calls.push("home");
+        return { success: true };
+      },
+      async swipeUp() {
+        calls.push("swipe");
+        return { success: true };
+      },
+    };
+    const result = await new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+      timer,
+      iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
+      iosLockStateProbe: lock,
+    }).execute();
+    // A Home press on the already-unlocked device would background the app under test.
+    expect(calls).toEqual(["home", "swipe", "swipe"]);
+    expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+    expect(result.warning).toBe(
+      "unlocked by the fallback swipe after the fast swipe had no effect",
+    );
+  });
+
+  test("a late dismissal with no second wake does not claim one", async () => {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const ios = new FakeIosUnlocker();
+    ios.result = {
+      success: false,
+      stillLocked: true,
+      rewoke: false,
+      error: "no budget remained for a second wake",
+    };
+    const lock = new FakeIosLockProbe();
+    lock.states = [LOCKED_SWIPE, LOCKED_SWIPE, UNLOCKED];
+    const result = await new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+      timer,
+      iosUnlocker: ios,
+      iosLockStateProbe: lock,
+    }).execute();
+    expect(result).toMatchObject({ success: true, unlocked: true });
+    expect(result.warning).toBe(
+      "the lock screen dismissed late, after the swipe; the device is unlocked",
+    );
+  });
+
+  test("stage-1 probe consumes swipe budget: no fallback swipe, one more wake, then still-showing failure", async () => {
     const timer = new FakeTimer();
     timer.enableAutoAdvance();
     let probes = 0;
@@ -1385,7 +1523,7 @@ describe("iOS two-stage unlock", () => {
         iosUnlocker: new IosLockScreenUnlocker(iosDevice, actions, timer),
         iosLockStateProbe: lock,
       }).execute(),
-    ).rejects.toThrow(/still locked/);
+    ).rejects.toThrow(/still showing/);
     expect(swipes).toBe(1);
     expect(timer.now()).toBeLessThanOrEqual(25000);
   });

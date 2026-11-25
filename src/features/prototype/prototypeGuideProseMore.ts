@@ -54,7 +54,10 @@ sent, replacing backends of the same id, and a saved prototype does not carry th
   redefining or clearing the backend cancels pending steps. Poll the collection to see the result.
   Actor delays follow wall time; \`simulate advanceTimeMs\` also moves every backend's actors ahead,
   applying due steps in order, and returns \`actorSteps\`.
-  \`advance\` and \`notify\` steps are not supported yet.
+  \`{advance: {path, metersPerTick, update: collection, id}}\` moves along a polyline from the top-level
+  \`paths: {name: [{lat, lng}, …]}\` (2 to 1000 points, at most 16 paths) and merges \`{lat, lng, heading}\`
+  into that item; with \`room\` instead of \`update\`/\`id\` it sends that frame to the room. Each run moves
+  further, and after the last point the step does nothing. \`notify\` steps are not supported yet.
 - A request's \`timeoutMs\` applies to the mock too, and a response over the 262144-byte cap fails
   with \`too_large\`.
 - **Rooms** serve realtime channels with \`via: "host"\`: a WebSocket to

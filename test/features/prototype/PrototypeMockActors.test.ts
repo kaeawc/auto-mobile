@@ -165,6 +165,11 @@ test("a wall-clock step back does not stall scheduled actor steps", () => {
 });
 
 describe("mock actor definitions", () => {
+  const line = [
+    { lat: 0, lng: 0 },
+    { lat: 0, lng: 0.001 },
+  ];
+  const advance = { path: "driverPath", metersPerTick: 5, update: "drivers", id: "d1" };
   const issueOf = (definition: unknown): string | undefined => {
     const result = mockBackendDefinitionSchema.safeParse(definition);
     return result.success ? undefined : result.error.issues[0]?.message;
@@ -172,9 +177,84 @@ describe("mock actor definitions", () => {
 
   test.each([
     [
-      "advance is refused until mock polylines exist",
-      { actors: [{ every: 100, maxRuns: 1, do: [{ advance: { route: "driverPath" } }] }] },
-      "advance is not supported",
+      "notify is refused until mock backends can deliver simulated push",
+      { actors: [{ every: 100, maxRuns: 1, do: [{ notify: { title: "Hi" } }] }] },
+      "notify is not supported",
+    ],
+    [
+      "advance along a path that is not defined",
+      {
+        collections: { drivers: [] },
+        actors: [{ every: 100, maxRuns: 1, do: [{ advance: { ...advance, path: "nope" } }] }],
+        paths: { driverPath: line },
+      },
+      'no path named "nope"',
+    ],
+    [
+      "advance into a collection that is not defined",
+      {
+        actors: [{ every: 100, maxRuns: 1, do: [{ advance }] }],
+        paths: { driverPath: line },
+      },
+      'no collection named "drivers"',
+    ],
+    [
+      "advance with both update and room",
+      {
+        collections: { drivers: [] },
+        actors: [{ every: 100, maxRuns: 1, do: [{ advance: { ...advance, room: "/track" } }] }],
+        paths: { driverPath: line },
+      },
+      "advance takes exactly one of update or room",
+    ],
+    [
+      "advance to a room with an id",
+      {
+        actors: [
+          {
+            every: 100,
+            maxRuns: 1,
+            do: [{ advance: { path: "driverPath", metersPerTick: 5, room: "/track", id: "d1" } }],
+          },
+        ],
+        paths: { driverPath: line },
+      },
+      "advance.id goes with update",
+    ],
+    [
+      "advance that does not move",
+      {
+        collections: { drivers: [] },
+        actors: [{ every: 100, maxRuns: 1, do: [{ advance: { ...advance, metersPerTick: 0 } }] }],
+        paths: { driverPath: line },
+      },
+      "Number must be greater than 0",
+    ],
+    [
+      "advance with a write in one step",
+      {
+        collections: { drivers: [] },
+        actors: [{ every: 100, maxRuns: 1, do: [{ advance, append: "drivers", value: {} }] }],
+        paths: { driverPath: line },
+      },
+      "at most one of append, update, remove, publish or advance",
+    ],
+    [
+      "a path with a single point",
+      { paths: { driverPath: [{ lat: 0, lng: 0 }] } },
+      "Array must contain at least 2 element(s)",
+    ],
+    [
+      "a path point off the globe",
+      {
+        paths: {
+          driverPath: [
+            { lat: 0, lng: 0 },
+            { lat: 91, lng: 0 },
+          ],
+        },
+      },
+      "Number must be less than or equal to 90",
     ],
     [
       "publish to a room that is not a path",
@@ -193,7 +273,7 @@ describe("mock actor definitions", () => {
           },
         ],
       },
-      "at most one of append, update, remove or publish",
+      "at most one of append, update, remove, publish or advance",
     ],
     [
       "an unknown collection",
@@ -231,10 +311,22 @@ describe("mock actor definitions", () => {
         collections: { a: [] },
         actors: [{ every: 100, maxRuns: 1, do: [{ append: "a", remove: "a", id: 1, value: {} }] }],
       },
-      "at most one of append, update, remove or publish",
+      "at most one of append, update, remove, publish or advance",
     ],
   ])("%s", (_name, definition, message) => {
     expect(issueOf(definition)).toContain(message);
+  });
+
+  test("a valid advance step parses, and more than 16 paths are refused", () => {
+    expect(
+      issueOf({
+        collections: { drivers: [] },
+        actors: [{ every: 100, maxRuns: 1, do: [{ advance }] }],
+        paths: { driverPath: line },
+      }),
+    ).toBeUndefined();
+    const paths = Object.fromEntries(Array.from({ length: 17 }, (_, index) => [`p${index}`, line]));
+    expect(issueOf({ paths })).toBe("at most 16 paths");
   });
 
   test("more than 16 actors or 64 steps are refused", () => {

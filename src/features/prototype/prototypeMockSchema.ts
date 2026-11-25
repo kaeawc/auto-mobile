@@ -27,6 +27,10 @@ export const MAX_MOCK_ACTOR_STEPS = 64;
 export const MAX_MOCK_ACTOR_DELAY_MS = 600_000;
 export const MIN_MOCK_ACTOR_EVERY_MS = 100;
 export const MAX_MOCK_ACTOR_RUNS = 10_000;
+/** Named polylines an `advance` step moves along, and points per polyline. */
+export const MAX_MOCK_PATHS = 16;
+export const MAX_MOCK_PATH_POINTS = 1000;
+export const MAX_MOCK_ADVANCE_METERS = 100_000;
 
 const MAX_DEPTH = contract.limits.MAX_PROTOTYPE_DATA_DEPTH;
 
@@ -115,9 +119,8 @@ const faultSchema = z
   });
 
 const ACTOR_ROUTE = new RegExp(`^(?:${METHODS.join("|")}) (?:${ROUTE_PATH_BODY})$`);
-/** Steps the issue names that need a piece mock backends do not have yet (maps, push). */
+/** Steps the issue names that need a piece mock backends do not have yet (push). */
 const UNSUPPORTED_STEPS = {
-  advance: "mock backends have no routes along a polyline yet",
   notify: "mock backends cannot deliver simulated push yet",
 } as const;
 
@@ -133,16 +136,48 @@ const actorPublishSchema = z
   .object({ room: z.string().startsWith("/").max(256), frame: frameSchema })
   .strict();
 
+const pathPointSchema = z
+  .object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) })
+  .strict();
+
+const pathSchema = z.array(pathPointSchema).min(2).max(MAX_MOCK_PATH_POINTS);
+
+const itemIdSchema = z.union([z.string().min(1).max(256), z.number().finite()]);
+
+/**
+ * Moves `metersPerTick` further along the polyline `path` each time the step runs, then writes
+ * `{lat, lng, heading}` into the collection item `update`/`id` (PATCH, so `broadcasts` apply) or
+ * sends it to the room path `room`. Progress is kept per step; at the end of the line the step
+ * writes the last point once and then does nothing.
+ */
+const actorAdvanceSchema = z
+  .object({
+    path: z.string().regex(COLLECTION_NAME),
+    metersPerTick: z.number().gt(0).max(MAX_MOCK_ADVANCE_METERS),
+    update: z.string().regex(COLLECTION_NAME).optional(),
+    id: itemIdSchema.optional(),
+    room: z.string().startsWith("/").max(256).optional(),
+  })
+  .strict()
+  .superRefine((advance, context) => {
+    if ((advance.update === undefined) === (advance.room === undefined)) {
+      context.addIssue({ code: "custom", message: "advance takes exactly one of update or room" });
+    }
+    if ((advance.update !== undefined) !== (advance.id !== undefined)) {
+      context.addIssue({ code: "custom", path: ["id"], message: "advance.id goes with update" });
+    }
+  });
+
 const actorStepSchema = z
   .object({
     afterMs: actorDelay.optional(),
     append: z.string().regex(COLLECTION_NAME).optional(),
     update: z.string().regex(COLLECTION_NAME).optional(),
     remove: z.string().regex(COLLECTION_NAME).optional(),
-    id: z.union([z.string().min(1).max(256), z.number().finite()]).optional(),
+    id: itemIdSchema.optional(),
     value: z.record(jsonValue).optional(),
     publish: actorPublishSchema.optional(),
-    advance: z.unknown().optional(),
+    advance: actorAdvanceSchema.optional(),
     notify: z.unknown().optional(),
   })
   .strict()
@@ -156,18 +191,18 @@ const actorStepSchema = z
         });
       }
     }
-    const kinds = (["append", "update", "remove", "publish"] as const).filter(
+    const kinds = (["append", "update", "remove", "publish", "advance"] as const).filter(
       (kind) => step[kind] !== undefined,
     );
     if (kinds.length > 1) {
       context.addIssue({
         code: "custom",
-        message: "a step takes at most one of append, update, remove or publish",
+        message: "a step takes at most one of append, update, remove, publish or advance",
       });
     } else if (kinds.length === 0 && step.afterMs === undefined) {
       context.addIssue({
         code: "custom",
-        message: "a step needs append, update, remove, publish or afterMs",
+        message: "a step needs append, update, remove, publish, advance or afterMs",
       });
     }
     const kind = kinds.length === 1 ? kinds[0] : undefined;
@@ -275,18 +310,27 @@ export const mockBackendDefinitionSchema = z
     seed: z.number().int().min(0).max(0xffff_ffff).optional(),
     /** Timed and route-triggered collection writes and room frames (#14211). */
     actors: z.array(actorSchema).max(MAX_MOCK_ACTORS).optional(),
+    /** `{name: [{lat, lng}, …]}`: polylines the actor `advance` step moves along. */
+    paths: z
+      .record(pathSchema)
+      .refine((paths) => Object.keys(paths).length <= MAX_MOCK_PATHS, {
+        message: `at most ${MAX_MOCK_PATHS} paths`,
+      })
+      .refine((paths) => Object.keys(paths).every((name) => COLLECTION_NAME.test(name)), {
+        message: "path names must match [A-Za-z][A-Za-z0-9_-]{0,31}",
+      })
+      .optional(),
   })
   .strict()
   .superRefine((definition, context) => {
     const names = new Set(Object.keys(definition.collections ?? {}));
     for (const [at, actor] of (definition.actors ?? []).entries()) {
       for (const [index, step] of actor.do.entries()) {
-        const name = step.append ?? step.update ?? step.remove;
-        if (name !== undefined && !names.has(name)) {
+        for (const issue of missingStepReferences(step, names, definition.paths ?? {})) {
           context.addIssue({
             code: "custom",
-            path: ["actors", at, "do", index],
-            message: `no collection named "${name}"`,
+            path: ["actors", at, "do", index, ...issue.path],
+            message: issue.message,
           });
         }
       }
@@ -301,16 +345,40 @@ export const mockBackendDefinitionSchema = z
   )
   .refine(
     (definition) => mockBackendBytes(definition, definition.collections) <= MAX_MOCK_BACKEND_BYTES,
-    `a backend holds at most ${MAX_MOCK_BACKEND_BYTES} bytes of collections, routes, rooms and broadcasts`,
+    `a backend holds at most ${MAX_MOCK_BACKEND_BYTES} bytes of collections, routes, rooms, broadcasts and paths`,
   );
+
+/** The collection and path names a step uses that the definition does not define. */
+function missingStepReferences(
+  step: z.infer<typeof actorStepSchema>,
+  collections: ReadonlySet<string>,
+  paths: object,
+): { path: string[]; message: string }[] {
+  const issues: { path: string[]; message: string }[] = [];
+  const name = step.append ?? step.update ?? step.remove ?? step.advance?.update;
+  if (name !== undefined && !collections.has(name)) {
+    issues.push({ path: [], message: `no collection named "${name}"` });
+  }
+  const path = step.advance?.path;
+  if (path !== undefined && !Object.hasOwn(paths, path)) {
+    issues.push({ path: ["advance", "path"], message: `no path named "${path}"` });
+  }
+  return issues;
+}
 
 /** The size the backend budget counts: collection data plus every static definition part. */
 export function mockBackendBytes(
-  definition: Pick<MockBackendDefinitionInput, "routes" | "rooms" | "broadcasts">,
+  definition: Pick<MockBackendDefinitionInput, "routes" | "rooms" | "broadcasts" | "paths">,
   collections: unknown,
 ): number {
   return Buffer.byteLength(
-    JSON.stringify([collections, definition.routes, definition.rooms, definition.broadcasts]),
+    JSON.stringify([
+      collections,
+      definition.routes,
+      definition.rooms,
+      definition.broadcasts,
+      definition.paths,
+    ]),
   );
 }
 
@@ -318,6 +386,7 @@ interface MockBackendDefinitionInput {
   routes?: unknown;
   rooms?: unknown;
   broadcasts?: unknown;
+  paths?: unknown;
 }
 
 export type MockBackendDefinition = z.infer<typeof mockBackendDefinitionSchema>;
@@ -329,3 +398,5 @@ export type MockBroadcast = z.infer<typeof broadcastSchema>;
 export type MockActor = z.infer<typeof actorSchema>;
 export type MockActorStep = z.infer<typeof actorStepSchema>;
 export type MockActorPublish = z.infer<typeof actorPublishSchema>;
+export type MockActorAdvance = z.infer<typeof actorAdvanceSchema>;
+export type MockPath = z.infer<typeof pathSchema>;

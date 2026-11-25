@@ -29,6 +29,16 @@ also reports enabled private displays 2 (cluster), 3 (cluster app virtual) and 4
   7. `7-unfold-from-closed-base-while-override`: then `emu unfold`; base OPENED, still 3 (bug).
   8. `8-after-reset-opened-base`: after `state reset`; state 2.
 
+## api37-fold-* (issue #19190)
+
+Captured 2026-11-24 from a Pixel 9 Pro Fold AVD on `system-images;android-37.0;google_apis;arm64-v8a`.
+Its `cmd device_state print-states` is byte-identical to `foldpf-print-states.txt`.
+
+- `api37-fold-rear-display-broken-pipe.txt`: `adb shell cmd device_state state` output right
+  after `cmd device_state state 3`, while system_server was dying.
+- `api37-fold-restarting-device-state.txt`: `adb shell cmd device_state state` output during
+  the following soft restart.
+
 ## hinge-angle0 (issues #8947, #9018)
 
 These bytes are the recorded real captures supplied in issue #9018, reproduced here

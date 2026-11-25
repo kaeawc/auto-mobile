@@ -36,6 +36,12 @@ export interface TargetResolution {
   platform: SomePlatform;
   readOnly: boolean;
   readSession: Awaited<ReturnType<typeof admitReadSession>>;
+  /**
+   * A read naming a session whose device is in restart recovery (#19191): it resolves through the
+   * shared session path, which recovers the device or refuses with the session's typed error,
+   * but it is still a read, so it is never admitted as session use.
+   */
+  readAwaitsSessionRecovery: boolean;
   device: BootedDevice | undefined;
 }
 
@@ -77,6 +83,7 @@ export function createTargetResolution(
     platform: args.platform || "either",
     readOnly: false,
     readSession: undefined,
+    readAwaitsSessionRecovery: false,
     device: undefined,
   };
 }

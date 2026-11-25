@@ -11,6 +11,7 @@ import { OrphanRecorderActiveError } from "./orphanRecorderRefusal";
 import { ActionableError } from "../models/ActionableError";
 import { DirectSessionNotActiveError } from "../models/DirectSessionNotActiveError";
 import { TextIndeterminateError } from "../features/action/TextIndeterminateError";
+import { acquisitionFailureDeviceLeft } from "../features/deviceLifecycle/boot/acquisitionFailureDeviceState";
 import { McpError } from "./mcpError";
 import { logger } from "../utils/logger";
 import { errorMessage } from "../utils/describeUnknownError";
@@ -151,16 +152,28 @@ function toolCallErrorText(error: unknown, message: string): string {
   if (error instanceof DaemonRestartPendingError) {
     return JSON.stringify(daemonRestartPendingPayload(error));
   }
+  return structuredFailureText(error, message);
+}
+
+/** A typed refusal, container failure or acquisition failure envelope, else plain text. */
+function structuredFailureText(error: unknown, message: string): string {
+  // What a failed acquisition left of the device it booted or created is a typed field (#18823).
+  const deviceLeft = acquisitionFailureDeviceLeft(error);
+  const deviceLeftField = deviceLeft !== undefined ? { deviceLeft } : {};
   const refusal = typedRefusalPayload(error);
   if (refusal) {
-    return JSON.stringify({ success: false, error: message, ...refusal });
+    return JSON.stringify({ success: false, error: message, ...refusal, ...deviceLeftField });
   }
   if (error instanceof ActionableError && error.containerFailure) {
     return JSON.stringify({
       success: false,
       error: message,
       containerFailure: error.containerFailure,
+      ...deviceLeftField,
     });
+  }
+  if (deviceLeft !== undefined) {
+    return JSON.stringify({ success: false, error: message, deviceLeft });
   }
   return `Error: ${message}`;
 }

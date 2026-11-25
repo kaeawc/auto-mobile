@@ -13,6 +13,7 @@ import { isAnonymousAcquisitionSession } from "../daemon/sessionManager";
 import { requestAcquisitionReceipt } from "../daemon/acquisitionReceipt";
 import type { DeviceReadinessReservation } from "../daemon/devicePool";
 import { type DeviceBootResult } from "../devices/deviceBootService";
+import type { CreatedDeviceRollbackOutcome } from "../features/deviceLifecycle/boot/acquisitionFailureDeviceState";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { raceWithDeadline } from "../utils/raceWithDeadline";
@@ -96,6 +97,9 @@ export type BootPreparationOptions = {
     // lifecycle lease is released only once all of them have settled.
     coldBootSettlements: Promise<void>[];
     bindingSettlements: Promise<unknown>[];
+    // Set once a createIfMissing rollback ran, so the failure reports the deleted device even
+    // though the rollback cleared `boot` (#18823).
+    createdDeviceRollback?: CreatedDeviceRollbackOutcome;
   };
 };
 
@@ -131,7 +135,9 @@ export function createdDeviceRollbackFor(
         collectDeferredCleanup: (cleanup) => state.coldBootSettlements.push(cleanup),
       });
       logCreatedDeviceRollback(device, failure, cleanup);
+      state.createdDeviceRollback = cleanup.status === "succeeded" ? "deleted" : "failed";
     } catch (error) {
+      state.createdDeviceRollback = "failed";
       // The boot failure is what the caller must see; the rollback failure is logged.
       logger.warn(
         `[DeviceTools] Rollback of created ${device.platform} device '${device.name}' threw: ${errorMessage(error)}`,

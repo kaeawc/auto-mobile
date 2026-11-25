@@ -22,6 +22,8 @@ import { errorMessage } from "../../src/utils/describeUnknownError";
 import { logger } from "../../src/utils/logger";
 import { RunnerReadinessError } from "../../src/ctrlProxy/RunnerReadinessService";
 import { typedRefusalFields } from "../../src/models/typedRefusalFields";
+import { DeviceTransportOfflineError } from "../../src/models/DeviceTransportOfflineError";
+import { annotateAcquisitionFailure } from "../../src/features/deviceLifecycle/boot/acquisitionFailureDeviceState";
 
 import { DEFAULT_DEVICE_ACQUISITION_RETRY_AFTER_MS } from "../../src/models/deviceAcquisitionRefusals";
 
@@ -71,6 +73,18 @@ describe("shapeToolCallError", () => {
         dispatched: "unknown",
       });
     }
+  });
+
+  test("an annotated acquisition refusal keeps its typed fields and adds deviceLeft (#18823)", () => {
+    const original = new DeviceTransportOfflineError("emulator-5554", undefined);
+    const annotated = annotateAcquisitionFailure(original, "booted", "retry getAndroid");
+    const plain = JSON.parse(shapeToolCallError(original, context).content[0].text);
+    expect(plain).not.toHaveProperty("deviceLeft");
+    expect(JSON.parse(shapeToolCallError(annotated, context).content[0].text)).toEqual({
+      ...plain,
+      error: annotated.message,
+      deviceLeft: "booted",
+    });
   });
 
   test("an unrelated structurally coded actionable error stays plain text", () => {

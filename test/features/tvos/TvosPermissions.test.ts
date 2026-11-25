@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { AppPermissions } from "../../../src/features/action/AppPermissions";
 import { createSetAppPermissionsHandler } from "../../../src/server/appTools";
+import { setAppPermissionsResultSchema } from "../../../src/server/appToolOutputSchemas";
 import type { BootedDevice } from "../../../src/models";
 import {
   APPLE_PLATFORM_SUPPORTED_TOOLS,
@@ -69,6 +70,7 @@ describe("setAppPermissions on an Apple TV simulator (#17527)", () => {
           result: { permission: "photos", success: true, verified: false },
         },
       ],
+      appTerminated: true,
     });
   });
 
@@ -87,9 +89,25 @@ describe("setAppPermissions on an Apple TV simulator (#17527)", () => {
     expect(toolStructured(response)).toMatchObject({
       success: true,
       platform: "tvos",
-      message: `Applied 1 app permission change(s) for ${BUNDLE}`,
+      appTerminated: true,
+      message:
+        `Applied 1 app permission change(s) for ${BUNDLE}. The permission change terminated ` +
+        `${BUNDLE}; relaunch it with launchApp before the next interaction`,
     });
     expect(toolIsError(response)).toBe(false);
+    expect(setAppPermissionsResultSchema.safeParse(toolStructured(response)).success).toBe(true);
+  });
+
+  test("a change that applied nothing does not report the app terminated (#19186)", async () => {
+    simctl.setCommandArgsError(GRANT_ARGV, new Error("Failed to grant access"));
+
+    const result = await new AppPermissions(tv, { simctl }).setPermissions(BUNDLE, {
+      action: "grant",
+      permissions: ["photos"],
+    });
+
+    expect(result).toMatchObject({ success: false, changedCount: 0 });
+    expect(result.appTerminated).toBeUndefined();
   });
 
   test("revoke passes each service name to simctl, keeping later ones after a rejection", async () => {

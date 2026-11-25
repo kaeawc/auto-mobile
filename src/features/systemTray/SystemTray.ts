@@ -418,6 +418,7 @@ export class SystemTray {
       observation: result.observation,
       success,
       skipped: result.skipped,
+      ...(result.warning ? { warnings: [result.warning] } : {}),
     };
     return success ? ok(payload) : failed(payload);
   }

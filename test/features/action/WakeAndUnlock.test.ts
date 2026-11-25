@@ -18,6 +18,14 @@ import type {
   LockCredentialStore,
 } from "../../../src/features/action/WakeAndUnlock";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import {
+  IosPreLockForegroundRegistry,
+  SimctlIosForegroundRestorer,
+  recordIosAppBeforePowerPress,
+  type IosForegroundRestorer,
+} from "../../../src/features/action/IosForegroundRestore";
+import type { ObserveResult } from "../../../src/models";
+import { createExecResult } from "../../../src/utils/execResult";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { BootedDevice, DeviceLockState } from "../../../src/models";
 import { ActionableError } from "../../../src/models";
@@ -1697,3 +1705,164 @@ for (const platform of ["ios", "android"] as const) {
     );
   });
 }
+
+class FakeForegroundRestorer implements IosForegroundRestorer {
+  calls: Array<{ appId: string; timeoutMs: number }> = [];
+  warning: string | undefined;
+  error: Error | undefined;
+  async restore(appId: string, options: { timeoutMs: number }): Promise<string | undefined> {
+    this.calls.push({ appId, timeoutMs: options.timeoutMs });
+    if (this.error) {
+      throw this.error;
+    }
+    return this.warning;
+  }
+}
+
+const PLAYGROUND = "dev.jasonpearson.automobile.Playground";
+
+/** The pre-press observation of a power press with `appId` in front and the device unlocked. */
+function unlockedObservation(appId: string): ObserveResult {
+  return {
+    observationId: "pre-power",
+    display: { key: "default", role: "unknown", posture: "unknown", generation: 0 },
+    updatedAt: 0,
+    screenSize: { width: 402, height: 874 },
+    systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+    activeWindow: { appId, activityName: "", layoutSeqSum: 0 },
+    deviceLock: { locked: false, keyguardShowing: false },
+  };
+}
+
+describe("iOS unlock restores the app that was in front before the lock (#19231)", () => {
+  function setup(appBeforeLock: string | undefined, lockStates: DeviceLockState[]) {
+    const timer = new FakeTimer();
+    timer.enableAutoAdvance();
+    const registry = new IosPreLockForegroundRegistry();
+    recordIosAppBeforePowerPress(
+      {
+        device: iosDevice,
+        button: "power",
+        pressSucceeded: true,
+        prePress: unlockedObservation(appBeforeLock ?? "com.apple.springboard"),
+      },
+      registry,
+    );
+    const lock = new FakeIosLockProbe();
+    lock.states = lockStates;
+    lock.state = lockStates.at(-1);
+    const unlocker = new FakeIosUnlocker();
+    const restorer = new FakeForegroundRestorer();
+    const action = new WakeAndUnlock(iosDevice, new FakeAdbExecutor(), {
+      timer,
+      wallClockNow: () => 0,
+      iosUnlocker: unlocker,
+      iosLockStateProbe: lock,
+      iosPreLockForeground: registry,
+      iosForegroundRestorer: restorer,
+    });
+    return { action, registry, restorer, unlocker, timer };
+  }
+
+  test("a verified unlock brings the recorded app back to the front", async () => {
+    const { action, restorer, registry } = setup(PLAYGROUND, [LOCKED_SWIPE, UNLOCKED]);
+    const result = await action.execute();
+    expect(result).toMatchObject({ success: true, wasLocked: true, unlocked: true });
+    expect(result.warning).toBeUndefined();
+    expect(restorer.calls).toEqual([{ appId: PLAYGROUND, timeoutMs: 5_000 }]);
+    // One lock restores once.
+    expect(registry.take(iosDevice.deviceId)).toBeUndefined();
+  });
+
+  test("an already-unlocked device is left alone and the stale record is dropped", async () => {
+    const { action, restorer, registry, unlocker } = setup(PLAYGROUND, [UNLOCKED]);
+    const result = await action.execute();
+    expect(result).toMatchObject({ success: true, wasLocked: false });
+    expect(unlocker.calls).toBe(0);
+    expect(restorer.calls).toEqual([]);
+    expect(registry.take(iosDevice.deviceId)).toBeUndefined();
+  });
+
+  test("SpringBoard in front before the lock restores nothing", async () => {
+    const { action, restorer } = setup(undefined, [LOCKED_SWIPE, UNLOCKED]);
+    const result = await action.execute();
+    expect(result).toMatchObject({ success: true, wasLocked: true });
+    expect(restorer.calls).toEqual([]);
+  });
+
+  test("a restore that reports a warning keeps the unlock a success", async () => {
+    const { action, restorer } = setup(PLAYGROUND, [LOCKED_SWIPE, UNLOCKED]);
+    restorer.warning = `${PLAYGROUND} was left in the background`;
+    const result = await action.execute();
+    expect(result).toMatchObject({ success: true, unlocked: true });
+    expect(result.warning).toBe(`${PLAYGROUND} was left in the background`);
+  });
+
+  test("a restore that throws is a warning, not an error", async () => {
+    const { action, restorer } = setup(PLAYGROUND, [LOCKED_SWIPE, UNLOCKED]);
+    restorer.error = new Error("simctl launch exited 1");
+    const result = await action.execute();
+    expect(result).toMatchObject({ success: true, unlocked: true });
+    expect(result.warning).toContain("simctl launch exited 1");
+    expect(result.warning).toContain("call launchApp");
+  });
+
+  test("a device that stays locked never restores and still fails", async () => {
+    const { action, restorer, unlocker } = setup(PLAYGROUND, [LOCKED_SWIPE]);
+    unlocker.result = {
+      success: false,
+      stillLocked: true,
+      rewoke: true,
+      error: "the swipe did not dismiss the lock screen",
+    };
+    await expect(action.execute()).rejects.toThrow("iOS lock screen is still showing");
+    expect(restorer.calls).toEqual([]);
+  });
+
+  test("a power press over the lock screen keeps the app recorded when it locked", () => {
+    const registry = new IosPreLockForegroundRegistry();
+    const press = { device: iosDevice, button: "power", pressSucceeded: true };
+    recordIosAppBeforePowerPress({ ...press, prePress: unlockedObservation(PLAYGROUND) }, registry);
+    recordIosAppBeforePowerPress(
+      {
+        ...press,
+        prePress: {
+          ...unlockedObservation("com.apple.springboard"),
+          deviceLock: { locked: true, keyguardShowing: true },
+        },
+      },
+      registry,
+    );
+    recordIosAppBeforePowerPress(
+      { ...press, button: "home", prePress: unlockedObservation("x") },
+      registry,
+    );
+    recordIosAppBeforePowerPress(
+      { ...press, pressSucceeded: false, prePress: unlockedObservation("x") },
+      registry,
+    );
+    expect(registry.take(iosDevice.deviceId)).toBe(PLAYGROUND);
+  });
+
+  test("simctl restore activates the app by bundle id and turns a failure into a warning", async () => {
+    const commands: string[][] = [];
+    let fail = false;
+    const restorer = new SimctlIosForegroundRestorer(iosDevice.deviceId, {
+      executeCommandArgs: async (args) => {
+        commands.push(args);
+        if (fail) {
+          throw new Error("app not installed");
+        }
+        return createExecResult("", "");
+      },
+    });
+    expect(await restorer.restore(PLAYGROUND, { timeoutMs: 1_000 })).toBeUndefined();
+    fail = true;
+    expect(await restorer.restore(PLAYGROUND, { timeoutMs: 1_000 })).toContain("app not installed");
+    expect(await restorer.restore(PLAYGROUND, { timeoutMs: 0 })).toContain("no time remained");
+    expect(commands).toEqual([
+      ["launch", iosDevice.deviceId, PLAYGROUND],
+      ["launch", iosDevice.deviceId, PLAYGROUND],
+    ]);
+  });
+});

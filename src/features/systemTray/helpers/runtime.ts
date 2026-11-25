@@ -31,6 +31,7 @@ import {
 } from "../notificationHints";
 import type { SystemTrayCall, SystemTrayNotificationArgs } from "../systemTrayTypes";
 import { hasIosAppNotificationCoverSheet } from "../IosNotificationUIDetector";
+import { IOS_FOREGROUND_RESTORE_MAX_MS } from "../../action/IosForegroundRestore";
 import { getDetector, getSystemTrayDependencies, type SystemTrayObserver } from "./dependencies";
 import {
   collectNotificationCandidates,
@@ -351,6 +352,8 @@ export const ensureSystemTrayClosed = async (
   closed: boolean;
   skipped: boolean;
   minTimestamp: number;
+  /** The app behind an iOS cover sheet could not be brought back to the front (#19231). */
+  warning?: string;
 }> => {
   const { observeScreenFactory } = getSystemTrayDependencies();
   const detector = getDetector(device, signal);
@@ -394,13 +397,71 @@ export const ensureSystemTrayClosed = async (
     signal,
     isClosed,
   });
+  const closedObservation = awaitedObservation ?? observation;
+  const closed = isClosed(closedObservation);
+  const closedResult = { observation: closedObservation, closed, skipped: false, minTimestamp };
+  return closed && appCoverSheetPackage
+    ? {
+        ...closedResult,
+        ...(await restoreAppBehindCoverSheet(device, appCoverSheetPackage, closedObservation, {
+          observeScreen,
+          awaitTimeoutMs,
+          signal,
+          isClosed,
+        })),
+      }
+    : closedResult;
+};
 
-  return {
-    observation: awaitedObservation ?? observation,
-    closed: isClosed(awaitedObservation ?? observation),
-    skipped: false,
-    minTimestamp,
-  };
+/**
+ * Home closes an app-owned Notification Center but lands on the home screen (#19231). Bring
+ * the app that was behind the cover sheet back to the front and observe it there.
+ */
+const restoreAppBehindCoverSheet = async (
+  device: BootedDevice,
+  appId: string,
+  closedObservation: ObserveResult,
+  {
+    observeScreen,
+    awaitTimeoutMs,
+    signal,
+    isClosed,
+  }: {
+    observeScreen: SystemTrayObserver;
+    awaitTimeoutMs: number;
+    signal?: AbortSignal;
+    isClosed: (observation: ObserveResult) => boolean;
+  },
+): Promise<{ observation?: ObserveResult; minTimestamp?: number; warning?: string }> => {
+  if (closedObservation.activeWindow?.appId === appId) {
+    return {};
+  }
+  const { iosForegroundRestorerFactory } = getSystemTrayDependencies();
+  const restorer = iosForegroundRestorerFactory?.(device);
+  if (!restorer) {
+    return {};
+  }
+  throwIfAborted(signal);
+  const warning = await awaitWhileRequestIsLive(
+    restorer.restore(appId, { timeoutMs: IOS_FOREGROUND_RESTORE_MAX_MS, signal }),
+    signal,
+  );
+  if (warning) {
+    return { warning };
+  }
+  const detector = getDetector(device, signal);
+  const minTimestamp = await awaitWhileRequestIsLive(detector.getObservationTimestamp(), signal);
+  const observation = await waitForSystemTrayClosed(observeScreen, minTimestamp, {
+    awaitTimeoutMs,
+    signal,
+    isClosed: (candidate) => isClosed(candidate) && candidate.activeWindow?.appId === appId,
+  });
+  if (observation.activeWindow?.appId === appId) {
+    return { observation, minTimestamp };
+  }
+  const notBack = `${appId} did not come back to the front after Notification Center closed; call launchApp to return to it`;
+  logger.warn(`[systemTray] ${notBack}`);
+  return { observation, minTimestamp, warning: notBack };
 };
 
 // Collect every text/content-desc string inside a candidate notification row's

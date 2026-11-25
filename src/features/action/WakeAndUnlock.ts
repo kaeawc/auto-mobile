@@ -17,6 +17,14 @@ import {
   defaultAdbClientFactory,
 } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import {
+  IOS_FOREGROUND_RESTORE_MAX_MS,
+  iosPreLockForeground,
+  SimctlIosForegroundRestorer,
+  type IosForegroundRestorer,
+  type IosPreLockForegroundRegistry,
+} from "./IosForegroundRestore";
 
 import type { LockCredentialStore, WakeAndUnlockResult } from "../../models/WakeAndUnlock";
 export type {
@@ -73,6 +81,9 @@ export interface WakeAndUnlockOptions {
   iosRunnerRecovery?: IosRunnerRecovery;
   iosLockStateProbe?: IosLockStateProbe;
   iosLockStateInvalidator?: IosLockStateInvalidator;
+  /** The app in front before `pressButton power` locked the simulator (#19231). */
+  iosPreLockForeground?: IosPreLockForegroundRegistry;
+  iosForegroundRestorer?: IosForegroundRestorer;
 }
 
 // The daemon's default MCP request timeout is 30s (src/daemon/mcpRequestTimeout.ts:25).
@@ -110,6 +121,8 @@ export class WakeAndUnlock {
   private readonly iosUnlocker?: IosScreenUnlocker;
   private readonly iosRunnerRecovery?: IosRunnerRecovery;
   private readonly iosLockStateProbe?: IosLockStateProbe;
+  private readonly iosPreLockForeground: IosPreLockForegroundRegistry;
+  private readonly iosForegroundRestorer: () => IosForegroundRestorer;
 
   constructor(
     device: BootedDevice,
@@ -128,6 +141,10 @@ export class WakeAndUnlock {
       device.platform === "ios"
         ? (options.iosLockStateProbe ?? new NotifyutilIosLockStateProbe())
         : undefined;
+    this.iosPreLockForeground = options.iosPreLockForeground ?? iosPreLockForeground;
+    this.iosForegroundRestorer = () =>
+      options.iosForegroundRestorer ??
+      new SimctlIosForegroundRestorer(device.deviceId, new SimCtlClient(device));
   }
 
   /**
@@ -196,6 +213,10 @@ export class WakeAndUnlock {
     }
     const simulator = resolveIosDeviceKind({ deviceId: this.device.deviceId }) === "simulator";
     const deadline = this.iosUnlockDeadline(transportDeadlineMs);
+    // Taken even when already unlocked: a record from an earlier lock must not outlive it.
+    const appBeforeLock = simulator
+      ? this.iosPreLockForeground.take(this.device.deviceId)
+      : undefined;
     if (simulator) {
       const initialLock = await this.readIosLockState(deadline, signal);
       if (!initialLock) {
@@ -241,7 +262,47 @@ export class WakeAndUnlock {
         ? this.iosResult(true, false)
         : this.iosResult(false, false, result.error);
     }
-    return this.finishIosUnlock({ result, stageLock, deadline, signal });
+    const unlocked = await this.finishIosUnlock({ result, stageLock, deadline, signal });
+    return this.restoreAppBeforeLock(unlocked, appBeforeLock, deadline, signal);
+  }
+
+  /**
+   * Every simulator unlock path wakes through SpringBoard, which lands on the home screen and
+   * backgrounds the app that was in front before the lock (#19231). Bring that app back after a
+   * verified unlock; a failure is a warning, since the device is unlocked either way.
+   */
+  private async restoreAppBeforeLock(
+    result: WakeAndUnlockResult,
+    appId: string | undefined,
+    deadline: number,
+    signal?: AbortSignal,
+  ): Promise<WakeAndUnlockResult> {
+    if (!result.success || !appId) {
+      return result;
+    }
+    const timeoutMs = Math.min(IOS_FOREGROUND_RESTORE_MAX_MS, deadline - this.timer.now());
+    let warning: string | undefined;
+    try {
+      warning =
+        timeoutMs <= 0
+          ? `${appId} was left in the background: no time remained to bring it back to the front; call launchApp to return to it`
+          : await raceWithDeadline(
+              () => this.iosForegroundRestorer().restore(appId, { timeoutMs, signal }),
+              {
+                timer: this.timer,
+                signal,
+                timeoutMs,
+                label: `bringing ${appId} back to the front`,
+              },
+            );
+    } catch (error) {
+      throwIfAborted(signal);
+      warning = `${appId} was left in the background: bringing it back to the front failed (${errorMessage(error)}); call launchApp to return to it`;
+      logger.warn(`[WakeAndUnlock] ${warning}`, error);
+    }
+    return warning
+      ? { ...result, warning: [result.warning, warning].filter(Boolean).join("; ") }
+      : result;
   }
 
   private async finishIosUnlock({

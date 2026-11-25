@@ -4538,6 +4538,93 @@ describe("iOS systemTray open/close", () => {
       },
     );
 
+    test.each([
+      ["restored", undefined],
+      ["restore failed", "com.apple.Preferences was left in the background"],
+    ] satisfies Array<[string, string | undefined]>)(
+      "close over Settings that lands on SpringBoard brings Settings back (%s) (#19231)",
+      async (_name, restoreWarning) => {
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        const settingsId = ios26TrayOpenSettings.viewHierarchy!.packageName!;
+        const springBoard: ObserveResult = {
+          ...createIosObservation(capturedIosHomeIconHierarchy),
+          deviceLock: { locked: false, keyguardShowing: false },
+          activeWindow: { appId: "com.apple.springboard", activityName: "", layoutSeqSum: 0 },
+        };
+        let homeCalls = 0;
+        const restores: Array<{ appId: string; timeoutMs: number }> = [];
+        observer.setObserveResult(() =>
+          restores.length > 0 && !restoreWarning
+            ? ios26SettingsClosed
+            : homeCalls > 0
+              ? springBoard
+              : ios26TrayOpenSettings,
+        );
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          pressHomeFactory: async () => {
+            homeCalls++;
+            return { success: true };
+          },
+          iosForegroundRestorerFactory: () => ({
+            restore: async (appId, { timeoutMs }) => {
+              restores.push({ appId, timeoutMs });
+              return restoreWarning;
+            },
+          }),
+          observeScreenFactory: () => observer,
+        });
+        const result = await new SystemTray(iosDevice).execute({
+          action: "close",
+          awaitTimeout: 500,
+        });
+        expect(result.payload.success).toBe(true);
+        expect(result.payload.message).toBe("Closed system tray (collapsed notification shade)");
+        expect(restores).toEqual([{ appId: settingsId, timeoutMs: 5_000 }]);
+        const observation = result.payload.observation as ObserveResult | undefined;
+        expect(observation?.activeWindow?.appId).toBe(
+          restoreWarning ? "com.apple.springboard" : settingsId,
+        );
+        expect(result.payload.warnings).toEqual(restoreWarning ? [restoreWarning] : undefined);
+      },
+    );
+
+    test("close over Settings that returns to Settings restores nothing (#19231)", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const observer = new FakeObserveScreen();
+      let homeCalls = 0;
+      let restores = 0;
+      observer.setObserveResult(() =>
+        homeCalls > 0 ? ios26SettingsClosed : ios26TrayOpenSettings,
+      );
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => new FakeIosClient(),
+        pressHomeFactory: async () => {
+          homeCalls++;
+          return { success: true };
+        },
+        iosForegroundRestorerFactory: () => ({
+          restore: async () => {
+            restores++;
+            return undefined;
+          },
+        }),
+        observeScreenFactory: () => observer,
+      });
+      const result = await new SystemTray(iosDevice).execute({
+        action: "close",
+        awaitTimeout: 500,
+      });
+      expect(result.payload.success).toBe(true);
+      expect(restores).toBe(0);
+    });
+
     test.each([2, 3, undefined])(
       "open bounds settling reads when the first read exhausts the timeout (opens at %s)",
       async (opensAt) => {

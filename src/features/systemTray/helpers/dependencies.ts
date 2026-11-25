@@ -31,6 +31,12 @@ import {
 import { SearchableHierarchy } from "../../utility/SearchableNode";
 import { createNotificationUIDetector } from "../createNotificationUIDetector";
 import type { IosGestureResult } from "../IosNotificationUIDetector";
+import {
+  SimctlIosForegroundRestorer,
+  type IosForegroundRestorer,
+} from "../../action/IosForegroundRestore";
+import { resolveIosDeviceKind } from "../../../utils/ios-cmdline-tools/IosDeviceKind";
+import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
 
 const SYSTEM_TRAY_RETRY_INITIAL_DELAY_MS = 250;
 const SYSTEM_TRAY_RETRY_MAX_DELAY_MS = 1000;
@@ -73,6 +79,8 @@ export interface SystemTrayDependencies {
   iosLockStateInvalidator?: IosLockStateInvalidator;
   pressHomeFactory?: (device: BootedDevice, signal?: AbortSignal) => Promise<IosGestureResult>;
   pressButtonFactory?: (device: BootedDevice) => Pick<PressButton, "execute">;
+  /** Brings the app back after Home closes an app-owned Notification Center (#19231). */
+  iosForegroundRestorerFactory?: (device: BootedDevice) => IosForegroundRestorer | undefined;
   timer: Timer;
   /** Delay between retries of a transiently failing pre-swipe clearAll step. */
   backoff: BackoffPolicy;
@@ -142,6 +150,11 @@ export const getSystemTrayDependencies = (): SystemTrayDependencies => {
         const result = await factory(device).execute("home", { signal });
         return pressHomeResultToIosGestureResult(result);
       },
+      iosForegroundRestorerFactory: (device) =>
+        device.platform === "ios" &&
+        resolveIosDeviceKind({ deviceId: device.deviceId }) === "simulator"
+          ? new SimctlIosForegroundRestorer(device.deviceId, new SimCtlClient(device))
+          : undefined,
       timer: defaultTimer,
       backoff: defaultSystemTrayBackoff,
       postedNotifications: defaultPostedNotificationLedger,
@@ -153,6 +166,14 @@ export const getSystemTrayDependencies = (): SystemTrayDependencies => {
   return systemTrayDependencies;
 };
 
+const mergedForegroundRestorer = (
+  overrides: Partial<SystemTrayDependencies>,
+  current: SystemTrayDependencies,
+): Pick<SystemTrayDependencies, "iosForegroundRestorerFactory"> => ({
+  iosForegroundRestorerFactory:
+    overrides.iosForegroundRestorerFactory ?? current.iosForegroundRestorerFactory,
+});
+
 export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependencies>): void => {
   const current = getSystemTrayDependencies();
   systemTrayDependencies = {
@@ -162,6 +183,7 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
     iosLockStateInvalidator: overrides.iosLockStateInvalidator ?? current.iosLockStateInvalidator,
     pressHomeFactory: overrides.pressHomeFactory ?? current.pressHomeFactory,
     pressButtonFactory: overrides.pressButtonFactory ?? current.pressButtonFactory,
+    ...mergedForegroundRestorer(overrides, current),
     timer: overrides.timer ?? current.timer,
     backoff: overrides.backoff ?? current.backoff,
     postedNotifications: overrides.postedNotifications ?? current.postedNotifications,

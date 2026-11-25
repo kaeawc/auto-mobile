@@ -42,6 +42,7 @@ import {
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { combineWithAmbientAbort } from "../../utils/AbortContext";
 import { HomeScreen } from "./HomeScreen";
+import { recordIosAppBeforePowerPress } from "./IosForegroundRestore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import type { SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { resolveActionCall, type ActionCall } from "./ActionCall";
@@ -309,6 +310,13 @@ export class PressButton extends BaseVisualChange {
       return pressed;
     }, options);
     acceptIosHomeAlreadyOnSpringboard(result, startedOnFallbackSpringboard);
+    recordIosAppBeforePowerPress({
+      device: this.device,
+      button,
+      pressSucceeded,
+      durationMs,
+      prePress,
+    });
     acceptVerifiedAlreadyOpenSwitcher(result, verifiedAlreadyOpen);
     await acceptHomeAlreadyOnLauncher(
       { button, displayId, pressSucceeded, launcherVerified, result, observation: prePress },

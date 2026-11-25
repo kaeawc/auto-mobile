@@ -15,7 +15,7 @@
   "material_app_bar_dialog_pickers": 4774,
   "material_app_bar_dialog_pickers_dark": 4362,
   "material_controls": 2279,
-  "material_slider_chip_card": 8029,
+  "material_slider_chip_card": 8022,
   "repeat": 1113,
   "repeat_component_labels": 30599,
   "repeat_state_keys": 22800,
@@ -40,8 +40,8 @@
   "theme_seed": 23,
   "theme_seed_color_roles": 354,
   "theme_seed_controls": 2231,
-  "theme_seed_slider_chip_card": 35228,
+  "theme_seed_slider_chip_card": 11638,
   "theme_typography_shapes": 29,
   "theme_typography_shapes_controls": 4382,
-  "theme_typography_shapes_slider_chip_card": 8397
+  "theme_typography_shapes_slider_chip_card": 8395
 }

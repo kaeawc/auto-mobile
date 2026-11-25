@@ -790,6 +790,16 @@ const toggle =
     );
   };
 
+/**
+ * A card's container role per variant, as CardDefaults gives them (#16611): ElevatedCard's
+ * surfaceContainerLow, OutlinedCard's surface, else the filled Card's surfaceContainerHighest.
+ */
+const CARD_FILLED = "surfaceContainerHighest";
+const CARD_CONTAINER_ROLES: Readonly<Record<string, string>> = {
+  elevated: "surfaceContainerLow",
+  outlined: "surface",
+};
+
 const card: NodeRenderer = (raw, scope, path) => {
   // A card hugs its content, but grows like a line around a child that fills; each child carries
   // the height the card's column hands it.
@@ -804,11 +814,7 @@ const card: NodeRenderer = (raw, scope, path) => {
     // The container is a skin metric; the layout is shared.
     ...(scope.skin === "ios"
       ? iosCardChrome(node.variant, scope)
-      : roleCss(
-          scope,
-          node.variant === "outlined" ? "surface" : "surfaceContainerHighest",
-          "onSurface",
-        )),
+      : roleCss(scope, CARD_CONTAINER_ROLES[String(node.variant)] ?? CARD_FILLED, "onSurface")),
   });
   const inner = child(scope, { inBox: false, style: containerChildStyle(scope, node, "column") });
   return el("div", { attrs, style }, children(node, inner, path));

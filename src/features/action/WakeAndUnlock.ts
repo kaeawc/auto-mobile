@@ -51,6 +51,8 @@ export interface IosScreenUnlocker {
     warning?: string;
     /** The swipe was applied and the lock state read locked afterwards: no gesture is pending. */
     stillLocked?: true;
+    /** With stillLocked: whether a second wake (Home press) was made after the swipe. */
+    rewoke?: boolean;
   }>;
 }
 
@@ -82,8 +84,9 @@ const IOS_RECOVERY_WAIT_MS = 20_000;
 // One final simulator probe can use a small part of the response headroom when
 // recovery consumes the unlock deadline. Never extend gesture/recovery budgets.
 const IOS_RECOVERY_LOCK_PROBE_GRACE_MS = 250;
-const IOS_UNLOCK_POLL_INTERVAL_MS = 250;
-const IOS_UNLOCK_POLL_MAX_MS = 2_500;
+/** Lock-state settle poll: notifyutil lockstate can lag a swipe that did unlock. */
+export const IOS_UNLOCK_POLL_INTERVAL_MS = 250;
+export const IOS_UNLOCK_POLL_MAX_MS = 2_500;
 
 /**
  * Wake and (if needed) unlock a device — the cross-platform capability behind the
@@ -246,7 +249,13 @@ export class WakeAndUnlock {
     deadline,
     signal,
   }: {
-    result: { success: boolean; error?: string; warning?: string; stillLocked?: true };
+    result: {
+      success: boolean;
+      error?: string;
+      warning?: string;
+      stillLocked?: true;
+      rewoke?: boolean;
+    };
     stageLock?: DeviceLockState;
     deadline: number;
     signal?: AbortSignal;
@@ -268,6 +277,7 @@ export class WakeAndUnlock {
             deadline,
             swipeFailure,
             stillLocked: result.stillLocked === true,
+            rewoke: result.rewoke === true,
             signal,
             lastLock: result.warning ? undefined : stageLock,
           });
@@ -329,6 +339,7 @@ export class WakeAndUnlock {
     deadline,
     swipeFailure,
     stillLocked = false,
+    rewoke = false,
     signal,
     lastLock,
   }: {
@@ -336,6 +347,8 @@ export class WakeAndUnlock {
     swipeFailure: string | undefined;
     /** No gesture is in flight, so only the short settle window applies. */
     stillLocked?: boolean;
+    /** With stillLocked: a second wake was made after the swipe. */
+    rewoke?: boolean;
     signal?: AbortSignal;
     lastLock?: DeviceLockState;
   }): Promise<WakeAndUnlockResult> {
@@ -366,9 +379,7 @@ export class WakeAndUnlock {
       );
       return {
         ...this.iosResult(true, true),
-        warning: stillLocked
-          ? "the lock screen dismissed late, after a second wake; the device is unlocked"
-          : `the lock-screen swipe did not complete (${swipeFailure}); the device is unlocked`,
+        warning: lateUnlockWarning(swipeFailure, stillLocked, rewoke),
       };
     }
     return this.iosResult(true, true);
@@ -490,4 +501,13 @@ export class WakeAndUnlock {
     }
     return lastReadable;
   }
+}
+
+function lateUnlockWarning(swipeFailure: string, stillLocked: boolean, rewoke: boolean): string {
+  if (!stillLocked) {
+    return `the lock-screen swipe did not complete (${swipeFailure}); the device is unlocked`;
+  }
+  return rewoke
+    ? "the lock screen dismissed late, after a second wake; the device is unlocked"
+    : "the lock screen dismissed late, after the swipe; the device is unlocked";
 }

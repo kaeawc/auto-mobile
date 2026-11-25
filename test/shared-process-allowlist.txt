@@ -1588,7 +1588,6 @@ test/plan/planExecutorParallelFailureSelection.test.ts
 test/plan/planExecutorParallelStartStep.test.ts
 test/plan/planExecutorStepExpectations.test.ts
 test/plan/planExecutorTapOnDebug.test.ts
-test/plan/planExecutorToolResults.test.ts
 test/plan/planExecutorUnsupportedResult.test.ts
 test/plan/planExecutorValidationError.test.ts
 test/plan/planStepSecretRedaction.test.ts

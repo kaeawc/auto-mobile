@@ -1,7 +1,10 @@
-import { expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { AndroidDisposableAppAttacher } from "../../src/features/prototype/disposableApp/android/AndroidDisposableAppAttacher";
 import { FileDisposableAppRegistry } from "../../src/features/prototype/disposableApp/DisposableAppRegistry";
-import { createPrototypeToolRuntime } from "../../src/server/prototypeTools/runtime";
+import {
+  createPrototypeToolRuntime,
+  disposeDaemonPrototypeHostForTesting,
+} from "../../src/server/prototypeTools/runtime";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeDisposableAppAdb, FakeDisposableAppSocket } from "../fakes/FakeDisposableAppAttach";
 import { FakePrototypeAgentConnector } from "../fakes/FakePrototypeAgentSocket";
@@ -11,6 +14,11 @@ import { InMemoryDisposableAppRegistryStore } from "../fakes/InMemoryDisposableA
 import { drainUntil } from "../helpers/fakeTimerStepping";
 import { event } from "../helpers/prototypeTestEvent";
 import { toolStructured } from "../helpers/toolResponse";
+
+// The shared host keeps the attacher of the registration that created it, so a host another file
+// left installed would replace this file's fake attacher with the real one (#19237).
+beforeEach(disposeDaemonPrototypeHostForTesting);
+afterEach(disposeDaemonPrototypeHostForTesting);
 
 const device = { name: "fake", deviceId: "attach-host", platform: "android" as const };
 async function setup() {

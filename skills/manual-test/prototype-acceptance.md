@@ -190,6 +190,29 @@ Platform notes to record:
 - **API 37.** On an Android 17 image, a local-network `ws://` URL without
   `ACCESS_LOCAL_NETWORK` fails with a message naming that permission.
 
+## Camera and media (#14196)
+
+Run on an Android emulator (API 36 Playground) and an iOS Simulator; record PASS/FAIL per leg and
+platform. Each leg has a precondition: the device advertises the listed capabilities in
+`prototype status`. If it does not, `show` is refused before anything is sent: record BLOCKED
+with the missing capability, not FAIL. Setup and assertion limits per runtime are in
+`docs/how-it-works/prototype-camera-media.md`; prefer `simulate` over driving system UI.
+
+**Seed.** Copy two PNGs with distinct bytes to the host, e.g. `/tmp/media/a.png` and
+`/tmp/media/b.png`, then `putAppFile {target:{domain:"media_library"}, files:[{sourcePath,
+destinationPath}]}` for each. Android: MediaStore lists both. iOS: Photos shows both.
+
+| Leg             | Spec and precondition                                                                                                                   | Do                                                                                                                                                                                                      | Expect (ground truth)                                                                                                                                                                                                                             |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pick and upload | `concept-post-photo` (#14272); `prototype_platform_mediaLibrary_v1`, `prototype_platform_media_items_v1`, `prototype_network_upload_v1` | Define a mock backend with a `POST /upload` route; `simulate {call:"mediaLibrary.pick", outcome:{result:{files:["/tmp/media/a.png","/tmp/media/b.png"]}}}`, tap **Pick**, enter a caption, tap **Post** | `/data/draft/picked` holds two `media:` items in pick order; `backendLog` has one `POST /upload` with two file parts and the caption; compare each part's sha256 with the host file where the log carries part bytes, otherwise record part sizes |
+| Cancel          | Same spec                                                                                                                               | `simulate {call:"mediaLibrary.pick", outcome:{error:{code:"cancelled"}}}`, tap **Pick**                                                                                                                 | `into` unchanged; `onError` ran with `cancelled`; `statusKey` is `error`                                                                                                                                                                          |
+| Scan ticket     | `concept-scan-ticket` (#14193); Android only: `setDeviceState {cameraPoster:{mode:"qr",text:"ticket-42"}}`                              | Tap **Scan**                                                                                                                                                                                            | `/data` holds `ticket-42`. iOS Simulator has no camera: record the library-image fallback instead                                                                                                                                                 |
+| Voice note      | `concept-voice-note`; `prototype_platform_audioRecorder_v1`, microphone granted                                                         | Tap **Record**, `injectAudioInput {tone:{frequencyHz:1000,durationMs:2000}}`, tap **Stop**                                                                                                              | A recording item with `durationMs` near 2000 lands in `/data`; **Cancel** instead leaves `/data` unchanged                                                                                                                                        |
+
+Today no runtime advertises `mediaLibrary`, `camera` or `audioRecorder`, and the host refuses a
+`{result:{files}}` simulate outcome until device media injection (#14192) exists, so every leg is
+BLOCKED; the table is what to run once they land.
+
 ## Cleanup
 
 Run `proxy1 release --client NAME` then `proxy1 close --client NAME`, or

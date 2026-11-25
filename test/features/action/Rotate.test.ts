@@ -20,6 +20,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeWearOsDetector } from "../../fakes/FakeWearOsDetector";
 import { FakeAndroidTvDetector } from "../../fakes/FakeAndroidTvDetector";
+import { FakeAndroidAutomotiveDetector } from "../../fakes/FakeAndroidAutomotiveDetector";
 import { WINDOW_MANAGER_ROTATION_TIMEOUT_MS } from "../../../src/utils/android-cmdline-tools/readWindowManagerRotation";
 import { readFileSync } from "fs";
 import { join } from "path";
@@ -109,6 +110,7 @@ describe("Rotate", () => {
         xrDetector: new FakeAndroidXrDetector(),
         wearOsDetector: new FakeWearOsDetector(),
         tvDetector: new FakeAndroidTvDetector(),
+        automotiveDetector: new FakeAndroidAutomotiveDetector(),
       },
       collaborators: {
         awaitIdle: fakeAwaitIdle,

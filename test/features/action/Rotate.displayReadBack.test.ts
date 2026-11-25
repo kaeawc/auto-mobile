@@ -16,6 +16,7 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeWearOsDetector } from "../../fakes/FakeWearOsDetector";
 import { FakeAndroidTvDetector } from "../../fakes/FakeAndroidTvDetector";
+import { FakeAndroidAutomotiveDetector } from "../../fakes/FakeAndroidAutomotiveDetector";
 import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -56,6 +57,7 @@ function setup() {
         xrDetector: new FakeAndroidXrDetector(),
         wearOsDetector: new FakeWearOsDetector(),
         tvDetector: new FakeAndroidTvDetector(),
+        automotiveDetector: new FakeAndroidAutomotiveDetector(),
       },
     }),
   };
@@ -186,6 +188,7 @@ describe("Rotate on a default display that ignores user_rotation (am-flip-6p7 O1
         xrDetector: new FakeAndroidXrDetector(),
         wearOsDetector: new FakeWearOsDetector(),
         tvDetector: new FakeAndroidTvDetector(),
+        automotiveDetector: new FakeAndroidAutomotiveDetector(),
       },
     });
     const observe = new FakeObserveScreen();

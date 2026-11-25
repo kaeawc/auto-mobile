@@ -10,6 +10,7 @@ import {
   type AndroidTvDetector,
 } from "../../../src/utils/android-cmdline-tools/androidTvDevice";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAndroidAutomotiveDetector } from "../../fakes/FakeAndroidAutomotiveDetector";
 import { FakeAndroidTvDetector } from "../../fakes/FakeAndroidTvDetector";
 import { FakeAndroidXrDetector } from "../../fakes/FakeAndroidXrDetector";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -39,7 +40,12 @@ function setup(
   const rotate = new Rotate(device, {
     adb,
     timer,
-    options: { xrDetector: new FakeAndroidXrDetector(false), wearOsDetector, tvDetector },
+    options: {
+      xrDetector: new FakeAndroidXrDetector(false),
+      wearOsDetector,
+      tvDetector,
+      automotiveDetector: new FakeAndroidAutomotiveDetector(false),
+    },
     collaborators: { awaitIdle, observeScreen, window: new FakeWindow() },
   });
   return { adb, timer, awaitIdle, observeScreen, rotate };

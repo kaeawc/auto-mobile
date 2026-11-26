@@ -6,6 +6,7 @@ import {
   defaultStatusBarOverrideRegistry,
   type StatusBarOverrideStore,
 } from "../features/utility/StatusBarOverrideRegistry";
+import { defaultPowerRegistry, type PowerRegistry } from "../features/utility/power/PowerRegistry";
 import { runOutsideRequestContext } from "../utils/AbortContext";
 import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
@@ -21,6 +22,34 @@ export interface StatusBarSessionCleanupOptions {
   registry?: StatusBarOverrideStore;
   controllerFor?: StatusBarControllerFactory;
   timer?: Timer;
+  /** Where the same release's power restore is found, to order the battery refresh after it. */
+  powerRegistry?: Pick<PowerRegistry, "restoreReport">;
+}
+
+/**
+ * Resolves once `sessionId`'s power restore settles, or when `signal` aborts. The power cleanup
+ * runs on the same release (#14084) and resets or re-fakes the battery; the clear's battery
+ * refresh reads, sets and resets it too, so interleaving them could leave the device faked
+ * (#19189). Release listeners run synchronously, so the restore is registered before this runs.
+ */
+function powerRestoreSettled(
+  powerRegistry: Pick<PowerRegistry, "restoreReport">,
+  sessionId: string,
+  signal: AbortSignal,
+): Promise<void> {
+  const restore = powerRegistry.restoreReport(sessionId);
+  if (!restore || signal.aborted) {
+    return Promise.resolve();
+  }
+  return new Promise<void>((resolve) => {
+    const done = (): void => {
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    signal.addEventListener("abort", done, { once: true });
+    // startPowerRestore already turns a thrown restore into a failed report.
+    void restore.then(done, done);
+  });
 }
 
 /**
@@ -42,6 +71,7 @@ export function registerStatusBarSessionCleanup(
   const registry = options.registry ?? defaultStatusBarOverrideRegistry;
   const controllerFor = options.controllerFor ?? defaultStatusBarControllerFactory;
   const timer = options.timer ?? defaultTimer;
+  const powerRegistry = options.powerRegistry ?? defaultPowerRegistry;
   /**
    * Runs in the registry's device queue, after any status-bar mutation already queued on the
    * device (#17084): the record is read only once that mutation has settled, so a rejected
@@ -65,7 +95,11 @@ export function registerStatusBarSessionCleanup(
     if (!controller) {
       return;
     }
-    await runOutsideRequestContext(() => controller.clear(signal));
+    await runOutsideRequestContext(() =>
+      controller.clear(signal, {
+        beforeBatteryRefresh: () => powerRestoreSettled(powerRegistry, sessionId, signal),
+      }),
+    );
   };
   const cleanup = (
     sessionId: string,

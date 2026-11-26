@@ -7,6 +7,18 @@ import { StatusBarRequestRejectedError } from "../../src/features/utility/Status
 import { StatusBarOverrideRegistry } from "../../src/features/utility/StatusBarOverrideRegistry";
 import type { BootedDevice } from "../../src/models";
 import { createStatusBarHandler, type StatusBarArgs } from "../../src/server/statusBarTools";
+import { registerPowerSessionCleanup } from "../../src/daemon/powerSessionCleanup";
+import { AndroidDemoModeStatusBarController } from "../../src/features/utility/AndroidDemoModeStatusBarController";
+import { InMemoryDemoAllowedReceipts } from "../../src/features/utility/DemoAllowedReceipts";
+import { AdbPowerClient } from "../../src/features/utility/power/AndroidPowerClient";
+import { createPowerOperations } from "../../src/features/utility/power/PowerOperations";
+import { PowerRegistry } from "../../src/features/utility/power/PowerRegistry";
+import type { ExecResult } from "../../src/models";
+import { defaultDeviceTraits } from "../../src/utils/android-cmdline-tools/deviceTraits";
+import type { AdbExecuteOptions } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { createExecResult } from "../../src/utils/execResult";
+import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
+import { FakePowerAdb } from "../fakes/FakePowerAdb";
 import { FakeSessionCleanupManager } from "../fakes/FakeSessionCleanupManager";
 import { FakeStatusBarController } from "../fakes/FakeStatusBarController";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -192,6 +204,90 @@ describe("release-time clear ordered against a sessionless override on the devic
     await drainMicrotasks(50);
     expect(controller.clears).toBe(0);
     expect(registry.get(DEVICE.deviceId)?.sessionId).toBe("session-1");
+  });
+});
+
+/** Answers the emulator probe; gates the power restore's battery reset (see the test below). */
+class EmulatorPowerAdb extends FakePowerAdb {
+  statusBarReadBattery = false;
+  override async execute(args: string[], options: AdbExecuteOptions = {}): Promise<ExecResult> {
+    const command = args.join(" ");
+    if (command === "shell getprop ro.kernel.qemu") {
+      return createExecResult("1\n", "");
+    }
+    if (command === "shell dumpsys battery reset") {
+      // Give a concurrent status-bar clear every chance to read the session's fake first.
+      for (let turn = 0; turn < 200 && !this.statusBarReadBattery; turn++) {
+        await Promise.resolve();
+      }
+    }
+    return super.execute(args, options);
+  }
+}
+
+describe("status bar clear and power restore on one release (#19189)", () => {
+  test("a session battery fake and a status bar override end with the battery un-faked", async () => {
+    const adb = new EmulatorPowerAdb();
+    const powerRegistry = new PowerRegistry();
+    const powerTimer = new FakeTimer();
+    powerTimer.enableAutoAdvance();
+    const statusBarRegistry = new StatusBarOverrideRegistry();
+    const manager = new FakeSessionCleanupManager();
+    const statusBarAdb = {
+      execute: async (args: string[], options?: AdbExecuteOptions) => {
+        const command = args.join(" ");
+        if (command === "shell dumpsys battery") {
+          adb.statusBarReadBattery = true;
+        }
+        if (command.startsWith("shell dumpsys battery set -f")) {
+          // The worst interleaving: the power restore resets and verifies between this clear's
+          // battery read and its set.
+          await powerRegistry.restoreReport("session-1");
+        }
+        return adb.execute(args, options);
+      },
+    };
+    // Registered in the daemon's release-listener order: status bar first, power later.
+    registerStatusBarSessionCleanup(manager, {
+      registry: statusBarRegistry,
+      controllerFor: (device) =>
+        new AndroidDemoModeStatusBarController(
+          statusBarAdb,
+          device.deviceId,
+          new InMemoryDemoAllowedReceipts(),
+        ),
+      timer: new FakeTimer(),
+      powerRegistry,
+    });
+    const clientFactory = () => new AdbPowerClient(adb);
+    registerPowerSessionCleanup(manager, {
+      registry: powerRegistry,
+      timer: powerTimer,
+      clientFactory,
+    });
+    const ops = createPowerOperations(
+      () => DEVICE,
+      () => new FakeAdbClientFactory(adb),
+      () => defaultDeviceTraits,
+      {
+        timer: () => powerTimer,
+        seams: {
+          clientFactory,
+          registry: powerRegistry,
+          target: async () => ({ isEmulator: true, sdk: 34 }),
+          mutation: (run) => run("session-1"),
+        },
+      },
+    );
+    await ops.write({ battery: { level: 15, charging: "none" } });
+    statusBarRegistry.record(DEVICE, "session-1", { batteryLevel: 50 });
+    expect(adb.battery).toMatchObject({ level: 15, stopped: true });
+
+    manager.release("session-1", DEVICE.deviceId);
+    await manager.settle();
+
+    expect(await powerRegistry.restoreReport("session-1")).toMatchObject({ status: "restored" });
+    expect(adb.battery).toMatchObject({ level: 100, stopped: false });
   });
 });
 

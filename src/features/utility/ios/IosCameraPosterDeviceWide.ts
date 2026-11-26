@@ -2,7 +2,6 @@ import { Mutex } from "async-mutex";
 import type { ExecResult } from "../../../models";
 import { ActionableError } from "../../../models/ActionableError";
 import { mergeDyldInsertLibraries } from "../../prototype/ios/prototypeAgentInjection";
-import { SingleFlight } from "../../../utils/cache/SingleFlight";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
@@ -77,8 +76,10 @@ export function withoutGate(value: string, gate?: string): string {
  * re-applies a poster the registry still holds.
  */
 export class IosCameraPosterDeviceWide {
-  private readonly deactivations = new SingleFlight<string, void>();
-  /** Activation and deactivation of one simulator never interleave (#19119). */
+  /**
+   * Activation and deactivation of one simulator never interleave and run in call order: each
+   * call queues for the lock synchronously (#19119). A second clear finds no record and returns.
+   */
   private readonly locks = new Map<string, Mutex>();
 
   private readonly simctl: PosterSimctlRunner;
@@ -133,9 +134,7 @@ export class IosCameraPosterDeviceWide {
    * the poster variables. A simulator with no recorded activation is left alone.
    */
   deactivate(udid: string, signal?: AbortSignal): Promise<void> {
-    return this.deactivations.run(udid, () =>
-      this.exclusive(udid, () => this.runDeactivate(udid, signal)),
-    );
+    return this.exclusive(udid, () => this.runDeactivate(udid, signal));
   }
 
   /** A boot reset the launchd environment: re-apply the poster the registry still holds. */
@@ -181,6 +180,7 @@ export class IosCameraPosterDeviceWide {
     }
   }
 
+  /** Queues `action` for the simulator's lock before returning, so the lock order is the call order. */
   private exclusive(udid: string, action: () => Promise<void>): Promise<void> {
     let lock = this.locks.get(udid);
     if (!lock) {

@@ -49,8 +49,8 @@ of each app without another launchd change.
 
 Each activation is recorded in `ios-camera-poster-active/devices/<udid>.json`
 (`IosCameraPosterActivationStore`): the gate path. A record that cannot be read counts as no
-activation and is deleted. Activation and deactivation of one simulator run one at a time, so a
-clear during an activation waits for it and then undoes it. Every clear path (`setDeviceState`
+activation and is deleted. Activation and deactivation of one simulator run one at a time, in the
+order they were called, so a clear during an activation waits for it and then undoes it. Every clear path (`setDeviceState`
 clear, `killDevice`, session release or rebind) goes through the registry, which then calls
 `deactivate`. It removes only the gate entry from `DYLD_INSERT_LIBRARIES`, keeping any other
 inserted library, or unsets the variable when nothing else is left. It then unsets both poster

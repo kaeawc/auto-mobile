@@ -235,6 +235,42 @@ test("a clear during an in-flight activation waits for it and then removes the g
   expect(h.simctl.env.size).toBe(0);
 });
 
+test("activate, clear, activate, clear during a held activation ends with no gate (#19119)", async () => {
+  const h = setup();
+  let releasePoster!: () => void;
+  const posterReady = new Promise<void>((resolve) => {
+    releasePoster = resolve;
+  });
+  const ensure = h.poster.ensure.bind(h.poster);
+  h.poster.ensure = async () => {
+    await posterReady;
+    return ensure();
+  };
+  const first = h.deviceWide.activate(udid);
+  const firstClear = h.deviceWide.deactivate(udid);
+  // The first clear is queued for the lock before the second activation and clear arrive.
+  await Promise.resolve();
+  await Promise.resolve();
+  const second = h.deviceWide.activate(udid);
+  const secondClear = h.deviceWide.deactivate(udid);
+  releasePoster();
+  await Promise.all([first, firstClear, second, secondClear]);
+  expect(h.store.read(udid)).toBeUndefined();
+  expect(h.simctl.env.size).toBe(0);
+});
+
+test("a clear and an activation called in the same tick run in call order (#19119)", async () => {
+  const h = setup();
+  await h.deviceWide.activate(udid);
+  const clear = h.deviceWide.deactivate(udid);
+  const activation = h.deviceWide.activate(udid);
+  await Promise.all([clear, activation]);
+  // The activation was called last, so the poster stays on.
+  expect(h.store.read(udid)).toEqual({ gate: stableGate });
+  expect(h.simctl.env.get("DYLD_INSERT_LIBRARIES")).toBe(stableGate);
+  expect(h.simctl.env.get("AM_CAMERA_POSTER_DYLIB")).toBe("/camera/libAMCameraPoster.dylib");
+});
+
 test("a library that cannot be built fails before launchd is touched", async () => {
   const h = setup();
   h.gate.error = new Error("no clang");

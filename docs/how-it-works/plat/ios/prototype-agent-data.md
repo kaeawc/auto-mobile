@@ -129,7 +129,8 @@ before validation. Image loads dial checked public IP addresses and verify the c
 before sending. Loads the framework performs drop authorization, cookie and referer headers, and
 revalidate every redirect hop against the image policy, with at most five hops. With an embedded
 `deviceClient`, image loads go to the app's client after the first URL check, and that client owns
-headers and redirects. Public HTTPS destinations are allowed; literal loopback HTTP requires
+headers and redirects. That check does not resolve the host, so the app's client must enforce DNS
+and redirect egress policy itself. Public HTTPS destinations are allowed; literal loopback HTTP requires
 a DEBUG or ProtoViewer development build plus an explicit cleartext configuration. Images refuse
 private addresses, and refuse daemon ports on loopback and private addresses (a public host may use them). ProtoViewer shares its request consent gate with image loads.
 

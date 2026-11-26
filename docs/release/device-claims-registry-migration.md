@@ -11,8 +11,9 @@ that succeeds only while no live daemon holds the row. For this release the winn
 allocation claim file, so a daemon that cannot use the table at that moment (a registry still
 opening, a busy write, a failed open) and falls back to the claim files still sees the claim. The
 release after this one stops writing claim files and stops reading them. Claim files alone decide
-for watchOS and tvOS (the table does not admit those platforms yet) and whenever no registry can
-decide (none open, a files-only daemon, a failed write).
+for watchOS and tvOS (the table does not admit those platforms yet) and whenever the registry
+leaves a claim to them (no registry file, a files-only daemon, or a registry that still needs this
+release's migrations or has an unknown schema).
 
 ## Mixed versions are unsupported
 
@@ -54,7 +55,9 @@ Live multi-daemon acceptance on a shared adb server is tracked in #15542 (`needs
   during startup recovery, a claim that finds no open registry opens an existing registry file
   itself, without migrating it, and the same refusal applies whenever a registry file exists,
   unless the registry still needs this release's migrations or has a schema this daemon does not
-  know. With no registry file, the claim files decide. A refused recovery claim keeps its
+  know. During the retry backoff after a failed open (1 s doubling to 30 s), the last open failure
+  decides, even if another daemon has since migrated the registry. With no registry file, the claim
+  files decide. A refused recovery claim keeps its
   session pending and retries within the session's recovery window, so a registry that stays
   unusable before bind can delay the socket bind by up to the 15 s startup rehydration deadline.
 - A row without a recorded control socket (written by an early build or while no socket was bound) is

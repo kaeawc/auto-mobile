@@ -260,11 +260,11 @@ The bounds are named contract limits (`MAX_PROTOTYPE_NOTIFICATION_*`,
 checks literal values only. The device runtime that posts the notification enforces the resolved
 limits, and only the per-prototype iOS Viewer posts notifications.
 
-| Resolved limit | Value                                                          |
-| -------------- | -------------------------------------------------------------- |
-| Reply          | At most 1 KiB                                                  |
-| Notification   | At most 5 KiB                                                  |
-| Update rate    | At most 4 per second per notification, coalesced to the latest |
+| Resolved limit | Value                                                                  |
+| -------------- | ---------------------------------------------------------------------- |
+| Reply          | At most 1 KiB                                                          |
+| Notification   | At most 5 KiB                                                          |
+| Update rate    | At most 4 per second per notification; a fifth is `too_many_in_flight` |
 
 The iOS Viewer posts local notifications under its own bundle identity and advertises both
 `prototype_platform_notifications_v1` and `prototype_platform_notifications_scheduled_v1`, so
@@ -282,9 +282,9 @@ Kotlin and Swift `PrototypeNotificationsReport` twins replay
 `test/fixtures/prototype-notifications/report.json`. No runtime sends the report yet, so `status` and
 `inspect` do not show it.
 
-Title and body limits count UTF-16 code units. The 5 KiB total counts UTF-8 bytes of the resolved
-title, body and `data`, and fails the call on its own (`invalid_args` when over). A code
-unit is at most 3 bytes, so every literal at the per-field limits fits (at most 4,480 bytes). Text
+Title and body limits count UTF-16 code units. The 5 KiB total counts the JSON-encoded resolved
+arguments, escaping included, and fails the call on its own (`invalid_args` when over). A code
+unit is at most 3 bytes, so title, body and `data` at their per-field limits take at most 4,480 bytes. Text
 bound at post time can still exceed it, such as emoji counted per character (5,632 bytes at the
 limits).
 

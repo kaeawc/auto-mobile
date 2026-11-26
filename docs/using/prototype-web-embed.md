@@ -91,12 +91,15 @@ A placeholder's `reason` is `unsupportedType`, `assetNotInlined`, `assetOverBudg
 
 ## The custom element
 
-Importing `@kaeawc/auto-mobile-prototype-web/element` registers `<automobile-prototype>`:
+Importing `@kaeawc/auto-mobile-prototype-web/element` registers `<automobile-prototype>`. In a
+bundled app, import it by that name. On a page without a bundler or import map, load the package's
+`dist/element.js` file:
 
 ```html
-<script type="module">
-  import "@kaeawc/auto-mobile-prototype-web/element";
-</script>
+<script
+  type="module"
+  src="/node_modules/@kaeawc/auto-mobile-prototype-web/dist/element.js"
+></script>
 <automobile-prototype frame="pixel-9" controls="rotate zoom">
   <script type="application/json">
     { "id": "hello", "root": { "type": "text", "text": "Hello" } }
@@ -133,7 +136,8 @@ element.addEventListener("error", (event) => console.warn(event.detail.message))
 ## Draw without a DOM
 
 `renderPrototype(spec, options)` returns the element tree without touching the page. It takes
-`frame`, `orientation`, `mode`, `screen`, `locale` and `textSize`. It throws `PrototypeWebRefusal`,
+`frame`, `orientation`, `mode`, `screen`, `locale`, `textSize` and `parseGlyph`. `parseGlyph` turns
+an envelope glyph's SVG markup into shapes; without it, icons draw a placeholder. It throws `PrototypeWebRefusal`,
 whose `error` holds the fields below.
 
 ## Errors

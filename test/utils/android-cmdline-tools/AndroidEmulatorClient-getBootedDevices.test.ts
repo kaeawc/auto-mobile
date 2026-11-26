@@ -624,6 +624,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       "shell dumpsys SurfaceFlinger --display-id",
       "shell dumpsys display",
       "shell cmd device_state print-states",
+      "shell getprop ro.build.version.sdk",
+      "shell getprop ro.build.version.release",
+      "shell wm size",
+      "shell wm density",
     ]);
   });
 
@@ -746,6 +750,10 @@ describe("AndroidEmulatorClient.getBootedDevicesChecked", () => {
       "shell dumpsys SurfaceFlinger --display-id",
       "shell dumpsys display",
       "shell cmd device_state print-states",
+      "shell getprop ro.build.version.sdk",
+      "shell getprop ro.build.version.release",
+      "shell wm size",
+      "shell wm density",
     ]);
   });
 

@@ -13,8 +13,31 @@ import {
   getHierarchyRoots,
   nodeHasSystemTrayHint,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
+  SYSTEM_TRAY_PACKAGE,
   traverseForHint,
 } from "./notificationHints";
+
+/**
+ * The expanded shade takes input focus (`mCurrentFocus=NotificationShade`); a heads-up
+ * notification renders the same SystemUI panel ids in an unfocused window while the app
+ * below keeps focus (#19195). When the capture names the focused window's package and it
+ * is not SystemUI, the shade is not expanded. Captures without window packages keep the
+ * hint-only check.
+ */
+const focusedWindowIsOutsideShade = (viewHierarchy: ViewHierarchyResult): boolean => {
+  const displayId = viewHierarchy.displayId ?? null;
+  const focused = (viewHierarchy.windows ?? []).filter((window) => {
+    const windowDisplayId = window.displayId ?? null;
+    return (
+      window.isFocused === true &&
+      (displayId === null || windowDisplayId === null || windowDisplayId === displayId)
+    );
+  });
+  return (
+    focused.length > 0 &&
+    focused.every((window) => !!window.packageName && window.packageName !== SYSTEM_TRAY_PACKAGE)
+  );
+};
 
 export interface AndroidNotificationUIDetectorDeps {
   executeAdbCommand(command: string): Promise<{ stdout: string; stderr: string }>;
@@ -46,6 +69,9 @@ export class AndroidNotificationUIDetector implements NotificationUIDetector {
       return !!watchStreamRoot(viewHierarchy);
     }
     if (!viewHierarchy) {
+      return false;
+    }
+    if (focusedWindowIsOutsideShade(viewHierarchy)) {
       return false;
     }
     const rootNodes = getHierarchyRoots(viewHierarchy);

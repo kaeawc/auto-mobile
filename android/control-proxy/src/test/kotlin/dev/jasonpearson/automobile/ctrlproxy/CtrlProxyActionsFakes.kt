@@ -169,7 +169,7 @@ open class NoOpCtrlProxyActions : CtrlProxyActions {
     patches += listOf(requestId, id, baseRevision, ops)
   }
 
-  override suspend fun inspectPrototypes(requestId: String?) = Unit
+  override suspend fun inspectPrototypes(requestId: String?, includeLocation: Boolean) = Unit
 
   override suspend fun putPrototypeAsset(
     requestId: String?,
@@ -537,8 +537,8 @@ class RecordingCtrlProxyActions : CtrlProxyActions {
     ops: JsonArray,
   ) = record("patchPrototype", requestId, id, baseRevision, ops)
 
-  override suspend fun inspectPrototypes(requestId: String?) =
-    record("inspectPrototypes", requestId)
+  override suspend fun inspectPrototypes(requestId: String?, includeLocation: Boolean) =
+    record("inspectPrototypes", requestId, includeLocation)
 
   override suspend fun putPrototypeAsset(
     requestId: String?,

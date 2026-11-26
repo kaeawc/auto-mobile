@@ -94,6 +94,7 @@ import {
   type PrototypeAssetResult,
   type PrototypeDismiss,
   type PrototypeEvent,
+  type PrototypeInspectOptions,
   type PrototypeResult,
   type PutPrototypeAssetMessage,
   type RemovePrototypeAssetMessage,
@@ -621,8 +622,16 @@ export class CtrlProxyPrototypes {
    * while no host was connected (through [onPrototypeEvent]), then answers with `prototypes`. Throws
    * before sending when the device does not advertise `prototype_persistence_replay_v1`.
    */
-  requestInspectPrototypes(timeoutMs = 5000, perf?: PerformanceTracker): Promise<PrototypeResult> {
-    return this.request(ctrlProxyRequests.inspectPrototypes({ requestId: "" }), timeoutMs, perf);
+  requestInspectPrototypes(
+    timeoutMs = 5000,
+    perf?: PerformanceTracker,
+    options: PrototypeInspectOptions = {},
+  ): Promise<PrototypeResult> {
+    return this.request(
+      ctrlProxyRequests.inspectPrototypes({ requestId: "", ...options }),
+      timeoutMs,
+      perf,
+    );
   }
 
   /**

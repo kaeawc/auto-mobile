@@ -152,7 +152,9 @@ internal class CtrlProxyMessageHandlerPrototypeTest : CtrlProxyMessageHandlerFix
   fun `dispatch inspect prototypes request`() = runTest {
     dispatch("""{"type":"inspect_prototypes","requestId":"i"}""")
     assertEquals("inspectPrototypes", lastCall.first)
-    assertEquals(listOf<Any?>("i"), lastCall.second)
+    assertEquals(listOf<Any?>("i", false), lastCall.second)
+    dispatch("""{"type":"inspect_prototypes","requestId":"j","includeLocation":true}""")
+    assertEquals(listOf<Any?>("j", true), lastCall.second)
   }
 
   @Test

@@ -164,6 +164,13 @@ export function isSavedPrototypeErrorCode(value: unknown): value is SavedPrototy
 export interface InspectPrototypesMessage {
   type: "inspect_prototypes";
   requestId: string;
+  /** Report `/platform/location/current` as the full fix instead of its accuracy summary (#16463). */
+  includeLocation?: true;
+}
+
+/** Options for one `inspect_prototypes` request. */
+export interface PrototypeInspectOptions {
+  includeLocation?: boolean;
 }
 /**
  * `@SerialName("put_prototype_asset")` → `PutPrototypeAsset`. `dataBase64` is the encoded image file
@@ -337,6 +344,8 @@ export interface PrototypeStatusEntry {
   /** Last haptic and sound calls (prototype_platform_haptics_v1, _sound_v1); parsePrototypeFeedbackLog validates it. */
   feedbackLog?: unknown;
   shaderFailures?: Record<string, string>;
+  /** The runtime's `/platform` state, redacted by the device (#16463); the host redacts it again. */
+  platform?: unknown;
 }
 
 /**

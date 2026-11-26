@@ -15,6 +15,7 @@ import type {
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
+  PrototypeInspectOptions,
   PrototypeResult,
 } from "../observe/android/ctrlProxyProtocol";
 import { ActionableError } from "../../models/ActionableError";
@@ -82,8 +83,8 @@ export class AndroidPrototypeTransport
     return this.client.requestPatchPrototype(patch, timeoutMs);
   }
 
-  inspect(timeoutMs?: number): Promise<PrototypeResult> {
-    return this.client.requestInspectPrototypes(timeoutMs);
+  inspect(timeoutMs?: number, options?: PrototypeInspectOptions): Promise<PrototypeResult> {
+    return this.client.requestInspectPrototypes(timeoutMs, undefined, options);
   }
 
   /** Saved prototypes are Android-only extras outside PrototypeTransport. */

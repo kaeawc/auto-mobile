@@ -285,6 +285,22 @@ describe("ctrlProxyProtocol — builders serialize byte-identically", () => {
       expected: '{"type":"inspect_prototypes","requestId":"r8"}',
     },
     {
+      builder: "inspectPrototypes",
+      name: "inspect with includeLocation (shared Kotlin literal)",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.inspectPrototypes({ requestId: "r9", includeLocation: true }),
+      ),
+      expected: '{"type":"inspect_prototypes","requestId":"r9","includeLocation":true}',
+    },
+    {
+      builder: "inspectPrototypes",
+      name: "inspect omits a false includeLocation",
+      actual: serializeCtrlProxyRequest(
+        ctrlProxyRequests.inspectPrototypes({ requestId: "r8", includeLocation: false }),
+      ),
+      expected: '{"type":"inspect_prototypes","requestId":"r8"}',
+    },
+    {
       builder: "savePrototype",
       name: "save omitted icon",
       actual: serializeCtrlProxyRequest(

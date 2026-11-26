@@ -50,6 +50,7 @@ import type {
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
+  PrototypeInspectOptions,
   PrototypeResult,
 } from "../../src/features/observe/android/ctrlProxyProtocol";
 import type { SetTextOptions } from "../../src/features/observe/DeviceService";
@@ -380,6 +381,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     result: { success: true, prototypes: [], droppedEvents: 0 },
   };
   private inspectCount = 0;
+  private inspectOptions: PrototypeInspectOptions[] = [];
 
   /** What the next inspect delivers: `events` first (as the device replays), then `result`. */
   setInspectReply(result: PrototypeResult, events: PrototypeEvent[] = []): void {
@@ -390,12 +392,19 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
     return this.inspectCount;
   }
 
+  /** The options each inspect request carried, in order. */
+  getInspectOptions(): PrototypeInspectOptions[] {
+    return [...this.inspectOptions];
+  }
+
   async requestInspectPrototypes(
     _timeoutMs = 5000,
     _perf?: PerformanceTracker,
+    options: PrototypeInspectOptions = {},
   ): Promise<PrototypeResult> {
     this.checkFailure("requestInspectPrototypes");
     this.inspectCount++;
+    this.inspectOptions.push(options);
     for (const event of this.inspectReply.events) {
       this.emitPrototypeEvent(event);
     }

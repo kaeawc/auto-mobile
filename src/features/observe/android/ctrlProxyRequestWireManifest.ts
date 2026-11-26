@@ -118,6 +118,7 @@ export const CTRL_PROXY_REQUEST_FIELDS: {
   inspect_prototypes: {
     type: "required",
     requestId: "required",
+    includeLocation: "optional",
   },
   install_ca_cert: {
     type: "required",

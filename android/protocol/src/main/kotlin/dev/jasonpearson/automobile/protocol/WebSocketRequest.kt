@@ -509,7 +509,14 @@ data class DismissPrototype(
  */
 @Serializable
 @SerialName("inspect_prototypes")
-data class InspectPrototypes(override val requestId: String? = null) : WebSocketRequest()
+data class InspectPrototypes(
+  override val requestId: String? = null,
+  /**
+   * Report `/platform/location/current` as the full fix instead of its accuracy summary (#16463).
+   * Omitted (null, meaning false) by default and by older hosts.
+   */
+  val includeLocation: Boolean? = null,
+) : WebSocketRequest()
 
 /**
  * Applies [ops] to the shown prototype [id] (#11675): the RFC 6902 subset add/replace/remove/test

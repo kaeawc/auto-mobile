@@ -502,7 +502,7 @@ export const prototypeOutputSchema = z.object({
           .record(z.string(), z.record(z.string(), z.unknown()))
           .optional()
           .describe(
-            "iOS inspect only: the shown prototype's /platform state by module. location.current is {accuracyM, approximate, redacted: true} unless includeLocation: true; other sensitive keys (auth.userId) are omitted. Never in status",
+            "inspect only: the shown prototype's /platform state by module. location.current is {accuracyM, approximate, redacted: true} unless includeLocation: true; other sensitive keys (auth.userId) are omitted. Never in status; absent from an older CtrlProxy or agent",
           ),
         context: prototypeEventOutputSchema.shape.context,
         contextTruncated: prototypeEventOutputSchema.shape.contextTruncated,

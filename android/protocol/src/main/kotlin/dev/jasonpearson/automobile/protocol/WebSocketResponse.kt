@@ -1137,6 +1137,11 @@ data class PrototypeStatusEntry(
   /** The module runtime snapshot for this presentation, when the runtime reports it. */
   @EncodeDefault(EncodeDefault.Mode.NEVER) val platformRuntime: PrototypePlatformReport? = null,
   @EncodeDefault(EncodeDefault.Mode.NEVER) val images: PrototypeRemoteImageCounts? = null,
+  /**
+   * The runtime's `/platform` state through [PrototypeInspectPlatformRedaction] (#16463): no
+   * coordinates unless the inspect asked for `includeLocation`. Absent from older APKs.
+   */
+  @EncodeDefault(EncodeDefault.Mode.NEVER) val platform: JsonObject? = null,
 )
 
 /**

@@ -129,6 +129,11 @@ The `location.updated` event and the state keys `/platform/location/current` (th
 are `sensitive`. Real-device verification sets the fix with `setDeviceState.location`; the Android emulator keeps
 that fix after the session ends.
 
+`inspect` reports each prototype's `/platform` on CtrlProxy and the iOS agent. Without `includeLocation: true`,
+`location.current` is only `{accuracyM, approximate, redacted: true}` and other `sensitive` keys are left out. The
+runtime applies `redactPrototypeInspectPlatform` before it replies, and the host applies it again; the Kotlin and Swift
+twins replay `test/fixtures/prototype-location/inspect-redaction.json`. The status store never keeps `/platform`.
+
 The reference both runtimes copy is `applyPrototypeLocationOutcome` (`prototypeLocationOutcome.ts`). The runtime writes a fix only when its coordinates are in range, and the fix carries only the
 optional fields the platform reported. The `<into>__meta` key then gets `{durationMs, approximate}`. A failure leaves
 `into` untouched and records `{durationMs, error}`. A code outside the four above becomes `platform_error`, and

@@ -70,6 +70,7 @@ import type {
   DeleteSavedPrototypeMessage,
   PinSavedPrototypeMessage,
   InspectPrototypesMessage,
+  PrototypeInspectOptions,
   PutPrototypeAssetMessage,
   PutPrototypeAssetAbortMessage,
   PutPrototypeAssetBeginMessage,
@@ -431,8 +432,14 @@ export const ctrlProxyRequests = {
     };
   },
 
-  inspectPrototypes(args: { requestId: string }): InspectPrototypesMessage {
-    return { type: "inspect_prototypes", requestId: args.requestId };
+  inspectPrototypes(
+    args: { requestId: string } & PrototypeInspectOptions,
+  ): InspectPrototypesMessage {
+    return {
+      type: "inspect_prototypes",
+      requestId: args.requestId,
+      ...(args.includeLocation === true ? { includeLocation: true } : {}),
+    };
   },
 
   dismissPrototype(args: { requestId: string } & PrototypeDismiss): DismissPrototypeMessage {

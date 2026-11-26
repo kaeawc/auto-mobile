@@ -365,6 +365,46 @@ describe("SimCtlClient boot self-verification", () => {
   });
 
   test.each([
+    {
+      name: "a readiness wait on a running simulator",
+      run: (harness: Harness) => harness.simctl.waitForSimulatorReady(UDID, 10_000),
+      rejectWith: null,
+      wasAlreadyBooted: true,
+    },
+    {
+      name: "a boot that bootstatus reports already Booted",
+      run: (harness: Harness) => harness.simctl.bootSimulator(UDID),
+      rejectWith: coreSimulator405Error(),
+      wasAlreadyBooted: true,
+    },
+    {
+      name: "a boot",
+      run: (harness: Harness) => harness.simctl.bootSimulator(UDID),
+      rejectWith: null,
+      wasAlreadyBooted: false,
+    },
+  ])(
+    "the boot hooks hear whether the simulator was already running: $name",
+    async ({ run, rejectWith, wasAlreadyBooted }) => {
+      const harness = createHarness({ maxAttempts: 1, retryBackoffMs: 0 });
+      harness.timer.enableAutoAdvance();
+      harness.setStates(["Booted"]);
+      harness.failBootStatusWith(rejectWith);
+      const heard: Array<boolean | undefined> = [];
+      const stop = simulatorBootHooks.onBooted(
+        (_udid, info) => void heard.push(info.wasAlreadyBooted),
+      );
+      try {
+        await run(harness);
+        await Promise.resolve();
+        expect(heard).toEqual([wasAlreadyBooted]);
+      } finally {
+        stop();
+      }
+    },
+  );
+
+  test.each([
     new ActionableError("boot failed"),
     new DeviceBootTimeoutError("startDevice", "boot", 1000, { budgetMs: 1000, device: UDID }),
   ])("attaches failed cleanup while preserving the original boot error: %s", async (failure) => {

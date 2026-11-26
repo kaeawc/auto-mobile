@@ -1,0 +1,68 @@
+{
+  "devices" : {
+    "com.apple.CoreSimulator.SimRuntime.tvOS-26-5" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-0" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-26-5" : [
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/9C494274-5ECD-48D2-8C84-4FD1E470FC16\/data",
+        "dataPathSize" : 1643651072,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/9C494274-5ECD-48D2-8C84-4FD1E470FC16",
+        "udid" : "9C494274-5ECD-48D2-8C84-4FD1E470FC16",
+        "lastUsedAt" : "2026-11-26T11:44:40Z",
+        "isAvailable" : true,
+        "logPathSize" : 163840,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPad-Pro-13-inch-M5-12GB",
+        "state" : "Booted",
+        "name" : "lane-ipadinput-fix-1"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-1" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.xrOS-26-5" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-2" : [
+      {
+        "dataPath" : "\/Users\/jason\/Library\/Developer\/CoreSimulator\/Devices\/8B529975-BB5F-4ED5-8309-0FF04764BAE6\/data",
+        "dataPathSize" : 5025234944,
+        "logPath" : "\/Users\/jason\/Library\/Logs\/CoreSimulator\/8B529975-BB5F-4ED5-8309-0FF04764BAE6",
+        "udid" : "8B529975-BB5F-4ED5-8309-0FF04764BAE6",
+        "lastUsedAt" : "2026-11-26T07:46:48Z",
+        "isAvailable" : true,
+        "logPathSize" : 278528,
+        "deviceTypeIdentifier" : "com.apple.CoreSimulator.SimDeviceType.iPhone-18-Pro",
+        "state" : "Booted",
+        "name" : "AutoMobile CI iPhone (27.2)"
+      }
+    ],
+    "com.apple.CoreSimulator.SimRuntime.watchOS-27-2" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-6" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.tvOS-27-0" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.tvOS-27-2" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.watchOS-26-5" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.xrOS-27-2" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-18-0" : [
+
+    ],
+    "com.apple.CoreSimulator.SimRuntime.iOS-27-2-iPhone19-4" : [
+
+    ]
+  }
+}

@@ -238,9 +238,10 @@ final class PrivateSimulatorBackend: SimulatorScreenBackend, CarPlayHIDBackend {
 
     private func simulatorKitSymbol(_ name: String) throws -> UnsafeMutableRawPointer {
         if simulatorKit == nil {
-            let path = try (developerDirectory() as NSString)
-                .appendingPathComponent("Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit")
-            guard let handle = dlopen(path, RTLD_NOW) else { throw unavailable("SimulatorKit at \(path)") }
+            let paths = try SimulatorKitLocation.candidatePaths(developerDirectory: developerDirectory())
+            guard let handle = paths.lazy.compactMap({ dlopen($0, RTLD_NOW) }).first else {
+                throw unavailable("SimulatorKit at \(paths.joined(separator: " or "))")
+            }
             simulatorKit = handle
         }
         guard let symbol = dlsym(simulatorKit, name) else { throw unavailable(name) }

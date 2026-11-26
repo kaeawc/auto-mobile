@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExecResult } from "../../../../src/models";
 import {
   IosCameraPosterDeviceWide,
@@ -20,7 +22,12 @@ class FakeLaunchctl implements PosterSimctlRunner {
   readonly calls: string[][] = [];
   readonly env = new Map<string, string>();
   failing = false;
+  /** `simctl list devices --json` output; the captured all-Shutdown list by default. */
+  deviceList = simctlFixture("list-devices.json");
   async executeCommandArgs(args: string[]): Promise<ExecResult> {
+    if (args[0] === "list") {
+      return execResult(this.deviceList);
+    }
     this.calls.push(args);
     if (this.failing) {
       throw new Error("Unable to lookup in current state: Shutdown");
@@ -31,15 +38,22 @@ class FakeLaunchctl implements PosterSimctlRunner {
     } else if (verb === "unsetenv") {
       this.env.delete(name!);
     }
-    const stdout = verb === "getenv" ? `${this.env.get(name!) ?? ""}\n` : "";
-    return {
-      stdout,
-      stderr: "",
-      toString: () => stdout,
-      trim: () => stdout.trim(),
-      includes: (s) => stdout.includes(s),
-    };
+    return execResult(verb === "getenv" ? `${this.env.get(name!) ?? ""}\n` : "");
   }
+}
+
+function execResult(stdout: string): ExecResult {
+  return {
+    stdout,
+    stderr: "",
+    toString: () => stdout,
+    trim: () => stdout.trim(),
+    includes: (s) => stdout.includes(s),
+  };
+}
+
+function simctlFixture(name: string): string {
+  return readFileSync(join(import.meta.dir, "../../../fixtures/ios-simctl", name), "utf8");
 }
 
 function setup() {
@@ -72,7 +86,7 @@ test("inserts the stable gate copy, not the cache build, after the poster variab
     launchctl("setenv", "AM_CAMERA_POSTER_CONFIG", `/data/devices/${udid}.json`),
     launchctl("setenv", "DYLD_INSERT_LIBRARIES", stableGate),
   ]);
-  expect(h.store.read(udid)).toEqual({ gate: stableGate, launchctlBefore: "" });
+  expect(h.store.read(udid)).toEqual({ gate: stableGate });
 });
 
 test("keeps libraries another feature inserted and does not add the gate twice", async () => {
@@ -150,7 +164,7 @@ test("a shaped boot that carries the gate takes the poster through its variables
     launchctl("setenv", "AM_CAMERA_POSTER_DYLIB", "/camera/libAMCameraPoster.dylib"),
     launchctl("setenv", "AM_CAMERA_POSTER_CONFIG", `/data/devices/${udid}.json`),
   ]);
-  expect(h.store.read(udid)).toEqual({ gate: stableGate, launchctlBefore: "" });
+  expect(h.store.read(udid)).toEqual({ gate: stableGate });
   await h.deviceWide.deactivate(udid);
   expect(h.simctl.env.has("AM_CAMERA_POSTER_DYLIB")).toBe(false);
   expect(h.store.read(udid)).toBeUndefined();
@@ -167,15 +181,6 @@ test("after a boot the recorded poster is applied again", async () => {
   expect(h.simctl.env.get("AM_CAMERA_POSTER_CONFIG")).toBe(`/data/devices/${udid}.json`);
 });
 
-test("a re-activation after a boot records the post-boot launchd value as the one to restore", async () => {
-  const h = setup();
-  h.simctl.env.set("DYLD_INSERT_LIBRARIES", "/old-boot/libOld.dylib");
-  await h.deviceWide.activate(udid);
-  h.simctl.env.clear();
-  await h.deviceWide.activate(udid);
-  expect(h.store.read(udid)?.launchctlBefore).toBe("");
-});
-
 test("after a boot with no recorded poster a stale activation is undone", async () => {
   const h = setup();
   await h.deviceWide.activate(udid);
@@ -187,7 +192,7 @@ test("after a boot with no recorded poster a stale activation is undone", async 
 test("daemon start undoes every recorded activation and forgets ones it cannot reach", async () => {
   const h = setup();
   await h.deviceWide.activate(udid);
-  h.store.write("SHUTDOWN-SIM", { gate: stableGate, launchctlBefore: "" });
+  h.store.write("SHUTDOWN-SIM", { gate: stableGate });
   const reachable = h.simctl.executeCommandArgs.bind(h.simctl);
   h.simctl.executeCommandArgs = async (args) => {
     if (args[1] === "SHUTDOWN-SIM") {
@@ -198,6 +203,72 @@ test("daemon start undoes every recorded activation and forgets ones it cannot r
   await h.deviceWide.sweep();
   expect(h.store.list()).toEqual([]);
   expect(h.simctl.env.size).toBe(0);
+});
+
+test("daemon start keeps the record of a still-booted simulator it could not clean (#19119)", async () => {
+  const h = setup();
+  // The captured list shows this simulator Booted (Xcode 27.2, iOS 27.2).
+  const booted = "8B529975-BB5F-4ED5-8309-0FF04764BAE6";
+  h.simctl.deviceList = simctlFixture("list-devices-booted-ios27-2.json");
+  h.store.write(booted, { gate: stableGate });
+  h.simctl.failing = true;
+  await h.deviceWide.sweep();
+  expect(h.store.list()).toEqual([booted]);
+});
+
+test("a clear during an in-flight activation waits for it and then removes the gate (#19119)", async () => {
+  const h = setup();
+  let releasePoster!: () => void;
+  const posterReady = new Promise<void>((resolve) => {
+    releasePoster = resolve;
+  });
+  const ensure = h.poster.ensure.bind(h.poster);
+  h.poster.ensure = async () => {
+    await posterReady;
+    return ensure();
+  };
+  const activation = h.deviceWide.activate(udid);
+  const clear = h.deviceWide.deactivate(udid);
+  releasePoster();
+  await Promise.all([activation, clear]);
+  expect(h.store.read(udid)).toBeUndefined();
+  expect(h.simctl.env.size).toBe(0);
+});
+
+test("activate, clear, activate, clear during a held activation ends with no gate (#19119)", async () => {
+  const h = setup();
+  let releasePoster!: () => void;
+  const posterReady = new Promise<void>((resolve) => {
+    releasePoster = resolve;
+  });
+  const ensure = h.poster.ensure.bind(h.poster);
+  h.poster.ensure = async () => {
+    await posterReady;
+    return ensure();
+  };
+  const first = h.deviceWide.activate(udid);
+  const firstClear = h.deviceWide.deactivate(udid);
+  // The first clear is queued for the lock before the second activation and clear arrive.
+  await Promise.resolve();
+  await Promise.resolve();
+  const second = h.deviceWide.activate(udid);
+  const secondClear = h.deviceWide.deactivate(udid);
+  releasePoster();
+  await Promise.all([first, firstClear, second, secondClear]);
+  expect(h.store.read(udid)).toBeUndefined();
+  expect(h.simctl.env.size).toBe(0);
+});
+
+test("a clear and an activation called in the same tick run in call order (#19119)", async () => {
+  const h = setup();
+  await h.deviceWide.activate(udid);
+  const clear = h.deviceWide.deactivate(udid);
+  const activation = h.deviceWide.activate(udid);
+  await Promise.all([clear, activation]);
+  // The activation was called last, so the poster stays on.
+  expect(h.store.read(udid)).toEqual({ gate: stableGate });
+  expect(h.simctl.env.get("DYLD_INSERT_LIBRARIES")).toBe(stableGate);
+  expect(h.simctl.env.get("AM_CAMERA_POSTER_DYLIB")).toBe("/camera/libAMCameraPoster.dylib");
 });
 
 test("a library that cannot be built fails before launchd is touched", async () => {

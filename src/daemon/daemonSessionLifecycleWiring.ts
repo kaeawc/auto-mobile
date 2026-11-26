@@ -18,6 +18,7 @@ import {
   registerIosCameraPosterSessionCleanup,
   type IosCameraPosterDaemonHooks,
 } from "./iosCameraPosterSessionCleanup";
+import { registerIosHingeAngleBootCleanup } from "./iosHingeAngleBootCleanup";
 import { registerPortReverseSessionCleanup } from "./portReverseSessionCleanup";
 import { registerBlePeripheralSessionCleanup } from "./blePeripheralSessionCleanup";
 import { registerAndroidAutoSessionCleanup } from "./androidAutoSessionCleanup";
@@ -142,6 +143,7 @@ function registerDeviceStateSessionCleanups(
   registerKeyboardProfileSessionCleanup(sessionManager);
   registerDeviceConditionSessionCleanup(sessionManager);
   registerIosCameraPosterSessionCleanup(sessionManager, host.iosCameraPosterDaemonHooks);
+  registerIosHingeAngleBootCleanup();
   registerPortReverseSessionCleanup(sessionManager);
   registerBlePeripheralSessionCleanup(sessionManager);
   registerAndroidAutoSessionCleanup(sessionManager);

@@ -1,0 +1,640 @@
+{
+  "viewHierarchy": {
+    "hierarchy": {
+      "node": {
+        "$": {
+          "text": " ",
+          "class": "XCUIApplication",
+          "bounds": [
+            0,
+            0,
+            402,
+            874
+          ],
+          "view-id": "s2-f51c0370e6bda732"
+        },
+        "node": [
+          {
+            "$": {
+              "resource-id": "SBCoverSheetWindow",
+              "class": "UIWindow",
+              "bounds": [
+                0,
+                0,
+                402,
+                874
+              ],
+              "view-id": "SBCoverSheetWindow"
+            },
+            "extras": {
+              "automobile:iosWindowLayer": "1"
+            },
+            "node": [
+              {
+                "$": {
+                  "class": "UIScrollView",
+                  "bounds": [
+                    0,
+                    0,
+                    402,
+                    874
+                  ],
+                  "scrollable": "true",
+                  "view-id": "s2-3309939c1e56204c"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "resource-id": "combined-list-view",
+                      "class": "UIView",
+                      "bounds": [
+                        0,
+                        0,
+                        402,
+                        874
+                      ],
+                      "view-id": "combined-list-view"
+                    },
+                    "node": [
+                      {
+                        "$": {
+                          "class": "UIScrollView",
+                          "bounds": [
+                            0,
+                            0,
+                            402,
+                            874
+                          ],
+                          "scrollable": "true",
+                          "view-id": "s2-86a5c16abf38f93a"
+                        },
+                        "node": [
+                          {
+                            "$": {
+                              "class": "UIScrollView",
+                              "bounds": [
+                                14,
+                                0,
+                                388,
+                                219
+                              ],
+                              "scrollable": "true",
+                              "view-id": "s2-bd2e83c81c8646a0"
+                            },
+                            "node": [
+                              {
+                                "$": {
+                                  "class": "UIScrollView",
+                                  "bounds": [
+                                    14,
+                                    0,
+                                    388,
+                                    219
+                                  ],
+                                  "scrollable": "true",
+                                  "view-id": "s2-190458cd80f36bb1"
+                                },
+                                "node": [
+                                  {
+                                    "$": {
+                                      "resource-id": "ListCell",
+                                      "class": "UIButton",
+                                      "bounds": [
+                                        14,
+                                        0,
+                                        388,
+                                        219
+                                      ],
+                                      "clickable": "true",
+                                      "role": "button",
+                                      "view-id": "ListCell"
+                                    },
+                                    "node": {
+                                      "$": {
+                                        "resource-id": "ListCell.ContentView",
+                                        "class": "UIView",
+                                        "bounds": [
+                                          14,
+                                          0,
+                                          388,
+                                          219
+                                        ],
+                                        "view-id": "ListCell.ContentView"
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "$": {
+                                      "text": "Vertical scroll bar, 1 page",
+                                      "class": "UIView",
+                                      "bounds": [
+                                        355,
+                                        48,
+                                        385,
+                                        219
+                                      ],
+                                      "view-id": "s2-edd1e9ee444fedac-1"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "$": {
+                                  "text": "Vertical scroll bar, 1 page",
+                                  "class": "UIView",
+                                  "bounds": [
+                                    355,
+                                    48,
+                                    385,
+                                    219
+                                  ],
+                                  "view-id": "s2-edd1e9ee444fedac-2"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "$": {
+                              "class": "UIScrollView",
+                              "bounds": [
+                                14,
+                                680,
+                                388,
+                                746
+                              ],
+                              "scrollable": "true",
+                              "view-id": "s2-2a22e5d091d1e19f"
+                            },
+                            "node": [
+                              {
+                                "$": {
+                                  "class": "UIScrollView",
+                                  "bounds": [
+                                    14,
+                                    680,
+                                    388,
+                                    746
+                                  ],
+                                  "scrollable": "true",
+                                  "view-id": "s2-3d7139af5b05fd7c"
+                                },
+                                "node": [
+                                  {
+                                    "$": {
+                                      "text": "PLAYGROUND, now, MTtitle2, second body",
+                                      "resource-id": "ListCell",
+                                      "class": "UIButton",
+                                      "bounds": [
+                                        14,
+                                        680,
+                                        388,
+                                        746
+                                      ],
+                                      "clickable": "true",
+                                      "role": "button",
+                                      "view-id": "ListCell"
+                                    },
+                                    "node": [
+                                      {
+                                        "$": {
+                                          "text": "Open",
+                                          "resource-id": "swipe-action-button-identifier",
+                                          "class": "UIButton",
+                                          "bounds": [
+                                            14,
+                                            680,
+                                            104,
+                                            746
+                                          ],
+                                          "clickable": "true",
+                                          "role": "button",
+                                          "view-id": "swipe-action-button-identifier"
+                                        }
+                                      },
+                                      {
+                                        "$": {
+                                          "resource-id": "ListCell.ContentView",
+                                          "class": "UIView",
+                                          "bounds": [
+                                            112,
+                                            680,
+                                            486,
+                                            746
+                                          ],
+                                          "view-id": "ListCell.ContentView"
+                                        },
+                                        "node": {
+                                          "$": {
+                                            "text": "PLAYGROUND, now, MTtitle2, second body",
+                                            "resource-id": "NotificationShortLookView",
+                                            "class": "UIView",
+                                            "bounds": [
+                                              112,
+                                              680,
+                                              486,
+                                              746
+                                            ],
+                                            "view-id": "NotificationShortLookView"
+                                          },
+                                          "node": {
+                                            "$": {
+                                              "resource-id": "ShortLook.Platter",
+                                              "class": "UIView",
+                                              "bounds": [
+                                                112,
+                                                680,
+                                                486,
+                                                746
+                                              ],
+                                              "view-id": "ShortLook.Platter"
+                                            },
+                                            "node": {
+                                              "$": {
+                                                "resource-id": "ShortLook.Platter.Content",
+                                                "class": "UIView",
+                                                "bounds": [
+                                                  112,
+                                                  680,
+                                                  486,
+                                                  746
+                                                ],
+                                                "view-id": "ShortLook.Platter.Content"
+                                              },
+                                              "node": {
+                                                "$": {
+                                                  "text": "now, MTtitle2, second body",
+                                                  "resource-id": "ShortLook.Platter.Content.Seamless",
+                                                  "class": "UIButton",
+                                                  "bounds": [
+                                                    112,
+                                                    680,
+                                                    486,
+                                                    746
+                                                  ],
+                                                  "clickable": "true",
+                                                  "role": "button",
+                                                  "view-id": "ShortLook.Platter.Content.Seamless"
+                                                },
+                                                "node": {
+                                                  "$": {
+                                                    "resource-id": "ShortLook.Platter.Content.Seamless.CrossFade",
+                                                    "class": "UIView",
+                                                    "bounds": [
+                                                      112,
+                                                      680,
+                                                      486,
+                                                      746
+                                                    ],
+                                                    "view-id": "ShortLook.Platter.Content.Seamless.CrossFade"
+                                                  },
+                                                  "node": [
+                                                    {
+                                                      "$": {
+                                                        "text": "MTtitle2",
+                                                        "resource-id": "NotificationTitle",
+                                                        "class": "UILabel",
+                                                        "bounds": [
+                                                          176,
+                                                          694,
+                                                          434,
+                                                          712
+                                                        ],
+                                                        "role": "text",
+                                                        "view-id": "NotificationTitle"
+                                                      }
+                                                    },
+                                                    {
+                                                      "$": {
+                                                        "resource-id": "NotificationBody.TopAligned.originalMessage",
+                                                        "class": "UIView",
+                                                        "bounds": [
+                                                          176,
+                                                          712,
+                                                          469,
+                                                          730
+                                                        ],
+                                                        "view-id": "NotificationBody.TopAligned.originalMessage"
+                                                      },
+                                                      "node": {
+                                                        "$": {
+                                                          "text": "second body",
+                                                          "resource-id": "TextContent.Primary",
+                                                          "class": "UILabel",
+                                                          "bounds": [
+                                                            176,
+                                                            712,
+                                                            469,
+                                                            730
+                                                          ],
+                                                          "role": "text",
+                                                          "view-id": "TextContent.Primary"
+                                                        }
+                                                      }
+                                                    }
+                                                  ]
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "$": {
+                                      "text": "Vertical scroll bar, 1 page",
+                                      "class": "UIView",
+                                      "bounds": [
+                                        355,
+                                        680,
+                                        385,
+                                        746
+                                      ],
+                                      "view-id": "s2-edd1e9ee444fedac-3"
+                                    }
+                                  }
+                                ]
+                              },
+                              {
+                                "$": {
+                                  "text": "Vertical scroll bar, 1 page",
+                                  "class": "UIView",
+                                  "bounds": [
+                                    355,
+                                    680,
+                                    385,
+                                    746
+                                  ],
+                                  "view-id": "s2-edd1e9ee444fedac-4"
+                                }
+                              }
+                            ]
+                          },
+                          {
+                            "$": {
+                              "class": "UIScrollView",
+                              "bounds": [
+                                14,
+                                754,
+                                388,
+                                763
+                              ],
+                              "scrollable": "true",
+                              "view-id": "s2-9c50464cb8e8a7a9"
+                            },
+                            "node": {
+                              "$": {
+                                "text": "Vertical scroll bar, 1 page",
+                                "class": "UIView",
+                                "bounds": [
+                                  355,
+                                  754,
+                                  385,
+                                  763
+                                ],
+                                "view-id": "s2-edd1e9ee444fedac-5"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "$": {
+                          "text": "1 Notification",
+                          "class": "UIButton",
+                          "bounds": [
+                            104,
+                            786,
+                            298,
+                            804
+                          ],
+                          "clickable": "true",
+                          "role": "button",
+                          "view-id": "s2-9291df6f9a2693dc"
+                        },
+                        "node": {
+                          "$": {
+                            "resource-id": "focus-container-1 Notification",
+                            "class": "UIView",
+                            "bounds": [
+                              187,
+                              792,
+                              214,
+                              797
+                            ],
+                            "view-id": "focus-container-1 Notification"
+                          },
+                          "node": [
+                            {
+                              "$": {
+                                "text": " 1 Notification",
+                                "resource-id": "focus-text-1 Notification",
+                                "class": "UILabel",
+                                "bounds": [
+                                  187,
+                                  792,
+                                  214,
+                                  797
+                                ],
+                                "role": "text",
+                                "view-id": "focus-text-1 Notification"
+                              }
+                            },
+                            {
+                              "$": {
+                                "class": "UIButton",
+                                "bounds": [
+                                  187,
+                                  792,
+                                  214,
+                                  797
+                                ],
+                                "clickable": "true",
+                                "role": "button",
+                                "view-id": "s2-a2f653687fe2a0c4"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "$": {
+                      "text": "Vertical scroll bar, 1 page",
+                      "class": "UIView",
+                      "bounds": [
+                        369,
+                        62,
+                        399,
+                        812
+                      ],
+                      "view-id": "s2-edd1e9ee444fedac-6"
+                    }
+                  }
+                ]
+              },
+              {
+                "$": {
+                  "resource-id": "lockscreen-date-view",
+                  "class": "UIView",
+                  "bounds": [
+                    0,
+                    0,
+                    402,
+                    874
+                  ],
+                  "view-id": "lockscreen-date-view"
+                },
+                "node": [
+                  {
+                    "$": {
+                      "text": "Thu Nov 26",
+                      "class": "UILabel",
+                      "bounds": [
+                        30,
+                        77,
+                        372,
+                        113
+                      ],
+                      "role": "text",
+                      "view-id": "s2-aa4cb59582521c47"
+                    }
+                  },
+                  {
+                    "$": {
+                      "text": "6:36 AM",
+                      "class": "UILabel",
+                      "bounds": [
+                        59,
+                        89,
+                        342,
+                        227
+                      ],
+                      "role": "text",
+                      "view-id": "s2-186eeeda4f10dcc9"
+                    }
+                  }
+                ]
+              },
+              {
+                "$": {
+                  "text": "Home indicator",
+                  "class": "UIView",
+                  "bounds": [
+                    129,
+                    861,
+                    273,
+                    866
+                  ],
+                  "view-id": "s2-a98c831348621af1"
+                }
+              }
+            ]
+          },
+          {
+            "$": {
+              "text": "Cellular",
+              "class": "UIView",
+              "bounds": [
+                288,
+                25,
+                307,
+                38
+              ],
+              "view-id": "s2-55febb7b5d2fd450"
+            },
+            "extras": {
+              "automobile:iosWindowLayer": "0"
+            }
+          },
+          {
+            "$": {
+              "resource-id": "3 of 3 Wi-Fi bars",
+              "class": "UIView",
+              "bounds": [
+                314,
+                26,
+                331,
+                38
+              ],
+              "view-id": "3 of 3 Wi-Fi bars"
+            },
+            "extras": {
+              "automobile:iosWindowLayer": "0"
+            },
+            "node": {
+              "$": {
+                "text": "Wi-Fi",
+                "resource-id": "wifi",
+                "class": "UIImageView",
+                "bounds": [
+                  312,
+                  24,
+                  334,
+                  40
+                ],
+                "clickable": "true",
+                "role": "image",
+                "view-id": "wifi"
+              }
+            }
+          },
+          {
+            "$": {
+              "text": "100% battery power",
+              "class": "UIView",
+              "bounds": [
+                339,
+                26,
+                366,
+                39
+              ],
+              "view-id": "s2-bcee4fb354cade76"
+            },
+            "extras": {
+              "automobile:iosWindowLayer": "0"
+            }
+          }
+        ]
+      }
+    },
+    "packageName": "com.apple.springboard",
+    "fallbackToSpringboard": true,
+    "updatedAt": 1795696574496,
+    "windows": [
+      {
+        "bounds": [
+          0,
+          0,
+          402,
+          874
+        ],
+        "id": 0,
+        "isActive": true,
+        "isFocused": true,
+        "type": 1
+      }
+    ],
+    "screenScale": 3,
+    "screenWidth": 402,
+    "screenHeight": 874,
+    "nativeScale": 3,
+    "pixelWidth": 1206,
+    "pixelHeight": 2622,
+    "insets": {
+      "available": false,
+      "displayCutoutInfo": {
+        "classification": "unknown"
+      },
+      "source": "unavailable",
+      "units": "unknown"
+    },
+    "frameContext": "DC75D8FC-CD74-4565-B58D-C6545C9919A6:5:d05264995ab90a2f",
+    "fresh": true,
+    "projectedScreenSize": {
+      "width": 402,
+      "height": 874
+    }
+  }
+}

@@ -142,12 +142,25 @@ describe("AndroidPrototypePermissionBackend", () => {
   });
 });
 
+/** locationd's `Authorization` after each `simctl privacy` call, as captured on iOS 27.2 (#19370). */
+const LOCATIOND_AFTER: Record<string, Record<IosPrivacyOperation["action"], number | null>> = {
+  location: { grant: 2, revoke: 1, reset: null },
+  "location-always": { grant: 4, revoke: 1, reset: null },
+};
+
+/** `simctl privacy` writing TCC.db, except location, which the simulator keeps in locationd. */
 class FakePrivacy {
   readonly operations: IosPrivacyOperation[] = [];
   readonly rows = new Map<string, TccPermissionRow>();
+  locationAuthorization: number | null = null;
 
   async setPrivacy(operation: IosPrivacyOperation): Promise<ExecResult> {
     this.operations.push(operation);
+    const locationd = LOCATIOND_AFTER[operation.permission];
+    if (locationd) {
+      this.locationAuthorization = locationd[operation.action];
+      return createExecResult("", "");
+    }
     this.rows.set(operation.permission, {
       service: operation.permission,
       client: operation.appId,
@@ -166,6 +179,10 @@ class FakePrivacy {
       return row ? [row] : [];
     });
   }
+
+  async readLocationAuthorization(): Promise<number | null> {
+    return this.locationAuthorization;
+  }
 }
 
 describe("IosSimulatorPrototypePermissionBackend", () => {
@@ -173,7 +190,7 @@ describe("IosSimulatorPrototypePermissionBackend", () => {
 
   test("grant and revoke go through simctl privacy and read back from TCC", async () => {
     const privacy = new FakePrivacy();
-    const backend = new IosSimulatorPrototypePermissionBackend(privacy, privacy, options);
+    const backend = new IosSimulatorPrototypePermissionBackend(privacy, privacy, options, privacy);
     const results = await applyPrototypePermissions(
       ["camera", "locationBackground", "contacts"],
       { grant: ["camera"], deny: ["locationBackground"] },
@@ -192,7 +209,7 @@ describe("IosSimulatorPrototypePermissionBackend", () => {
 
   test("notifications are reported notGrantableOnSimulator without a privacy call", async () => {
     const privacy = new FakePrivacy();
-    const backend = new IosSimulatorPrototypePermissionBackend(privacy, privacy, options);
+    const backend = new IosSimulatorPrototypePermissionBackend(privacy, privacy, options, privacy);
     const results = await applyPrototypePermissions(["notifications"], "grantDeclared", backend);
     expect(results).toEqual([
       {
@@ -205,10 +222,32 @@ describe("IosSimulatorPrototypePermissionBackend", () => {
     expect(privacy.operations).toEqual([]);
   });
 
+  test("location reads back from locationd, which TCC.db never records (#19370)", async () => {
+    const privacy = new FakePrivacy();
+    const backend = new IosSimulatorPrototypePermissionBackend(privacy, privacy, options, privacy);
+    expect(await applyPrototypePermissions(["location"], "grantDeclared", backend)).toEqual([
+      { name: "location", state: "granted", verified: true },
+    ]);
+    expect(await applyPrototypePermissions(["location"], { deny: ["location"] }, backend)).toEqual([
+      { name: "location", state: "denied", verified: true },
+    ]);
+    expect(privacy.rows.size).toBe(0);
+  });
+
+  test("when-in-use location leaves the always request undetermined", async () => {
+    const privacy = new FakePrivacy();
+    privacy.locationAuthorization = 2;
+    const backend = new IosSimulatorPrototypePermissionBackend(privacy, privacy, options, privacy);
+    expect(await backend.read("location", PROTOTYPE_PERMISSION_MAP.location)).toBe("granted");
+    expect(
+      await backend.read("locationBackground", PROTOTYPE_PERMISSION_MAP.locationBackground),
+    ).toBe("notDetermined");
+  });
+
   test("a limited TCC row reads limited", async () => {
     const privacy = new FakePrivacy();
     privacy.rows.set("photos", { service: "photos", client: options.bundleId, auth_value: 3 });
-    const backend = new IosSimulatorPrototypePermissionBackend(privacy, privacy, options);
+    const backend = new IosSimulatorPrototypePermissionBackend(privacy, privacy, options, privacy);
     expect(await backend.read("photos", PROTOTYPE_PERMISSION_MAP.photos)).toBe("limited");
   });
 });

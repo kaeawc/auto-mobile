@@ -128,7 +128,8 @@ export const savedPrototypeErrorMessages: Record<SavedPrototypeErrorCode, string
   storage_failure: "Check available device storage and retry saving the prototype.",
   unsupported_existing:
     "Update CtrlProxy to read the existing saved prototype before replacing it.",
-  not_found: "List saved prototypes and use an id that still exists.",
+  not_found:
+    "List saved prototypes and use an id that still exists. listSaved and deleteSaved do not cover ProtoViewer: a save that returned viewer.libraryId is in the ProtoViewer library, so reopen it with open and delete it in the ProtoViewer app.",
   unsupported_format: "Update CtrlProxy to support this saved prototype format.",
   internal_error: "Retry the saved prototype request; if it persists, inspect the CtrlProxy logs.",
   unsupported_capability: "The saved prototype viewer cannot draw a node in this spec.",

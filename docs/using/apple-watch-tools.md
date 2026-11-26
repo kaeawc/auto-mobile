@@ -159,14 +159,14 @@ pre-grant notification authorization, so the app must request it. Tap Allow with
   With `clearAppData`, it wipes the app's Documents, Library and tmp before launch. It does not
   observe the launched app, so `verified` stays unset with `verificationSkipped: "platform"`.
 - `terminateApp` succeeds with `wasRunning: false` for a non-running app.
+- With a runner connected, `listApps` marks the front app `foreground`.
 - `crashApp` sends SIGABRT to the running watch app named by `appId`, as on an iOS simulator. It
   checks the watch's unified log and host crash reports for fresh evidence. The result has
   `confirmed`, `evidence` and, when found, a `crashReport` summary. An app that is not running
   fails with `wasRunning: false` and no further signal.
 
-To refresh a widget on demand, make the host app reload its widget timelines on a chosen launch
-argument. Then call `terminateApp` and `launchApp` with that argument, for example
-`launchArguments: ["-reload"]`. The widget updates within about 2 seconds.
+To refresh a widget, make the host app reload timelines on a launch argument such as
+`-reload`, then call `terminateApp` and `launchApp` with it. It updates within 2 seconds.
 
 ## `getLogs`
 

@@ -36,7 +36,7 @@ import {
 } from "./protoViewerSupportWindow";
 
 export const PROTOVIEWER_IMPORTED_WARNING =
-  "ProtoViewer treats this prototype as imported: its requests stay off until someone turns on network for imported prototypes in ProtoViewer's settings, and it is not attached to this host (no awaitEvent, patch or inspect).";
+  "ProtoViewer treats this prototype as imported: its requests stay off until someone turns on network for imported prototypes in ProtoViewer's settings, and it is not attached to this host (no awaitEvent, patch or inspect). listSaved and deleteSaved do not cover it: reopen it with open and delete it in the ProtoViewer app.";
 
 export interface ProtoViewerEntry {
   app: "protoviewer";

@@ -25,6 +25,7 @@ import { type UninstallAppCall, type UninstallGuardOptions } from "../features/a
 import { InspectPackageSigning } from "../features/observe/InspectPackageSigning";
 import type { CarAppTemplateReader } from "../features/observe/android/CarAppTemplateReader";
 import { getWatchRunnerLifecycle } from "../features/watch/WatchRunnerLifecycle";
+import type { WatchForegroundProbe } from "../features/watch/WatchForegroundApps";
 import { IosPackageSigningInspector } from "../features/observe/IosPackageSigningInspector";
 import { iosMutationTokens } from "../features/storage/IosMutationTokens";
 import {
@@ -177,9 +178,9 @@ export interface ListAppsToolDependencies {
 }
 
 const createDefaultListAppsToolDependencies = (
-  watchApps?: WatchAppManagerFactory,
+  deps: Pick<AppToolsDependencies, "watchApps" | "watchForegroundProbe">,
 ): ListAppsToolDependencies => ({
-  queryInstalledApps: createPlatformQueryInstalledApps(watchApps),
+  queryInstalledApps: createPlatformQueryInstalledApps(deps.watchApps, deps.watchForegroundProbe),
 });
 
 export interface TerminateAppExecutor {
@@ -796,6 +797,8 @@ export interface AppToolsDependencies {
   appPermissionsFactory?: AppPermissionsFactory;
   /** The Apple Watch app manager the app tools use for a watch (install through terminate). */
   watchApps?: WatchAppManagerFactory;
+  /** Which listed watch apps are in front; defaults to the connected watch runner (#19359). */
+  watchForegroundProbe?: WatchForegroundProbe;
   retargetWatchRunner?: WatchRunnerRetarget;
   recoverVisionosHostApp?: VisionosHostAppRecovery;
 }
@@ -803,7 +806,7 @@ export interface AppToolsDependencies {
 /** Builds every injectable handler from real defaults overlaid with `dependencies`. */
 function createAppToolHandlers(dependencies: AppToolsDependencies) {
   const listAppsHandler = createListAppsHandler({
-    ...createDefaultListAppsToolDependencies(dependencies.watchApps),
+    ...createDefaultListAppsToolDependencies(dependencies),
     ...dependencies.listApps,
   });
   const launchAppDependencies: LaunchAppToolDependencies = {

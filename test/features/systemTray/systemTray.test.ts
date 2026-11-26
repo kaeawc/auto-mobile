@@ -4423,8 +4423,9 @@ describe("iOS systemTray open/close", () => {
           keyguardShowing: true,
         });
         expect(invalidated).toEqual(Array(opensAt).fill(iosDevice.deviceId));
-        expect(observer.getExecuteCallCount()).toBe(1 + opensAt);
-        expect(timer.getSleepHistory()).toEqual(Array(opensAt - 1).fill(250));
+        // An app-tree open re-reads twice for SpringBoard's cover sheet (#19420).
+        expect(observer.getExecuteCallCount()).toBe(1 + opensAt + 2);
+        expect(timer.getSleepHistory()).toEqual(Array(opensAt).fill(250));
         expect(client.swipeCalls).toHaveLength(1);
       },
     );
@@ -4455,6 +4456,56 @@ describe("iOS systemTray open/close", () => {
       expect(client.swipeCalls).toHaveLength(1);
       const swipe = client.swipeCalls[0];
       expect(swipe.y2 > swipe.y1).toBe(true);
+    });
+
+    test("open returns SpringBoard's cover sheet once a fresh read shows it over the app", async () => {
+      // #19420: iOS 27.2 answered the first post-swipe read with the app's tree and the cover-sheet
+      // lock flags while SpringBoard already drew the cover sheet.
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      const coverSheet = createIosObservation(ios27NotificationCenterHierarchy);
+      let postSwipeReads = 0;
+      observer.setObserveResult(() => {
+        if (client.swipeCalls.length === 0) {
+          return ios26SettingsClosed;
+        }
+        postSwipeReads++;
+        return postSwipeReads === 1 ? ios26TrayOpenSettings : coverSheet;
+      });
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      const result = await new SystemTray(iosDevice).execute({ action: "open", awaitTimeout: 500 });
+      expect(result.payload.success).toBe(true);
+      expect(result.payload.observation).toBe(coverSheet);
+      expect(postSwipeReads).toBe(2);
+      expect(observer.getExecuteOptions().at(-1)?.requireFreshExtraction).toBe(true);
+      expect(timer.getSleepHistory()).toEqual([]);
+    });
+
+    test("open keeps the app-owned cover sheet when SpringBoard never shows it", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      observer.setObserveResult(() =>
+        client.swipeCalls.length > 0 ? ios26TrayOpenSettings : ios26SettingsClosed,
+      );
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      const result = await new SystemTray(iosDevice).execute({ action: "open", awaitTimeout: 500 });
+      expect(result.payload.success).toBe(true);
+      expect(result.payload.observation).toBe(ios26TrayOpenSettings);
+      // One pre-swipe read, the opening read, and two bounded SpringBoard re-reads.
+      expect(observer.getExecuteCallCount()).toBe(4);
+      expect(timer.getSleepHistory()).toEqual([250]);
     });
 
     // Derived observations model partial lock updates and uncertain foregrounds;
@@ -4669,9 +4720,11 @@ describe("iOS systemTray open/close", () => {
             : "Failed to open system tray: the tray remained closed",
         );
         expect(result.payload.observation).toEqual(lastRead);
-        expect(postSwipeReads).toBe(opensAt ?? 3);
-        expect(observer.getExecuteCallCount()).toBe(1 + (opensAt ?? 3));
-        expect(timer.getSleepHistory()).toEqual(Array((opensAt ?? 3) - 1).fill(250));
+        // An app-tree open re-reads twice for SpringBoard's cover sheet (#19420).
+        const reads = opensAt === undefined ? 3 : opensAt + 2;
+        expect(postSwipeReads).toBe(reads);
+        expect(observer.getExecuteCallCount()).toBe(1 + reads);
+        expect(timer.getSleepHistory()).toEqual(Array(opensAt ?? 2).fill(250));
         expect(client.swipeCalls).toHaveLength(1);
         expect(client.swipeCalls[0].y1).toBe(5);
       },

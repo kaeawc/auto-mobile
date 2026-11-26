@@ -7,6 +7,7 @@ import type { FileSystem } from "../../../../utils/filesystem/DefaultFileSystem"
 import { getIosInstalledAppBundleId } from "../../../../utils/ios-cmdline-tools/iosInstalledApp";
 import { SimulatorIosPermissionsBackend } from "../../../../utils/ios-cmdline-tools/IosPermissionsBackend";
 import type { SimCtlClient } from "../../../../utils/ios-cmdline-tools/SimCtlClient";
+import type { SimulatorLocationAuthorizationReader } from "../../../../utils/ios-cmdline-tools/SimulatorLocationdClients";
 import type { TccPermissionReader } from "../../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import type { DataContainerWriter, PrototypeSimctl } from "../../ios/iosPrototypeInstaller";
 import { prototypeJsonSchema, type PrototypeJson } from "../../prototypeJson";
@@ -36,6 +37,8 @@ interface IosDisposableAppInstallerDependencies {
   data: DataContainerWriter;
   /** Reads the simulator's TCC rows, so each declared permission is read back after the grants. */
   tcc: TccPermissionReader;
+  /** Reads locationd's record, where the simulator keeps location authorization (#19370). */
+  location: SimulatorLocationAuthorizationReader;
 }
 
 export class IosDisposableAppInstaller implements DisposableAppInstaller {
@@ -102,6 +105,7 @@ export class IosDisposableAppInstaller implements DisposableAppInstaller {
       new SimulatorIosPermissionsBackend({ deviceId, simctl: this.deps.commands }),
       this.deps.tcc,
       { deviceId, bundleId: appId },
+      this.deps.location,
     );
     // Coordinate with the app permissions tool, which also mutates the device's shared TCC state;
     // the read-back runs under the same lock so no other write lands between a grant and its read.

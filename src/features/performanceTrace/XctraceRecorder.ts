@@ -27,7 +27,11 @@ import {
   type PerformanceTraceTemplate,
 } from "./performanceTraceTemplates";
 import { XctraceTemplateUnavailableError } from "./XctraceTemplateUnavailableError";
-import { findBrokenXctraceCombination, type XctraceEnvironment } from "./xctraceCompatibility";
+import {
+  findBrokenXctraceCombination,
+  simulatorRefusesTemplate,
+  type XctraceEnvironment,
+} from "./xctraceCompatibility";
 import { XctraceUnsupportedEnvironmentError } from "./XctraceUnsupportedEnvironmentError";
 import {
   parseXctraceTable,
@@ -136,7 +140,7 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
   private async startTemplate(
     request: TemplatePerformanceTraceRequest,
   ): Promise<RecordingPerformanceTrace> {
-    await this.assertSupportedEnvironment(request.device, request.signal);
+    await this.assertSupportedEnvironment(request.device, request.template, request.signal);
     await this.assertTemplateInstalled(request.template, request.signal);
     const warnings: string[] = [];
     const target = await this.resolveTarget(request, warnings);
@@ -174,9 +178,13 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
     });
   }
 
-  /** Refuse up front on an Xcode and simulator pair where xctrace cannot finalise (#16999). */
+  /**
+   * Refuse up front on an Xcode and simulator pair where xctrace cannot finalise (#16999), and
+   * a template xctrace cannot record on a simulator there (#18790).
+   */
   private async assertSupportedEnvironment(
     device: BootedDevice,
+    template: PerformanceTraceTemplate,
     signal?: AbortSignal,
   ): Promise<void> {
     const environment = this.deps.environment;
@@ -190,6 +198,14 @@ export class XctraceRecorder implements PerformanceTraceRecorder {
     const xcodeVersion = await environment.xcodeVersion(signal);
     if (xcodeVersion && findBrokenXctraceCombination(xcodeVersion, simulatorRuntime)) {
       throw new XctraceUnsupportedEnvironmentError(xcodeVersion, simulatorRuntime, device.deviceId);
+    }
+    if (xcodeVersion && simulatorRefusesTemplate(xcodeVersion, template)) {
+      throw new ActionableError(
+        `performanceTrace cannot record the ${template} template on simulator ${device.deviceId}: ` +
+          `xctrace with Xcode ${xcodeVersion} reports that Hitches is not supported on this ` +
+          `platform. Record hitches on a physical device, or use the timeProfiler or hangs ` +
+          `template on the simulator.`,
+      );
     }
   }
 

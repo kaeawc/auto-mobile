@@ -4,6 +4,7 @@ import { resolveIosDeviceKind } from "../../utils/ios-cmdline-tools/IosDeviceKin
 import { iosVersionFromSimctlListDevices } from "../../utils/ios-cmdline-tools/iosVersion";
 import { parseXcodeVersion, type Xcodebuild } from "../../utils/ios-cmdline-tools/XcodebuildClient";
 import { logger } from "../../utils/logger";
+import type { PerformanceTraceTemplate } from "./performanceTraceTemplates";
 
 /** An Xcode and simulator runtime pair on which `xctrace record` cannot finalise a trace. */
 export interface XctraceBrokenCombination {
@@ -48,6 +49,20 @@ export function findBrokenXctraceCombination(
       versionHasPrefix(xcodeVersion, row.xcodeVersion) &&
       versionHasPrefix(simulatorRuntime, row.simulatorRuntime),
   );
+}
+
+/**
+ * Whether xctrace refuses this template on every simulator with this Xcode. From Xcode 27 the
+ * Animation Hitches template prints "Hitches is not supported on this platform" on iPhone, iPad
+ * and iPhone Duo simulators and records no run data (#18790). Earlier or unknown Xcode versions
+ * are not refused.
+ */
+export function simulatorRefusesTemplate(
+  xcodeVersion: string,
+  template: PerformanceTraceTemplate,
+): boolean {
+  const major = Number.parseInt(xcodeVersion.trim().split(".")[0] ?? "", 10);
+  return template === "hitches" && Number.isFinite(major) && major >= 27;
 }
 
 const XCODE_VERSION_TIMEOUT_MS = 10_000;

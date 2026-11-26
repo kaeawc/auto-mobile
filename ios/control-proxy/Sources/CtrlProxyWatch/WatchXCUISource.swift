@@ -3,7 +3,7 @@ import Foundation
 import XCTest
 
 @MainActor
-final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
+final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer, WatchAppStateReader {
     typealias CommandFailureCoordinator = WatchCommandFailureCoordinator
 
     private lazy var clockface = XCUIApplication(bundleIdentifier: "com.apple.clockface")
@@ -18,6 +18,17 @@ final class WatchXCUISource: WatchSnapshotSource, WatchGesturePerformer {
         self.app = app
         self.system = system
         self.failureCoordinator = failureCoordinator
+    }
+
+    func state(of bundleId: String) -> WatchAppState {
+        switch XCUIApplication(bundleIdentifier: bundleId).state {
+        case .notRunning: return .notRunning
+        case .runningBackgroundSuspended: return .runningBackgroundSuspended
+        case .runningBackground: return .runningBackground
+        case .runningForeground: return .runningForeground
+        case .unknown: return .unknown
+        @unknown default: return .unknown
+        }
     }
 
     func snapshot() throws -> SdkViewHierarchy {

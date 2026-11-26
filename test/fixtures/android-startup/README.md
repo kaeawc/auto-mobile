@@ -24,6 +24,15 @@ The `*-tablet-api35.txt` files come from a Pixel Tablet AVD (API 35 `google_apis
 | `dumpsys-window-hinter-transition-tablet-api35.txt` | `dumpsys window \| grep -A 8 SystemPerformanceHinter:` right after HOME        |
 | `dumpsys-window-hinter-idle-tablet-api35.txt`       | the same read 6 s later, once the transition finished                          |
 
+The `*-automotive-api34.txt` files come from an Android Automotive emulator (`android-34-ext9`
+`android-automotive` arm64, foreground user 10) with `automotive-fixture` installed. It declares two
+MAIN/LAUNCHER activities, so `resolve-activity` answers with the car chooser (#19181):
+
+| File                                                  | Command                                                              |
+| ----------------------------------------------------- | -------------------------------------------------------------------- |
+| `resolve-activity-car-resolver-automotive-api34.txt`  | `cmd package resolve-activity --brief -a MAIN -c LAUNCHER <package>` |
+| `query-activities-two-launchers-automotive-api34.txt` | `cmd package query-activities --brief -a MAIN -c LAUNCHER <package>` |
+
 The `*-api28.txt` files are still reconstructed from the AOSP output format (no API 28 device was
 available) and are not captures. Replace them with verbatim captures when one is taken; the parser
 tests read only these files, so a capture is a drop-in swap.

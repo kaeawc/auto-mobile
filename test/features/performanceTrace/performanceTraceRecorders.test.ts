@@ -793,3 +793,31 @@ describe("xctrace known-broken Xcode and simulator pairs (#16999)", () => {
     expect(environment.calls).toEqual(["simulatorRuntime"]);
   });
 });
+
+describe("xctrace hitches on a simulator (#18790)", () => {
+  const hitches = { ...iosRequest, template: "hitches" as const };
+
+  test("refuses hitches on an Xcode 27 simulator before running xctrace", async () => {
+    const environment = new FakeXctraceEnvironment({ xcode: "27.2", runtime: "27.2" });
+    const { host, recorder } = xctrace(4321, { environment });
+    const error = await recorder.start(hitches).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ActionableError);
+    expect((error as Error).message).toContain("Hitches is not supported on this platform");
+    expect((error as Error).message).toContain("timeProfiler");
+    expect(host.spawned).toEqual([]);
+  });
+
+  test.each([
+    ["hitches on a physical device", hitches, { xcode: "27.2" }],
+    ["hitches with an unknown Xcode", hitches, { runtime: "27.2" }],
+    ["hitches with Xcode 26 on a simulator", hitches, { xcode: "26.4", runtime: "26.4" }],
+    ["hangs on an Xcode 27 simulator", iosRequest, { xcode: "27.2", runtime: "27.2" }],
+  ])("records %s", async (_label, request, versions) => {
+    const environment = new FakeXctraceEnvironment(versions);
+    const { host, recorder } = xctrace(4321, { environment });
+    const recording = await recorder.start(request);
+    expect(host.spawned).toHaveLength(1);
+    await recording.stop();
+  });
+});

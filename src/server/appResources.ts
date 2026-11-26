@@ -21,6 +21,10 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
+  markWatchForeground,
+  type WatchForegroundProbe,
+} from "../features/watch/WatchForegroundApps";
+import {
   findBootedDeviceForResource,
   listBootedDevicesForResource,
 } from "./resourceDeviceResolver";
@@ -184,7 +188,10 @@ const defaultListInstalledAppsFactory: NonNullable<
 > = (device) => new ListInstalledApps(device);
 
 export interface AppResourceDependencies
-  extends LifecycleAppResourceDependencies, traitsProbe.Dependencies {}
+  extends LifecycleAppResourceDependencies, traitsProbe.Dependencies {
+  /** Which listed watch apps are in front; read per query, never cached (#19359). */
+  watchForegroundProbe?: WatchForegroundProbe;
+}
 
 async function fetchAppsForDevice(
   device: BootedDevice,
@@ -447,7 +454,12 @@ export async function queryInstalledApps(
   const effectiveType = resolveEffectiveAppsQueryType(options.type, cacheEntry, options.profile);
   const effectiveOptions: AppsQueryOptions = { ...options, type: effectiveType };
 
-  const apps = filterAppsByQuery(cacheEntry.queryApps, effectiveOptions);
+  const apps = await markWatchForeground(
+    device,
+    filterAppsByQuery(cacheEntry.queryApps, effectiveOptions),
+    deps.watchForegroundProbe,
+    signal,
+  );
   const unknownApps = launchabilityUnknownApps(cacheEntry.queryApps, effectiveOptions);
   const deviceEntries: AppsQueryDeviceContent[] = [
     {

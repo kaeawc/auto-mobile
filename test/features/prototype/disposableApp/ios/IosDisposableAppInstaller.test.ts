@@ -10,6 +10,7 @@ import type { PrototypePermissionName } from "../../../../../src/features/protot
 import { ActionableError } from "../../../../../src/models/ActionableError";
 import { createExecResult } from "../../../../../src/utils/execResult";
 import type { IosInstalledAppRecord } from "../../../../../src/utils/ios-cmdline-tools/iosInstalledApp";
+import type { SimulatorLocationAuthorizationReader } from "../../../../../src/utils/ios-cmdline-tools/SimulatorLocationdClients";
 import type {
   TccPermissionReader,
   TccPermissionRow,
@@ -29,6 +30,17 @@ const spec = { id: "feedly", root: { type: "column" } };
 const noGrants = { declared: [], granted: [], denied: [] };
 
 /** The simulator's TCC rows for `appId`, keyed by simctl service; a missing row is notDetermined. */
+/** locationd's `Authorization` for the app, as the simulator records location (#19370). */
+class FakeLocationReader implements SimulatorLocationAuthorizationReader {
+  value: number | null = null;
+  reads = 0;
+
+  async readLocationAuthorization(): Promise<number | null> {
+    this.reads += 1;
+    return this.value;
+  }
+}
+
 class FakeTccReader implements TccPermissionReader {
   readonly rows = new Map<string, TccPermissionRow>();
   readonly reads: string[][] = [];
@@ -82,10 +94,20 @@ function harness() {
     return { success: true, deviceId, packageName };
   });
   const tcc = new FakeTccReader(operations);
+  const location = new FakeLocationReader();
   return {
-    installer: new IosDisposableAppInstaller({ simctl, files, commands, data, clearStorage, tcc }),
+    installer: new IosDisposableAppInstaller({
+      simctl,
+      files,
+      commands,
+      data,
+      clearStorage,
+      tcc,
+      location,
+    }),
     operations,
     tcc,
+    location,
     simctl,
     commands,
     files,
@@ -206,8 +228,8 @@ describe("IosDisposableAppInstaller", () => {
     expect(operations.events).toEqual([]);
   });
 
-  test("maps canonical grants and revokes, then reads each declared name back from TCC", async () => {
-    const { installer, commands, tcc } = harness();
+  test("maps canonical grants and revokes, then reads each declared name back", async () => {
+    const { installer, commands, tcc, location } = harness();
     const granted: PrototypePermissionName[] = [
       "microphone",
       "location",
@@ -228,8 +250,12 @@ describe("IosDisposableAppInstaller", () => {
       "calendar",
       "motion",
     ];
-    services.forEach((service) => tcc.set(service, 2));
+    services
+      .filter((service) => !service.startsWith("location"))
+      .forEach((service) => tcc.set(service, 2));
     tcc.set("camera", 0);
+    // `grant location-always` leaves locationd at 4 (captured, iOS 27.2).
+    location.value = 4;
     const results = await installer.applyPermissions(simulator, appId, {
       declared: ["camera", ...granted],
       granted,
@@ -239,7 +265,12 @@ describe("IosDisposableAppInstaller", () => {
       ["privacy", simulator, "revoke", "camera", appId],
       ...services.map((service) => ["privacy", simulator, "grant", service, appId]),
     ]);
-    expect(tcc.reads).toEqual([["camera"], ...services.map((service) => [service])]);
+    // Location lives in locationd's clients.plist, not TCC.db (#19370).
+    expect(tcc.reads).toEqual([
+      ["camera"],
+      ...services.filter((service) => !service.startsWith("location")).map((s) => [s]),
+    ]);
+    expect(location.reads).toBe(2);
     expect(results).toEqual([
       { name: "camera", state: "denied", verified: true },
       ...granted.map((name) => ({ name, state: "granted" as const, verified: true })),

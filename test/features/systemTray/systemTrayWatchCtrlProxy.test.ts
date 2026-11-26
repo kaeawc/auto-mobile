@@ -20,6 +20,7 @@ import {
   watchAlert,
   watchNodes,
   watchExpandedTarget,
+  watchExpandedTargetDiagnosis,
   watchHasExpandedCard,
   watchNotifications,
   watchReplyText,
@@ -51,6 +52,8 @@ import replyCardCapture from "../../fixtures/wear/systemtray/ctrlproxy-round384-
 import replyInputCapture from "../../fixtures/wear/systemtray/ctrlproxy-card-expanded-reply-input.json";
 import replyKeyboardCapture from "../../fixtures/wear/systemtray/ctrlproxy-reply-keyboard.json";
 import replyTypedCapture from "../../fixtures/wear/systemtray/ctrlproxy-reply-keyboard-typed.json";
+import appInFrontCapture from "../../fixtures/wear/surface/observe-full-app-in-front.json";
+import watchFaceCapture from "../../fixtures/wear/surface/observe-project-full-watchface.json";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeTimer } from "../../fakes/FakeTimer";
@@ -92,6 +95,16 @@ const closed: ObserveResult = {
   ...top,
   viewHierarchy: { hierarchy: { node: { $: { bounds: "[0,0][454,454]" } } } },
 };
+
+// Full observations captured on a Wear OS emulator: the fixture app in front, and the watch face,
+// each with the back stack dumpsys reported (the resumed task: the fixture's, then SystemUI's).
+const appInFront = capture(appInFrontCapture, "app-in-front");
+const watchFaceObservation = capture(watchFaceCapture, "watch-face");
+/** `observation` with the resumed activity of another capture's back stack. */
+const resumedAs = (observation: ObserveResult, from: ObserveResult): ObserveResult => ({
+  ...observation,
+  backStack: from.backStack,
+});
 
 const replyCard = capture(replyCardCapture, "reply-card");
 const replyInput = capture(replyInputCapture, "reply-input");
@@ -1015,6 +1028,163 @@ describe("Wear OS 7 stream actions", () => {
       awaitTimeout: 500,
     });
     expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+  });
+
+  describe("an action that opens an app (#16829)", () => {
+    const OPEN_SWIPE = "shell input swipe 227 438";
+    const archive = {
+      action: "tap" as const,
+      notification: { appId: FIXTURE_APP, title: "Fixture alert", tapActionLabel: "Archive" },
+      awaitTimeout: 500,
+    };
+    /**
+     * From the watch face, as in the nightly: dumpsys resumes the fixture as soon as Archive is
+     * tapped, while CtrlProxy keeps serving the tree captured before the tap, with the card still
+     * expanded, for `staleReads` reads; then the app's own tree.
+     */
+    const handOff = (staleReads: number) => {
+      let afterArchive = 0;
+      return (commands: string[]) => {
+        if (!commands.some((command) => command.startsWith(OPEN_SWIPE))) {
+          return resumedAs(closed, watchFaceObservation);
+        }
+        if (!commands.includes(TAP_CARD)) {
+          return resumedAs(withFixtureCard, watchFaceObservation);
+        }
+        if (!commands.includes(TAP_ARCHIVE)) {
+          return resumedAs(expanded, watchFaceObservation);
+        }
+        return afterArchive++ < staleReads ? resumedAs(expanded, appInFront) : appInFront;
+      };
+    };
+    const readsAfterArchive = (commands: string[], reads: number[]) =>
+      reads.filter((index) => index > commands.indexOf(TAP_ARCHIVE)).length;
+
+    test("leaves the app in front instead of pressing Back on the stale expanded card", async () => {
+      const { tray, adb } = setup(handOff(3));
+      const result = await tray.execute(archive);
+      expect(adb.getExecutedCommands()).toContain(TAP_ARCHIVE);
+      expect(adb.getExecutedCommands()).not.toContain(BACK);
+      expect(result).toMatchObject({
+        isError: false,
+        payload: {
+          message: "Tapped watch notification",
+          observation: { activeWindow: { appId: FIXTURE_APP } },
+        },
+      });
+    });
+
+    test("waits a bounded time for the tree to catch up, and never presses Back", async () => {
+      const marks: number[] = [];
+      const stale = handOff(Number.POSITIVE_INFINITY);
+      const { tray, adb } = setup((commands) => {
+        marks.push(commands.length);
+        return stale(commands);
+      });
+      const result = await tray.execute(archive);
+      const commands = adb.getExecutedCommands();
+      expect(commands).not.toContain(BACK);
+      expect(result.isError).toBe(false);
+      // The tap's own read, the first cleanup read, then at most eight polls.
+      expect(readsAfterArchive(commands, marks)).toBeLessThanOrEqual(10);
+    });
+
+    test("still collapses the card when SystemUI stays resumed after the action", async () => {
+      const { tray, adb } = setup((commands) => {
+        if (!commands.includes(TAP_CARD)) {
+          return resumedAs(withFixtureCard, watchFaceObservation);
+        }
+        return commands.includes(TAP_ARCHIVE) && commands.includes(BACK)
+          ? resumedAs(withFixtureCard, watchFaceObservation)
+          : resumedAs(expanded, watchFaceObservation);
+      });
+      await tray.execute(archive);
+      expect(adb.getExecutedCommands().filter((command) => command === BACK)).toHaveLength(1);
+    });
+  });
+
+  test("does not swipe again on the capture its last swipe was decided on (#16829)", async () => {
+    const SCROLL_UP = "shell input swipe 227 317 227 158 400";
+    let afterSwipe = 0;
+    const { tray, adb } = setup((commands) => {
+      if (!commands.includes("shell input tap 227 285")) {
+        return midScreen;
+      }
+      if (!commands.includes(SCROLL_UP)) {
+        return offscreen;
+      }
+      // CtrlProxy serves the tree captured before the swipe twice more, then the scrolled one.
+      return afterSwipe++ < 2 ? offscreen : expanded;
+    });
+    const result = await tray.execute({
+      action: "tap",
+      notification: { appId: FIXTURE_APP, title: "Fixture alert", tapActionLabel: "Archive" },
+      awaitTimeout: 500,
+    });
+    expect(result.isError).toBe(false);
+    expect(adb.getExecutedCommands().filter((command) => command === SCROLL_UP)).toHaveLength(1);
+    expect(adb.getExecutedCommands()).toContain(TAP_ARCHIVE);
+  });
+
+  test("a missing action label reports what the expanded card shows (#16829)", async () => {
+    const { tray } = setup((commands) =>
+      commands.includes(TAP_CARD) ? expanded : withFixtureCard,
+    );
+    await expect(
+      tray.execute({
+        action: "tap",
+        notification: { appId: FIXTURE_APP, title: "Fixture alert", tapActionLabel: "Snooze" },
+        awaitTimeout: 500,
+      }),
+    ).rejects.toThrow(
+      'Watch notification expanded target is not available. Re-observe the expanded notification and use an explicit clickable content or action label. The last read showed one expanded card with no target labelled "Snooze"; its clickable rows: Reply, Archive.',
+    );
+  });
+
+  test("a card that never expands is reported as such (#16829)", async () => {
+    const { tray } = setup(() => withFixtureCard);
+    await expect(
+      tray.execute({
+        action: "tap",
+        notification: { appId: FIXTURE_APP, title: "Fixture alert", tapActionLabel: "Archive" },
+        awaitTimeout: 500,
+      }),
+    ).rejects.toThrow("The last read showed the stream with no expanded card.");
+  });
+
+  test("diagnoses a read without the stream, and duplicate or long labels, within bounds", () => {
+    expect(watchExpandedTargetDiagnosis(undefined, "Archive")).toBe(
+      "the last read had no view hierarchy",
+    );
+    expect(watchExpandedTargetDiagnosis(appInFront.viewHierarchy, "Archive")).toBe(
+      `the last read showed no notification stream (${FIXTURE_APP} in front)`,
+    );
+    const relabelled = (label: (text: string) => string) => {
+      const copy = structuredClone(expanded);
+      for (const node of copy.viewHierarchy
+        ? getHierarchyRoots(copy.viewHierarchy).flatMap(watchNodes)
+        : []) {
+        const props = getNodeProperties(node);
+        if (props?.text === "Reply" || props?.text === "Archive") {
+          props.text = label(props.text);
+        }
+      }
+      return copy.viewHierarchy;
+    };
+    expect(
+      watchExpandedTargetDiagnosis(
+        relabelled(() => "Archive"),
+        "Archive",
+      ),
+    ).toBe(
+      'the last read showed one expanded card with 2 targets labelled "Archive"; its clickable rows: Archive, Archive',
+    );
+    const long = watchExpandedTargetDiagnosis(
+      relabelled((text) => text.repeat(20)),
+      "Snooze",
+    );
+    expect(long).toContain(`its clickable rows: ${"Reply".repeat(8).slice(0, 39)}…, `);
+    expect(long.length).toBeLessThan(200);
   });
 
   test("does not rewind a stream that is already at its top", async () => {

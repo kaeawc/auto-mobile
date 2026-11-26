@@ -8,6 +8,7 @@ import { observeSystemTray, sleep } from "./runtime";
 import { returnToWatchFace, watchAwaySurface } from "./watchFace";
 import {
   isWearHierarchy,
+  WEAR_SYSTEM_UI,
   watchHasExpandedCard,
   watchNotifications,
   watchStreamRoot,
@@ -19,6 +20,9 @@ const CLOSE_POLLS = 8;
 const MAX_CLOSE_PRESSES = 3;
 /** How long one Back is watched for the stream to slide out. */
 const BACK_WAIT_MS = CLOSE_POLLS * POLL_MS;
+/** Reads an app the action opened is given to replace the stream in the captured tree. */
+const HAND_OFF_POLLS = 8;
+const SYSTEM_UI_PACKAGES = new Set([WEAR_SYSTEM_UI, "com.android.systemui"]);
 /**
  * Closing stops this long before the restore deadline, so a read still in flight finishes and
  * "did not close" is reported before the deadline aborts cleanup with a bare timeout.
@@ -33,6 +37,11 @@ export interface WatchRestoreState {
   initiallyOnAppList: boolean;
   /** The action expanded a card, which Back collapses first. */
   expandedByUs: boolean;
+  /**
+   * Set when the action may open an app: the package resumed just before the tapped target, so an
+   * app resumed by the tap is told apart from one that was already in front.
+   */
+  handOffFrom?: { resumed: string | undefined };
   /** Absolute time (injected timer) at which the caller aborts cleanup. */
   deadline: number;
 }
@@ -56,6 +65,56 @@ function back(device: BootedDevice, signal: AbortSignal): Promise<unknown> {
   );
 }
 
+/**
+ * The package of the resumed activity. The back stack is read from dumpsys on every observation,
+ * while the CtrlProxy tree can be one cached before the last input, so an app the tap started
+ * shows here before it replaces the stream in the tree (#16829).
+ */
+export function resumedPackage(observation: ObserveResult): string | undefined {
+  const backStack = observation.backStack;
+  const taskId = backStack?.currentActivity?.taskId ?? backStack?.currentTaskId;
+  return backStack?.tasks.find((task) => task.id === taskId)?.packageName;
+}
+
+/** The app the action handed off to: one SystemUI does not own and that was not resumed before. */
+function handedOffApp(observation: ObserveResult, state: WatchRestoreState): string | undefined {
+  const resumed = resumedPackage(observation);
+  return state.handOffFrom &&
+    resumed &&
+    !SYSTEM_UI_PACKAGES.has(resumed) &&
+    resumed !== state.handOffFrom.resumed
+    ? resumed
+    : undefined;
+}
+
+/**
+ * The action opened an app. A tree read straight after the tap can still be the cached one showing
+ * the expanded card, and Back would send the app it opened to the background (#16829), so wait,
+ * bounded, for the tree to show the app instead. Whatever the last read shows, nothing is pressed
+ * while the app stays resumed.
+ */
+async function settleHandOff(
+  device: BootedDevice,
+  first: ObserveResult,
+  state: WatchRestoreState,
+  signal: AbortSignal,
+): Promise<ObserveResult> {
+  const timer = getSystemTrayDependencies().timer;
+  let current = first;
+  for (
+    let poll = 0;
+    poll < HAND_OFF_POLLS &&
+    isWearHierarchy(current.viewHierarchy) &&
+    handedOffApp(current, state) &&
+    timer.now() < state.deadline - CLOSE_RESERVE_MS;
+    poll++
+  ) {
+    await sleep(POLL_MS, signal);
+    current = await read(device, signal);
+  }
+  return current;
+}
+
 /** Returns the watch to the screen the action started from, and the final observation. */
 export async function restoreWatchStream(
   device: BootedDevice,
@@ -63,6 +122,13 @@ export async function restoreWatchStream(
   signal: AbortSignal,
 ): Promise<ObserveResult> {
   let current = await read(device, signal);
+  if (handedOffApp(current, state)) {
+    current = await settleHandOff(device, current, state, signal);
+    // An app that already went away again (a trampoline that finished) leaves the stream behind.
+    if (handedOffApp(current, state)) {
+      return current;
+    }
+  }
   if (state.expandedByUs && watchHasExpandedCard(current.viewHierarchy)) {
     current = await collapseCard(device, current, signal);
   } else if (

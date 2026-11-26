@@ -79,6 +79,41 @@ class PrototypeWebViewNavigationTest {
   }
 
   @Test
+  fun titleSetAfterFinishIsWrittenOnceTheTitleChanges() {
+    navigation.load(allowed)
+    navigation.titleChanged()
+    assertEquals("no title is written before the page has loaded", 1, updates.size)
+    navigation.finished(allowed)
+    assertEquals(PrototypeScalar.Text(""), updates.last().writes["title"])
+    view.title = "Example Domain"
+    navigation.titleChanged()
+    val late = updates.last()
+    assertEquals(mapOf("title" to PrototypeScalar.Text("Example Domain")), late.writes)
+    assertTrue(late.actions.isEmpty())
+    val count = updates.size
+    navigation.titleChanged()
+    assertEquals("an unchanged title is not written again", count, updates.size)
+    view.title = "t".repeat(MAX_WEB_VIEW_TITLE_LENGTH * 4)
+    navigation.titleChanged()
+    assertEquals(
+      MAX_WEB_VIEW_TITLE_LENGTH,
+      (updates.last().writes["title"] as PrototypeScalar.Text).value.length,
+    )
+  }
+
+  @Test
+  fun previousPageTitleIsDroppedOnceANewNavigationStarts() {
+    navigation.load(allowed)
+    navigation.finished(allowed)
+    navigation.reset()
+    view.title = "Old page"
+    navigation.titleChanged()
+    navigation.started(allowed)
+    navigation.titleChanged()
+    assertTrue(updates.none { it.writes["title"] == PrototypeScalar.Text("Old page") })
+  }
+
+  @Test
   fun backAndReloadRouteOnlyToAttachedNode() = runTest {
     val fetcher = PrototypeWebFetcher { _, _, _ -> error("no fetch expected") }
     val module =

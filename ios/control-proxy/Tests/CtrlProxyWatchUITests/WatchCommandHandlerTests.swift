@@ -497,8 +497,51 @@ final class WatchCommandHandlerTests: XCTestCase {
     func testAllowlistContainsExactlySupportedCommands() {
         XCTAssertEqual(
             WatchCommandHandler.supportedCommands,
-            ["hierarchy", "tap", "swipe", "home", "crown", "type", "face"]
+            ["hierarchy", "tap", "swipe", "home", "crown", "type", "face", "appStates"]
         )
+    }
+
+    func testAppStatesReportsEachRequestedBundleOnce() throws {
+        let source = FakeWatchSource()
+        let reader = FakeAppStates([
+            "dev.example.front": .runningForeground,
+            "dev.example.back": .runningBackgroundSuspended,
+        ])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source, appStates: reader)
+        let json =
+            #"{"type":"appStates","requestId":"s","bundleIds":["dev.example.front","dev.example.back","dev.example.front","dev.example.gone"]}"#
+        let response = handler.handle(Data(json.utf8))
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "appStates_result")
+        XCTAssertEqual(response.requestId, "s")
+        let decoded = try JSONDecoder().decode(WatchResponse.self, from: JSONEncoder().encode(response))
+        XCTAssertEqual(decoded.states, [
+            "dev.example.front": .runningForeground,
+            "dev.example.back": .runningBackgroundSuspended,
+            "dev.example.gone": .notRunning,
+        ])
+        XCTAssertEqual(reader.queried, ["dev.example.front", "dev.example.back", "dev.example.gone"])
+    }
+
+    func testAppStatesRejectsInvalidRequestsAndMissingReader() {
+        let source = FakeWatchSource()
+        let reader = FakeAppStates([:])
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source, appStates: reader)
+        let tooMany = (0 ... WatchCommandHandler.maxAppStateBundles).map { "\"b\($0)\"" }.joined(separator: ",")
+        for json in [
+            #"{"type":"appStates"}"#,
+            #"{"type":"appStates","bundleIds":[]}"#,
+            #"{"type":"appStates","bundleIds":[""]}"#,
+            #"{"type":"appStates","bundleIds":["# + tooMany + #"]}"#,
+        ] {
+            let response = handler.handle(Data(json.utf8))
+            XCTAssertFalse(response.success, json)
+            XCTAssertEqual(response.errorCode, "invalid_request", json)
+        }
+        XCTAssertTrue(reader.queried.isEmpty)
+        let withoutReader = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let response = withoutReader.handle(Data(#"{"type":"appStates","bundleIds":["a"]}"#.utf8))
+        XCTAssertEqual(response.errorCode, "unsupported_on_watchos")
     }
 
     func testFaceOperationsAndDumpText() throws {
@@ -577,7 +620,9 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(event.type, "connected")
         XCTAssertEqual(event.id, 7)
         XCTAssertEqual(event.platform, "watchos")
-        XCTAssertEqual(event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type", "face"])
+        XCTAssertEqual(
+            event.supportedCommands, ["hierarchy", "tap", "swipe", "home", "crown", "type", "face", "appStates"]
+        )
         XCTAssertEqual(event.supportedFeatures, [])
     }
 
@@ -1218,6 +1263,21 @@ final class WatchCommandHandlerTests: XCTestCase {
         XCTAssertEqual(decoded.errorCode, "app_not_foreground")
         XCTAssertNil(decoded.data)
         XCTAssertEqual(source.calls, [])
+    }
+}
+
+@MainActor
+private final class FakeAppStates: WatchAppStateReader {
+    private let states: [String: WatchAppState]
+    private(set) var queried: [String] = []
+
+    init(_ states: [String: WatchAppState]) {
+        self.states = states
+    }
+
+    func state(of bundleId: String) -> WatchAppState {
+        queried.append(bundleId)
+        return states[bundleId] ?? .notRunning
     }
 }
 

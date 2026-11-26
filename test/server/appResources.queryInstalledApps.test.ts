@@ -872,3 +872,64 @@ describe("queryInstalledApps per-profile launchability (#6798 review)", () => {
     expect(content.launchabilityUnknownProfiles).toBeUndefined();
   });
 });
+
+describe("queryInstalledApps watch foreground (#19359)", () => {
+  const watch: BootedDevice = {
+    deviceId: "watch-foreground-device",
+    name: "Apple Watch Series 12 (46mm)",
+    platform: "watchos",
+  };
+
+  beforeEach(() => {
+    const devices = new FakeDeviceUtils();
+    devices.setBootedDevices("watchos", [watch]);
+    PlatformDeviceManagerFactory.setInstance(devices);
+  });
+
+  afterEach(() => {
+    PlatformDeviceManagerFactory.setInstance(null);
+    invalidateInstalledAppsCache(watch.deviceId);
+  });
+
+  test("marks only the app the runner reports in front, read fresh on every query", async () => {
+    const asked: string[][] = [];
+    let front = "com.apple.NanoSettings";
+    const watchDeps: AppResourceDependencies = {
+      ...deps,
+      listInstalledAppsFactory: () => ({
+        executeDetailedResult: async () => {
+          throw new Error("not exercised on watchOS");
+        },
+        executeIosDetailedResult: async () => ({
+          apps: [
+            { bundleId: "com.apple.NanoSettings", type: "system" as const, launchable: true },
+            { bundleId: "dev.example.watchapp", type: "user" as const, launchable: true },
+          ],
+          successful: true,
+        }),
+      }),
+      watchForegroundProbe: {
+        foregroundBundleIds: async (deviceId, bundleIds) => {
+          expect(deviceId).toBe(watch.deviceId);
+          asked.push([...bundleIds]);
+          return new Set([front]);
+        },
+      },
+    };
+    const query = { deviceId: watch.deviceId, platform: "watchos" as const, type: "all" as const };
+    const first = await queryInstalledApps(query, undefined, watchDeps);
+    expect(first.devices[0]!.apps.map((app) => [app.packageName, app.foreground])).toEqual([
+      ["com.apple.NanoSettings", true],
+      ["dev.example.watchapp", false],
+    ]);
+    front = "dev.example.watchapp";
+    const second = await queryInstalledApps(query, undefined, watchDeps);
+    expect(
+      second.devices[0]!.apps.filter((app) => app.foreground).map((app) => app.packageName),
+    ).toEqual(["dev.example.watchapp"]);
+    expect(asked).toEqual([
+      ["com.apple.NanoSettings", "dev.example.watchapp"],
+      ["com.apple.NanoSettings", "dev.example.watchapp"],
+    ]);
+  });
+});

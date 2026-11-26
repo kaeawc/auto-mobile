@@ -63,6 +63,26 @@ final class PrototypeWebViewNavigationTests: XCTestCase {
     }
 
     @MainActor
+    func testTitleSetAfterFinishIsWrittenOnceTheTitleChanges() async throws {
+        let page = FakeWebPage()
+        let probe = try NavigationProbe(page: page)
+        await probe.navigation.prepare { _ in }
+        probe.navigation.load("https://example.com/")
+        probe.navigation.titleChanged()
+        XCTAssertEqual(probe.updates.count, 1, "no title is written before the page has loaded")
+        probe.navigation.finished("https://example.com/")
+        XCTAssertEqual(probe.updates.last?.writes.first(where: { $0.0 == "title" })?.1, .string(""))
+        page.title = "Example Domain"
+        probe.navigation.titleChanged()
+        XCTAssertEqual(probe.updates.last?.writes.map(\.0), ["title"])
+        XCTAssertEqual(probe.updates.last?.writes.first?.1, .string("Example Domain"))
+        XCTAssertTrue(probe.updates.last?.actions.isEmpty ?? false)
+        let count = probe.updates.count
+        probe.navigation.titleChanged()
+        XCTAssertEqual(probe.updates.count, count, "an unchanged title is not written again")
+    }
+
+    @MainActor
     func testRuleCompilationFailureCannotLoad() async throws {
         enum CompilationError: Error { case badRules }
         let page = FakeWebPage()

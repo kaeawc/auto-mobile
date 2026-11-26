@@ -75,6 +75,11 @@ internal class PrototypeWebViewClient(
     released = true
   }
 
+  /** WebChromeClient.onReceivedTitle can arrive after onPageFinished (#19418). */
+  fun titleChanged() {
+    if (!inactive) navigation.titleChanged()
+  }
+
   override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
     if (inactive) return true
     val url = request.url.toString()

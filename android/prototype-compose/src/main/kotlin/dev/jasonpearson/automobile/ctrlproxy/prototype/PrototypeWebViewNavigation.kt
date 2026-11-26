@@ -16,6 +16,9 @@ internal class PrototypeWebViewNavigation(
   private var interact: (PrototypeInteraction.WebNavigation) -> Unit,
 ) {
   private var loading = false
+  // The status last published and the title written with it, so a late title is written once.
+  private var status: String? = null
+  private var publishedTitle = ""
 
   fun update(node: PrototypeWebViewNode, interact: (PrototypeInteraction.WebNavigation) -> Unit) {
     this.node = node
@@ -24,6 +27,8 @@ internal class PrototypeWebViewNavigation(
 
   fun reset() {
     loading = false
+    status = null
+    publishedTitle = ""
   }
 
   fun permits(url: String, mainFrame: Boolean): Boolean {
@@ -64,19 +69,34 @@ internal class PrototypeWebViewNavigation(
     publish("error")
   }
 
+  /**
+   * WebView can deliver a page's title after onPageFinished (onReceivedTitle), so a loaded page's
+   * title is written again whenever it changes (#19418). Nothing is written before the page loaded.
+   */
+  fun titleChanged() {
+    val key = node.titleKey ?: return
+    if (status != "loaded") return
+    val title = boundedTitle(page.title)
+    if (title == publishedTitle) return
+    publishedTitle = title
+    interact(
+      PrototypeInteraction.WebNavigation(mapOf(key to PrototypeScalar.Text(title)), emptyList()),
+    )
+  }
+
   private fun publish(
     status: String,
     url: String = "",
     actions: List<PrototypeAction> = emptyList(),
   ) {
+    this.status = status
+    // Only a committed page has a title; a previous page's title must not leak into an error.
+    publishedTitle = if (status == "loaded") boundedTitle(page.title) else ""
     interact(
       PrototypeInteraction.WebNavigation(
         buildMap {
           node.navigationStateKey?.let { put(it, PrototypeScalar.Text(status)) }
-          // Only a committed page has a title; a previous page's title must not leak into an error.
-          node.titleKey?.let {
-            put(it, PrototypeScalar.Text(if (status == "loaded") boundedTitle(page.title) else ""))
-          }
+          node.titleKey?.let { put(it, PrototypeScalar.Text(publishedTitle)) }
           node.canGoBackKey?.let { put(it, PrototypeScalar.BooleanValue(page.canGoBack)) }
         },
         actions.map { bindWebViewUrl(it, url) },

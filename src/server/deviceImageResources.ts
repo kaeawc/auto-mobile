@@ -62,7 +62,8 @@ import { SingleFlight } from "../utils/cache/SingleFlight";
 /** Per-read response budget; the shared fetch has its own lifecycle and hard cap. */
 export const ANDROID_PROVISIONING_CATALOG_BUDGET_MS = 9_000;
 export const ANDROID_INVENTORY_BACKGROUND_CAP_MS = 30_000;
-// The stage includes configured images, so it uses the same 2.5s freshness bound.
+// The stage includes configured images, so it uses the same 2.5s freshness bound. A read that
+// misses it and outlasts its budget falls back to the last complete result instead (#19437).
 export const ANDROID_INVENTORY_STAGE_TTL_MS = 2_500;
 
 const ANDROID_DEVICE_IMAGE_RESOURCE_CACHE_TTL_MS = 2_500; // Stay below adb's ~5s device-list cache.
@@ -70,10 +71,14 @@ interface AndroidBackgroundFetch {
   promise: Promise<PlatformResourceResult>;
   controller: AbortController;
   inventory?: AndroidConfiguredInventoryResult;
+  /** The creatable-profile catalog, set as soon as it is read; it never waits on the inventory. */
+  catalog?: ProvisioningCatalog;
 }
 interface AndroidImageCacheState {
   background?: AndroidBackgroundFetch;
   stage?: TTLCache<string, PlatformResourceResult>;
+  /** The last complete background result, kept until lifecycle invalidation (#19437). */
+  lastComplete?: PlatformResourceResult;
   cache: TTLCache<string, PlatformResourceResult> | null;
   singleFlight: SingleFlight<string, PlatformResourceResult>;
   generation: number;
@@ -85,6 +90,7 @@ const androidImageCacheStates = new Set<WeakRef<AndroidImageCacheState>>();
 
 function resetAndroidImageCacheState(state: AndroidImageCacheState): void {
   state.stage?.clear();
+  state.lastComplete = undefined;
   state.cache = null;
   state.singleFlight = new SingleFlight();
 }
@@ -553,7 +559,11 @@ async function generateAndroidResource(
           timer,
           budgetMs,
         });
-        if (generation === state.generation && result.catalogObservation.catalogComplete) {
+        if (
+          generation === state.generation &&
+          result.catalogObservation.catalogComplete &&
+          result.inventoryObservation.complete
+        ) {
           getAndroidDeviceImageResourceCache(state, timer).set(cacheKey, result);
         }
         return result;
@@ -591,6 +601,9 @@ function startAndroidBackgroundFetch({
               onInventoryComplete: (inventory) => {
                 fetch.inventory = inventory;
               },
+              onCatalogComplete: (catalog) => {
+                fetch.catalog = catalog;
+              },
             }),
           {
             timer,
@@ -603,15 +616,18 @@ function startAndroidBackgroundFetch({
             },
           },
         );
-        if (generation === state.generation && result.catalogObservation.catalogComplete) {
-          state.stage ??= new TTLCache(timer, { ttlMs: ANDROID_INVENTORY_STAGE_TTL_MS });
-          state.stage.set("android", result);
+        if (generation === state.generation) {
+          stageAndroidResult(state, timer, result);
         }
         return result;
       } catch (error) {
         if (hardCapExpired) {
           logger.warn("Android inventory background fetch reached its 30000ms hard cap", error);
-          return incompleteAndroidResource(fetch.inventory, ANDROID_INVENTORY_BACKGROUND_CAP_MS);
+          return incompleteAndroidResource(
+            fetch.inventory,
+            ANDROID_INVENTORY_BACKGROUND_CAP_MS,
+            fetch.catalog,
+          );
         }
         if (controller.signal.aborted) {
           // Lifecycle invalidation supersedes this observation; callers can retry the replacement.
@@ -642,6 +658,22 @@ function startAndroidBackgroundFetch({
   return fetch;
 }
 
+/** Stage a complete background result; keep it as the last complete one when its inventory is. */
+function stageAndroidResult(
+  state: AndroidImageCacheState,
+  timer: Timer,
+  result: PlatformResourceResult,
+): void {
+  if (!result.catalogObservation.catalogComplete) {
+    return;
+  }
+  state.stage ??= new TTLCache(timer, { ttlMs: ANDROID_INVENTORY_STAGE_TTL_MS });
+  state.stage.set("android", result);
+  if (result.inventoryObservation.complete) {
+    state.lastComplete = result;
+  }
+}
+
 function supersededAndroidResource(
   inventory: AndroidConfiguredInventoryResult | undefined,
 ): PlatformResourceResult {
@@ -668,6 +700,7 @@ function supersededAndroidResource(
 function incompleteAndroidResource(
   inventory: AndroidConfiguredInventoryResult | undefined,
   budgetMs: number,
+  catalog?: ProvisioningCatalog,
 ): PlatformResourceResult {
   const observation =
     inventory?.observation ??
@@ -678,17 +711,19 @@ function incompleteAndroidResource(
   return {
     platform: "android",
     images: inventory?.images ?? [],
-    provisioningCatalog: emptyProvisioningCatalog(),
-    catalogObservation: {
-      catalogComplete: false,
-      error: {
-        code: "timeout",
-        message: `Android device-image resource generation exceeded the ${budgetMs}ms budget; catalog is incomplete.`,
-        retryable: true,
-        retryAfterMs: ANDROID_INVENTORY_RETRY_AFTER_MS,
-        missing: observation.complete ? ["catalog"] : ["catalog", "configuredInventory"],
-      },
-    },
+    provisioningCatalog: catalog ?? emptyProvisioningCatalog(),
+    catalogObservation: catalog
+      ? { catalogComplete: true }
+      : {
+          catalogComplete: false,
+          error: {
+            code: "timeout",
+            message: `Android device-image resource generation exceeded the ${budgetMs}ms budget; catalog is incomplete.`,
+            retryable: true,
+            retryAfterMs: ANDROID_INVENTORY_RETRY_AFTER_MS,
+            missing: observation.complete ? ["catalog"] : ["catalog", "configuredInventory"],
+          },
+        },
     inventoryObservation: observation.complete
       ? observation
       : {
@@ -723,11 +758,18 @@ async function computeAndroidResource(options: {
       label: "Android device-image resource generation",
     });
   } catch (error) {
+    if (state.lastComplete) {
+      logger.warn(
+        `[DeviceImageResources] Android device-image resource generation exceeded ${budgetMs}ms; returning the last complete inventory while the refresh continues`,
+        error,
+      );
+      return state.lastComplete;
+    }
     logger.warn(
       `[DeviceImageResources] Android device-image resource generation exceeded ${budgetMs}ms; returning retryable incomplete catalog`,
       error,
     );
-    return incompleteAndroidResource(background.inventory, budgetMs);
+    return incompleteAndroidResource(background.inventory, budgetMs, background.catalog);
   }
 }
 
@@ -737,24 +779,38 @@ async function buildAndroidResourceResult({
   timer,
   signal,
   onInventoryComplete,
+  onCatalogComplete,
 }: {
   deviceManager: DeviceImageDiscoveryManager;
   avdManager: DeviceImageAvdManager;
   timer: Timer;
   signal: AbortSignal;
   onInventoryComplete: (inventory: AndroidConfiguredInventoryResult) => void;
+  onCatalogComplete: (catalog: ProvisioningCatalog) => void;
 }): Promise<PlatformResourceResult> {
+  // The creatable-profile catalog is read beside the configured-device inventory, so a slow
+  // inventory cannot hold it back (#19437).
+  const catalogRead = (async () => {
+    const [installedSystemImages, profiles] = await Promise.all([
+      avdManager.listInstalledSystemImages(undefined, signal),
+      avdManager.listDevices(signal),
+    ]);
+    const systemImages = new Map(installedSystemImages.map((image) => [image.packageName, image]));
+    const catalog = buildAndroidProvisioningCatalog([...systemImages.values()], profiles);
+    onCatalogComplete(catalog);
+    return catalog;
+  })();
+  // Observe a catalog failure here too, so it is never unhandled while the inventory runs.
+  void catalogRead.catch((error: unknown) => {
+    logger.debug(`Android provisioning catalog read failed: ${errorMessage(error)}`);
+  });
   const android = await buildAndroidImages(deviceManager, avdManager, timer, signal);
   onInventoryComplete(android);
-  const [installedSystemImages, profiles] = await Promise.all([
-    avdManager.listInstalledSystemImages(undefined, signal),
-    avdManager.listDevices(signal),
-  ]);
-  const systemImages = new Map(installedSystemImages.map((image) => [image.packageName, image]));
+  const provisioningCatalog = await catalogRead;
   return {
     platform: "android",
     images: android.images,
-    provisioningCatalog: buildAndroidProvisioningCatalog([...systemImages.values()], profiles),
+    provisioningCatalog,
     catalogObservation: { catalogComplete: true },
     inventoryObservation: android.observation,
   };

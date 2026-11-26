@@ -734,12 +734,14 @@ describe("Device Image Resources with Fakes", () => {
       timer.advanceTime(5_001);
       const result = await pending;
 
-      expect(result.catalogComplete).toBe(false);
-      expect(result.catalogObservations.android).toMatchObject({
-        catalogComplete: false,
-        error: {
-          code: "timeout",
-          message: expect.stringContaining("5000"),
+      // The creatable-profile catalog is read beside the hung listing, so it is complete (#19437);
+      // the configured-device inventory is what stays incomplete.
+      expect(result.catalogComplete).toBe(true);
+      expect(result.catalogObservations.android).toEqual({ catalogComplete: true });
+      expect(result.configuredInventory).toMatchObject({
+        complete: false,
+        observations: {
+          android: { complete: false, error: { message: expect.stringContaining("5000") } },
         },
       });
       // The shared provenance child survives the caller's shorter wait.
@@ -778,14 +780,9 @@ describe("Device Image Resources with Fakes", () => {
       timer.advanceTime(5_001);
       const result = await pending;
 
-      expect(result.catalogComplete).toBe(false);
-      expect(result.catalogObservations.android).toMatchObject({
-        catalogComplete: false,
-        error: {
-          code: "timeout",
-          message: expect.stringContaining("5000"),
-        },
-      });
+      // The catalog does not wait on the hung discovery (#19437); only the inventory is incomplete.
+      expect(result.catalogComplete).toBe(true);
+      expect(result.catalogObservations.android).toEqual({ catalogComplete: true });
       expect(result.configuredInventory).toEqual({
         schemaVersion: 1,
         complete: false,

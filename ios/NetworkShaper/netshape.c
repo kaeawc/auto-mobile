@@ -444,8 +444,10 @@ static int inspect_first(int fd, const void *buf, size_t n) {
 }
 
 /// Gate for one outgoing datagram on a shaped socket (or to remote `to`). Returns 1 to drop it
-/// silently (loss), -1 with errno for offline, 0 to send.
+/// silently (loss), -1 with errno for offline, 0 to send. A destination named by this call decides
+/// for this datagram: a loopback `to` is never shaped, even on a socket that sent remotely (#19120).
 static int datagram_out(int fd, const struct sockaddr *to) {
+    if (to && !is_remote(to) && is_dgram(fd)) return 0;
     if (to && is_remote(to) && fd >= 0 && fd < MAX_FD) {
         atomic_store(&g_shaped[fd], 1);
         atomic_store(&g_rule[fd], (signed char)match_rule(to));
@@ -660,8 +662,18 @@ static ssize_t my_sendmsg_x(int fd, const struct msghdr_x *m, unsigned int cnt, 
     if (g_depth == 0 && cnt > 0) {
         int gate = datagram_out(fd, (const struct sockaddr *)m[0].msg_name);
         if (gate < 0) return -1;
-        if (gate > 0) return (ssize_t)cnt; // the whole batch is lost
+        if (gate > 0) return 1; // the first datagram is lost; the caller resends the rest
         if (m[0].msg_iovlen > 0 && !is_dgram(fd) && inspect_first(fd, m[0].msg_iov[0].iov_base, m[0].msg_iov[0].iov_len) < 0) return -1;
+        // Each datagram has its own destination and loss roll (#19120): send the run that passes,
+        // and let the caller's next call start at the first one that does not.
+        if (is_dgram(fd)) {
+            for (unsigned int i = 1; i < cnt; i++) {
+                if (datagram_out(fd, (const struct sockaddr *)m[i].msg_name) != 0) {
+                    cnt = i;
+                    break;
+                }
+            }
+        }
     }
     if (OUTER(sendmsg_x(fd, m, cnt, fl)) && _r > 0 && shaped(fd)) {
         ssize_t total = 0;

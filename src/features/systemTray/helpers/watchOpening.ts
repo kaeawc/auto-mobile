@@ -2,8 +2,9 @@ import { ActionableError, type BootedDevice, type ObserveResult } from "../../..
 import { logger } from "../../../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { getSystemTrayDependencies } from "./dependencies";
-import { ensureSystemTrayOpen, observeSystemTray, sleep } from "./runtime";
+import { ensureSystemTrayOpen, sleep } from "./runtime";
 import { returnToWatchFace } from "./watchFace";
+import { readWatchNow } from "./watchRead";
 import { watchAlert } from "./watchHierarchy";
 
 const ALERT_POLL_MS = 250;
@@ -12,12 +13,7 @@ const ALERT_DISMISS_TIMEOUT_MESSAGE =
   "A notification alert is covering the watch. Dismiss the alert with Back, then retry opening the notification stream.";
 
 function readWatch(device: BootedDevice, signal?: AbortSignal): Promise<ObserveResult> {
-  return observeSystemTray(
-    getSystemTrayDependencies().observeScreenFactory(device),
-    0,
-    signal,
-    true,
-  );
+  return readWatchNow(device, signal);
 }
 
 async function dismissWatchAlert(

@@ -24,12 +24,12 @@ import {
   watchTapLabel,
 } from "./helpers/watchReply";
 import { watchAwaySurface } from "./helpers/watchFace";
+import { readWatchNow } from "./helpers/watchRead";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import { getSystemTrayDependencies, resolveUniqueTrayAppLabel } from "./helpers/dependencies";
 import {
   ensureSystemTrayClosed,
   ensureSystemTrayOpen,
-  observeSystemTray,
   resolveSystemTrayAwaitTimeout,
   sleep,
 } from "./helpers/runtime";
@@ -329,8 +329,7 @@ export class WatchSystemTray {
   ) {}
 
   private read(signal = this.signal): Promise<ObserveResult> {
-    const deps = getSystemTrayDependencies();
-    return observeSystemTray(deps.observeScreenFactory(this.device), 0, signal, true);
+    return readWatchNow(this.device, signal);
   }
 
   private command(command: string, signal = this.signal): Promise<unknown> {

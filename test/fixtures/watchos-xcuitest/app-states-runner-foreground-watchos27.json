@@ -1,0 +1,1 @@
+{"type":"appStates_result","requestId":"r1","success":true,"states":{"dev.example.notinstalled":"notRunning","com.apple.Carousel":"runningForeground","com.apple.clockface":"runningForeground","dev.jasonpearson.automobile.ctrlproxy.watch":"runningForeground","com.apple.NanoSettings":"notRunning","com.apple.NanoCalculator.watchkitapp":"notRunning"}}

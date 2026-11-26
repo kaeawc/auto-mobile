@@ -12,6 +12,7 @@ export type WatchCommand =
   | { type: "face"; op: "dump" }
   | { type: "type"; text: string }
   | { type: "hierarchy" | "home" }
+  | { type: "appStates"; bundleIds: string[] }
   | { type: "tap"; identifier: string }
   | { type: "tap"; x: number; y: number }
   | { type: "crown"; delta: number; velocity?: number }
@@ -56,6 +57,14 @@ interface Pending {
   type: string;
   resolve(value: unknown): void;
   reject(error: unknown): void;
+}
+
+/** What a successful reply resolves to: face text, appStates states, else its data. */
+function replyPayload(response: Record<string, unknown>): unknown {
+  if (response.type === "face_result") {
+    return response.text ?? response.data;
+  }
+  return response.type === "appStates_result" ? response.states : response.data;
 }
 
 export class WebSocketWatchRunnerClient implements WatchRunnerClient {
@@ -157,9 +166,7 @@ export class WebSocketWatchRunnerClient implements WatchRunnerClient {
         (pending.type === "hierarchy" ? "hierarchy_update" : `${pending.type}_result`) &&
       response.success === true
     ) {
-      pending.resolve(
-        response.type === "face_result" ? (response.text ?? response.data) : response.data,
-      );
+      pending.resolve(replyPayload(response));
     }
   }
 

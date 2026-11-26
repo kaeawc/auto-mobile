@@ -97,7 +97,7 @@ error_count="$(printf '%s' "$errors" | grep -c . || true)"
 # Fail closed: a non-zero exit with NO parseable errors means tsgo never ran.
 if [[ "$tsc_status" -ne 0 && "$error_count" -eq 0 ]]; then
   echo "ERROR: tsgo exited $tsc_status without reporting any parseable errors." >&2
-  echo "The type-checker likely failed to run. Raw output:" >&2
+  echo "tsgo, or the host-slot wrapper that runs it, did not complete. Its output (stdout and stderr):" >&2
   printf '%s\n' "$raw_tsc" >&2
   exit 3
 fi

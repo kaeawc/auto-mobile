@@ -59,6 +59,17 @@ describe("isStatusBarDiffSubtree (#19123, #19155)", () => {
     );
   });
 
+  test("skips the SystemUI clock even when the shade header makes it clickable", () => {
+    expect(isStatusBarDiffSubtree({ "resource-id": id("clock"), clickable: "true" })).toBe(true);
+  });
+
+  test("keeps a status-bar-shaped id under an actionable ancestor", () => {
+    expect(
+      isStatusBarDiffSubtree({ "resource-id": id("wifi_connected_summary") }, () => true),
+    ).toBe(false);
+    expect(isStatusBarDiffSubtree({ "resource-id": id("status_bar") }, () => true)).toBe(true);
+  });
+
   test("leaves the skeleton's status-bar folding allowlist unchanged", () => {
     expect(isSystemUiStatusBarId(id("mobile_combo"))).toBe(false);
   });

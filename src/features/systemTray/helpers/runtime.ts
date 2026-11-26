@@ -49,6 +49,11 @@ export const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 // Guarantee at most two supplemental reads over an app, without repeating the swipe.
 const IOS_APP_TRAY_MIN_OPEN_OBSERVATIONS = 3;
 
+// iOS 27 draws the cover sheet in SpringBoard's tree, but a read right after the open swipe can
+// still return the app's tree with the cover-sheet lock flags (#19420). Re-read fresh this many
+// times for SpringBoard's cover sheet; iOS 26.5 keeps the app tree, so its read is returned.
+const IOS_APP_TRAY_SPRINGBOARD_REREADS = 2;
+
 // When waiting for a notification, re-issue the shade expand (at most this often) if the
 // shade is found closed. A high-importance notification that re-posts (e.g. a persistent
 // connection push) re-fires a heads-up that can collapse the shade or race the initial
@@ -234,6 +239,10 @@ export const waitForSystemTrayOpen = async (
       detector.device.platform === "ios" && !!packageName && !packageName.includes("springboard")
     );
   };
+  const opened = (candidate: ObserveResult): Promise<ObserveResult> | ObserveResult =>
+    isIosAppObservation(candidate)
+      ? preferSpringBoardCoverSheet(candidate, { detector, observeScreen, minTimestamp, signal })
+      : candidate;
   const minimumObservations = isIosAppObservation(observation)
     ? IOS_APP_TRAY_MIN_OPEN_OBSERVATIONS
     : 1;
@@ -241,7 +250,7 @@ export const waitForSystemTrayOpen = async (
   while (timer.now() - startTime < awaitTimeoutMs || observations < minimumObservations) {
     throwIfAborted(signal);
     if (detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock)) {
-      return observation;
+      return opened(observation);
     }
     const remainingMs = awaitTimeoutMs - (timer.now() - startTime);
     await sleep(
@@ -260,7 +269,43 @@ export const waitForSystemTrayOpen = async (
     observations++;
   }
 
-  return observation;
+  return detector.isTrayOpen(observation.viewHierarchy, observation.deviceLock)
+    ? opened(observation)
+    : observation;
+};
+
+/**
+ * The open was detected from an app tree plus lock flags. Return SpringBoard's cover sheet when a
+ * fresh read shows it, so the result observes what the swipe opened instead of the app underneath.
+ */
+const preferSpringBoardCoverSheet = async (
+  appObservation: ObserveResult,
+  {
+    detector,
+    observeScreen,
+    minTimestamp,
+    signal,
+  }: {
+    detector: NotificationUIDetector;
+    observeScreen: SystemTrayObserver;
+    minTimestamp: number;
+    signal?: AbortSignal;
+  },
+): Promise<ObserveResult> => {
+  for (let read = 0; read < IOS_APP_TRAY_SPRINGBOARD_REREADS; read++) {
+    if (read > 0) {
+      await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS, signal);
+    }
+    const fresh = await observeSystemTray(observeScreen, minTimestamp, signal, true);
+    const packageName = fresh.viewHierarchy?.packageName ?? "";
+    if (
+      packageName.includes("springboard") &&
+      detector.isTrayOpen(fresh.viewHierarchy, fresh.deviceLock)
+    ) {
+      return fresh;
+    }
+  }
+  return appObservation;
 };
 
 const waitForSystemTrayClosed = async (

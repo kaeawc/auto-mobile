@@ -432,7 +432,7 @@ describe("prototype web still (#16346)", () => {
       });
     });
 
-    test("a chromeless or edge-to-edge screen, a sheet and a floating window keep their own placement", () => {
+    test("a chromeless, edge-to-edge or TV screen, a sheet and a floating window keep their own placement", () => {
       const chromeless = renderPrototypeStill(reference, { chromeless: true });
       expect(windowOf(chromeless.element).style).not.toHaveProperty("padding");
       const edgeToEdge = renderPrototypeStill(reference, { edgeToEdge: true });
@@ -445,6 +445,11 @@ describe("prototype web still (#16346)", () => {
         window: { placement: { type: "floating", gravity: "center" } },
       });
       expect(windowOf(floating.element).style).not.toHaveProperty("padding");
+      // A TV frame's insets are overscan margins, not system bars, so its window stays edge to edge.
+      for (const frame of ["android-tv-1080p", "apple-tv"]) {
+        const tv = renderPrototypeStill(reference, { frame });
+        expect(windowOf(tv.element).style).not.toHaveProperty("padding");
+      }
     });
   });
 

@@ -106,13 +106,18 @@ Part of [the prototype web renderer](prototype-web-renderer.md).
     since the still has no keyboard). The renderer exposes safe areas as
     `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`.
   - Window insets: a framed fullscreen window draws its content inside the safe area, as
-    ProtoViewer pads its renderer by `WindowInsets.safeDrawing`. Content starts below the status
-    bar and clear of the cutout and navigation handle. Every top-level row sits behind the same
-    horizontal inset. The window consumes every edge, so `safeAreaPadding` inside it adds nothing. The band behind the status bar takes the colour just
-    below it. A sheet or floating window leaves the insets to its content, where a top app bar
-    takes none of its own and `safeAreaPadding` adds them. The `edgeToEdge` still option draws a
-    fullscreen window under the bars and cutout instead, as the CtrlProxy overlay and the iOS Viewer
-    app do; the iOS parity check uses it. A chromeless screen has no insets.
+    ProtoViewer pads its renderer by `WindowInsets.safeDrawing`
+    ([decision](../devlog/2026-11-26-prototype-web-safe-drawing.md)). Content starts below the
+    status bar and clear of the cutout and navigation handle. Every top-level row sits behind the
+    same horizontal inset. The window consumes every edge, so `safeAreaPadding` inside it adds
+    nothing, and a root's own top padding draws below the status bar, not behind it.
+  - Status band: the band behind the status bar takes the colour just below it. The bottom and
+    side insets show the screen background, so a bottom nav ends above the home indicator.
+  - Unpadded windows: a TV frame's insets are overscan margins, so a TV window stays edge to edge.
+    A sheet or floating window leaves the insets to its content, where a top app bar takes none of
+    its own and `safeAreaPadding` adds them. The `edgeToEdge` still option draws a fullscreen
+    window under the bars and cutout instead, as the CtrlProxy overlay and the iOS Viewer app do;
+    the iOS parity check uses it. A chromeless screen has no insets.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

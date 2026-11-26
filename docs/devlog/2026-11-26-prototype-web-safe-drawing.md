@@ -30,12 +30,16 @@ ratio (#19373). Compose's `sizeIn` coerces the minimum into the incoming width f
 A framed fullscreen window pads every edge by the frame's inset and consumes it. The band behind
 the status bar takes the colour just below it, so the status bar content keeps its contrast. The
 `edgeToEdge` still option keeps the old drawing for the iOS parity check. Chromeless screens,
-sheets and floating windows are unchanged.
+sheets, floating windows and TV frames are unchanged: a TV frame's insets are overscan and
+title-safe margins, not system bars or a cutout, and no viewer is shown to pad them.
 
 A `fill` row clamps its `minWidth` with `min(100%, minWidth)`. A content-width row outside a row
 holds its minimum in the strut cell a later sibling's minimum uses, capped at the parent's width.
 
 ## Consequences
 
-Every framed golden moves down by the top inset. Tests of `safeAreaPadding` mechanics render in a
+Every framed phone, tablet, foldable and car golden moves down by the top inset. A root's own
+top `safeAreaPadding` is consumed by the window, so its colour no longer fills the band behind the
+status bar; the colour just below the band does. Only the top inset gets a band: the bottom and
+side insets show the screen background, as ProtoViewer's padding does. Tests of `safeAreaPadding` mechanics render in a
 full-height sheet, where the window leaves the insets to its content.

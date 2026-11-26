@@ -412,7 +412,7 @@ function stillScope(
     safeInsets: options.chromeless
       ? { top: 0, bottom: 0 }
       : { top: frame.safeArea[orientation].top, bottom: frame.safeArea[orientation].bottom },
-    ...safeDrawingScope(spec, options),
+    ...safeDrawingScope(spec, options, frame),
     ...optionalScope(options),
     ...anchorTargetsScope(expanded),
     stacks: [],
@@ -442,13 +442,22 @@ const SAFE_DRAWING_PADDING =
  * (#19372). The window consumes every edge, so a node's own `safeAreaPadding` adds nothing more,
  * as `windowInsetsPadding` consumes them. A chromeless screen (the renderers' golden content path)
  * has no insets, an edge-to-edge one leaves them to the spec, and a sheet or floating window places
- * itself.
+ * itself. A TV frame's insets are overscan and title-safe margins, not system bars or a cutout, so
+ * its window still leaves them to the spec.
  */
-function safeDrawingScope(spec: Raw, options: PrototypeStillOptions): Partial<WebRenderScope> {
+function safeDrawingScope(
+  spec: Raw,
+  options: PrototypeStillOptions,
+  frame: DeviceFrame,
+): Partial<WebRenderScope> {
   const type = record(record(spec.window)?.placement)?.type;
-  return options.chromeless || options.edgeToEdge || type === "sheet" || type === "floating"
-    ? {}
-    : { consumedInsets: SAFE_DRAWING_EDGES };
+  const skipped =
+    options.chromeless ||
+    options.edgeToEdge ||
+    frame.formFactor === "tv" ||
+    type === "sheet" ||
+    type === "floating";
+  return skipped ? {} : { consumedInsets: SAFE_DRAWING_EDGES };
 }
 
 /** The node ids the spec's tooltips anchor to (#16536); a spec without one sets none. */

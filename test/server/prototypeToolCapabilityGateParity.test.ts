@@ -36,7 +36,14 @@ const chart = {
 const chartData = { points: [{ y: 1 }, { y: 2 }] };
 // `with` lists capabilities a fixture needs besides the one under test: a device-run request also
 // needs the network capability, so the device gate is exercised with that one already advertised.
-const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }> = {
+// `showArgs` adds show inputs a fixture's spec needs, such as the fake share mode (#19308).
+interface ParityFixture {
+  minimalSpec: unknown;
+  ops: unknown[];
+  with?: string[];
+  showArgs?: Record<string, unknown>;
+}
+const fixtures: Record<string, ParityFixture> = {
   prototype_links_v1: {
     minimalSpec: { ...base, requires: ["prototype_links_v1"], links: [] },
     ops: [],
@@ -1137,6 +1144,7 @@ const fixtures: Record<string, { minimalSpec: unknown; ops: unknown[]; with?: st
     },
     ops: [],
     with: ["prototype_platform_v1"],
+    showArgs: { platformMode: { share: "fake" } },
   },
   prototype_platform_test_v1: {
     minimalSpec: {
@@ -1178,7 +1186,7 @@ function fixture(root: { type: string; id: string } & Record<string, unknown>) {
     ops: [{ op: "replaceNode", id: "label", node: root }],
   };
 }
-const parityFixtures: [string, { minimalSpec: unknown; ops: unknown[]; with?: string[] }][] = [
+const parityFixtures: [string, ParityFixture][] = [
   ...Object.entries(fixtures),
   [
     "prototype_lazy_list_v1",
@@ -1241,7 +1249,8 @@ async function call(device: BootedDevice, input: Record<string, unknown>) {
   const result = await ToolRegistry.getTool("prototype")!.deviceAwareHandler!(device, input);
   return prototypeOutputSchema.parse(readToolResponse(result).structuredContent);
 }
-const show = (device: BootedDevice, spec: unknown) => call(device, { action: "show", spec });
+const show = (device: BootedDevice, spec: unknown, extra: Record<string, unknown> = {}) =>
+  call(device, { action: "show", spec, ...extra });
 const patch = (device: BootedDevice, ops: unknown, extra = {}) =>
   call(device, { action: "patch", id: base.id, ops, ...extra });
 const requests = (device: BootedDevice) =>
@@ -1254,8 +1263,8 @@ beforeAll(async () => {
   const undo = preserveToolRegistry();
   setup();
   try {
-    for (const { device, minimalSpec } of cases) {
-      await show(device, minimalSpec);
+    for (const { device, minimalSpec, showArgs } of cases) {
+      await show(device, minimalSpec, showArgs);
       await show(device, base);
       await patch(device, [{ op: "replaceNode", id: "label", node: label }]);
     }
@@ -1280,9 +1289,9 @@ test("every registered gate has exactly one parity fixture", () => {
 });
 test.each(cases)(
   "$device.platform refuses $capability identically on show and patch",
-  async ({ capability, minimalSpec, ops, device, with: others }) => {
+  async ({ capability, minimalSpec, ops, device, with: others, showArgs }) => {
     advertise(...(others ?? []));
-    const refusedShow = await show(device, minimalSpec);
+    const refusedShow = await show(device, minimalSpec, showArgs);
     expect(refusedShow.success).toBe(false);
     expect(refusedShow.error).toContain(
       capability === "prototype_custom_shaders_v1" && device.platform === "ios"
@@ -1320,7 +1329,7 @@ test.each(cases)(
 );
 test.each(cases)(
   "$device.platform accepts $capability and state-only patches with it advertised",
-  async ({ capability, minimalSpec, ops, device, with: others }) => {
+  async ({ capability, minimalSpec, ops, device, with: others, showArgs }) => {
     advertise(capability, ...(others ?? []));
     if (capability === "prototype_custom_shaders_v1") {
       const refused = await show(device, minimalSpec);
@@ -1330,7 +1339,7 @@ test.each(cases)(
       );
       return;
     }
-    expect((await show(device, minimalSpec)).success).toBe(true);
+    expect((await show(device, minimalSpec, showArgs)).success).toBe(true);
     expect(
       (
         await patch(device, [{ op: "replace", path: "/state/liked", value: true }], {

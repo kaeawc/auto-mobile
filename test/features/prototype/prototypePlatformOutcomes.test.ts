@@ -88,6 +88,37 @@ describe("prototype platform outcomes", () => {
     );
   });
 
+  test("share.open results name only the outcome and an optional target (#19308)", () => {
+    for (const result of [
+      { outcome: "shared" },
+      { outcome: "unknown" },
+      { outcome: "shared", target: "Mail" },
+      { outcome: "shared", target: "x".repeat(256) },
+    ]) {
+      expect(validatePrototypePlatformOutcome("share.open", { result }).issue).toBeUndefined();
+    }
+    for (const code of ["cancelled", "unavailable"] as const) {
+      expect(
+        validatePrototypePlatformOutcome("share.open", { error: { code } }).issue,
+      ).toBeUndefined();
+    }
+    for (const result of [
+      null,
+      "shared",
+      {},
+      { outcome: "cancelled" },
+      { outcome: "shared", target: "" },
+      { outcome: "shared", target: "x".repeat(257) },
+      { outcome: "shared", simulated: true },
+      { outcome: "shared", items: { images: 0 } },
+    ]) {
+      expect(validatePrototypePlatformOutcome("share.open", { result }).issue).toEqual([
+        "outcome",
+        'A share.open result is {outcome: "shared" | "unknown", target?} with a target of 1 to 256 characters; the runtime adds items and simulated: true. To simulate a cancel, use {error: {code: "cancelled"}}.',
+      ]);
+    }
+  });
+
   test("bounds the whole UTF-8 wire envelope", () => {
     const multibyte = "😀".repeat(1020);
     const overhead = Buffer.byteLength(JSON.stringify({ result: multibyte }));

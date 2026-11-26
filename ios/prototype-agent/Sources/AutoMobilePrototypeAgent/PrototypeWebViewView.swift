@@ -64,6 +64,7 @@
             private var activeNavigation: WKNavigation?
             private var ruleTask: Task<Void, Never>?
             private var loadTask: Task<Void, Never>?
+            private var titleObservation: NSKeyValueObservation?
 
             init(module: PrototypeWebViewModule, nodeID: String?) {
                 self.module = module
@@ -77,6 +78,10 @@
                 self.navigation = navigation
                 webView.navigationDelegate = self
                 webView.uiDelegate = self
+                // The title can arrive after didFinish (#19097).
+                titleObservation = webView.observe(\.title, options: [.new]) { [weak self] _, _ in
+                    Task { @MainActor [weak self] in self?.navigation?.titleChanged() }
+                }
                 module.attach(nodeID, page: webView)
                 ruleTask = Task { [weak self, weak webView] in
                     await navigation.prepare { rules in
@@ -119,6 +124,8 @@
             }
 
             func detach(_ webView: WKWebView) {
+                titleObservation?.invalidate()
+                titleObservation = nil
                 ruleTask?.cancel()
                 loadTask?.cancel()
                 navigation = nil

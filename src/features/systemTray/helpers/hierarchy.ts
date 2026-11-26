@@ -2,7 +2,12 @@
 
 import { Element, ViewHierarchyNode, ViewHierarchyResult } from "../../../models";
 import { DefaultElementParser } from "../../utility/ElementParser";
-import { rawContentDesc, rawNodeValue, rawResourceId } from "../../utility/elementProperties";
+import {
+  rawContentDesc,
+  rawNodeValue,
+  rawResourceId,
+  rawText,
+} from "../../utility/elementProperties";
 import {
   SYSTEM_TRAY_PACKAGE,
   SYSTEM_TRAY_RESOURCE_ID_HINTS,
@@ -566,4 +571,41 @@ export const collectOutermostNotificationRows = (
   return nodeIsNotificationRowRoot(node)
     ? [node]
     : getDirectChildNodes(node).flatMap(collectOutermostNotificationRows);
+};
+
+const IOS_SWIPE_ACTION_ID = "swipe-action-button-identifier";
+
+/**
+ * The "Open" swipe action iOS 27 reveals in a cover-sheet notification row when the row is tapped,
+ * instead of opening the app (#19174). Only an action inside the tapped row's vertical extent counts.
+ */
+export const findIosRevealedOpenAction = (
+  viewHierarchy: ViewHierarchyResult | undefined,
+  row: Element["bounds"],
+): Element | undefined => {
+  if (!viewHierarchy) {
+    return undefined;
+  }
+  const parser = new DefaultElementParser();
+  const matches: Element[] = [];
+  const visit = (node: ViewHierarchyNode | undefined): void => {
+    if (!node || typeof node !== "object") {
+      return;
+    }
+    const props = getNodeProperties(node);
+    if (
+      props &&
+      rawResourceId(props) === IOS_SWIPE_ACTION_ID &&
+      (rawText(props) || rawContentDesc(props)) === "Open"
+    ) {
+      const element = parser.parseNodeBounds(node);
+      if (element && element.bounds.top >= row.top && element.bounds.bottom <= row.bottom) {
+        matches.push(element);
+      }
+    }
+    const children = node.node;
+    (Array.isArray(children) ? children : children ? [children] : []).forEach(visit);
+  };
+  getHierarchyRoots(viewHierarchy).forEach(visit);
+  return matches[0];
 };

@@ -4,6 +4,7 @@ import { convertIosHierarchy } from "../../helpers/iosHierarchyConverter";
 import { parseAndroidDeviceDisplays } from "../../../src/utils/android-cmdline-tools/AndroidDisplayInventory";
 import { panelKeyForFingerprint } from "../../../src/models/DisplayPanel";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { InMemoryIosRequestedHingeAngleStore } from "../../../src/features/device/DuoHingeLayout";
 import { AndroidDisplayReadError } from "../../../src/features/observe/AndroidDisplayReadError";
 import {
   ObservedAndroidDisplayCache,
@@ -756,20 +757,44 @@ describe("observation display stamp", () => {
       ),
     };
     const inner = { pixelWidth: 2007, pixelHeight: 2853 };
+    // No hinge angle requested: only the remembered posture can say half_opened.
+    const angles = new InMemoryIosRequestedHingeAngleStore();
     try {
       ObservedAndroidDisplayCache.rememberIosPosture(device.deviceId, {
-        ...observedIosDisplay(device, inner),
+        ...observedIosDisplay(device, inner, undefined, angles),
         posture: "half_opened",
       });
-      expect(observedIosDisplay(device, undefined).posture).toBe("unknown");
-      expect(observedIosDisplay(device, inner).posture).toBe("half_opened");
-      expect(observedIosDisplay(device, { pixelWidth: 1398, pixelHeight: 2034 }).posture).toBe(
-        "closed",
-      );
-      expect(observedIosDisplay(device, inner).posture).toBe("opened");
+      expect(observedIosDisplay(device, undefined, undefined, angles).posture).toBe("unknown");
+      expect(observedIosDisplay(device, inner, undefined, angles).posture).toBe("half_opened");
+      expect(
+        observedIosDisplay(device, { pixelWidth: 1398, pixelHeight: 2034 }, undefined, angles)
+          .posture,
+      ).toBe("closed");
+      expect(observedIosDisplay(device, inner, undefined, angles).posture).toBe("opened");
     } finally {
       ObservedAndroidDisplayCache.release(device.deviceId);
     }
+  });
+
+  test("a half-open hinge angle keeps the inner panel half_opened with nothing remembered (#19243)", () => {
+    const device: BootedDevice = {
+      ...ios,
+      deviceId: "8A0D6D35-19A4-4E1B-9E0C-243000019243",
+      displays: simulatorDeviceDisplays(
+        parseSimulatorDisplays(loadDuoEnumerate()),
+        "com.apple.CoreSimulator.SimDeviceType.iPhone-Duo",
+      ),
+    };
+    const inner = { pixelWidth: 2007, pixelHeight: 2853 };
+    const cover = { pixelWidth: 1398, pixelHeight: 2034 };
+    const angles = new InMemoryIosRequestedHingeAngleStore();
+    // A rotate's transition cleared the remembered setPosture posture.
+    ObservedAndroidDisplayCache.clear(device.deviceId);
+    angles.record(device.deviceId, 130);
+    expect(observedIosDisplay(device, inner, undefined, angles).posture).toBe("half_opened");
+    expect(observedIosDisplay(device, cover, undefined, angles).posture).toBe("closed");
+    angles.record(device.deviceId, 180);
+    expect(observedIosDisplay(device, inner, undefined, angles).posture).toBe("opened");
   });
 
   test("folded iPhone Duo selects the live cover panel by runner pixel size", () => {

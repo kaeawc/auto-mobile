@@ -1,4 +1,9 @@
 import type { DevicectlDisplayInfo } from "../../utils/ios-cmdline-tools/DevicectlDisplayInfo";
+import {
+  defaultIosRequestedHingeAngleStore,
+  iosPostureForPanel,
+  type IosRequestedHingeAngleStore,
+} from "../device/DuoHingeLayout";
 import { sizeMatchesPanel } from "../device/postureCommands";
 import type {
   BootedDevice,
@@ -449,7 +454,20 @@ export function runnerIosPanel(
   return panels.length > 1 ? liveIosPanel(panels, hierarchy) : undefined;
 }
 
-function iosPanelPosture(role: DisplayPanel["role"] | undefined): Posture {
+/**
+ * An iPhone Duo panel's posture, refined by the last requested hinge angle as getDeviceState does:
+ * the inner panel is half_opened strictly between 0 and 180 degrees (#19243). A rotate's geometry
+ * transition drops the remembered setPosture posture, and a hingeAngle request never records one,
+ * so the panel role alone would read opened while the hinge is half open.
+ */
+function iosPanelPosture(
+  device: BootedDevice,
+  role: DisplayPanel["role"] | undefined,
+  hingeAngles: Pick<IosRequestedHingeAngleStore, "requested">,
+): Posture {
+  if ((role === "inner" || role === "cover") && (device.displays?.panels.length ?? 0) > 1) {
+    return iosPostureForPanel(role, hingeAngles.requested(device.deviceId));
+  }
   return POSTURE_PANEL_ROLES.find(([, panelRole]) => panelRole === role)?.[0] ?? "unknown";
 }
 
@@ -479,6 +497,7 @@ export function observedIosDisplay(
     | Pick<ViewHierarchyResult, "pixelWidth" | "pixelHeight" | "captureSequence">
     | undefined,
   livePanel?: DisplayPanel,
+  hingeAngles: Pick<IosRequestedHingeAngleStore, "requested"> = defaultIosRequestedHingeAngleStore,
 ): DisplayRef {
   const panels = device.displays?.panels ?? [];
   const panel =
@@ -487,7 +506,9 @@ export function observedIosDisplay(
   return {
     key: panel?.key ?? "0",
     role: panel?.role ?? "unknown",
-    posture: ObservedAndroidDisplayCache.iosPosture(device, panel) ?? iosPanelPosture(panel?.role),
+    posture:
+      ObservedAndroidDisplayCache.iosPosture(device, panel) ??
+      iosPanelPosture(device, panel?.role, hingeAngles),
     // ObserveScreen stamps the tracker generation after recording the final display.
     generation: 0,
   };

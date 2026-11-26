@@ -1789,13 +1789,15 @@ describe("SetPosture", () => {
     "device change",
     "panel mismatch",
   ] as const) {
-    test(`remembers settled iOS half_opened until ${invalidation}`, async () => {
+    test(`keeps settled iOS half_opened past a ${invalidation} while the hinge is half open (#19243)`, async () => {
       const tracker = new DisplayTransitionTracker(() => {});
+      const angles = new InMemoryIosRequestedHingeAngleStore();
       const inner = { pixelWidth: 2007, pixelHeight: 2853 };
       const cover = { pixelWidth: 1398, pixelHeight: 2034 };
       const client = new FakeIOSCtrlProxy();
       const feature = new SetPosture(duo, {
         iosClientProvider: () => client,
+        iosHingeAngleStore: angles,
         transitionSink: tracker,
         timer: new FakeTimer(),
         observeFactory: () =>
@@ -1803,7 +1805,7 @@ describe("SetPosture", () => {
             execute: async () => {
               const result = {
                 ...observation,
-                display: observedIosDisplay(duo, inner),
+                display: observedIosDisplay(duo, inner, undefined, angles),
                 screenSize: { width: 669, height: 951 },
               };
               tracker.record(duo.deviceId, result, "ios");
@@ -1820,7 +1822,7 @@ describe("SetPosture", () => {
           posture: "half_opened",
           display: { posture: "half_opened" },
         });
-        const next = observedIosDisplay(duo, inner);
+        const next = observedIosDisplay(duo, inner, undefined, angles);
         expect(next.posture).toBe("half_opened");
         const generation = tracker.identityRevision(duo.deviceId);
         expect(tracker.checkIdentity(duo.deviceId, next, "ios")).toBe(false);
@@ -1842,9 +1844,13 @@ describe("SetPosture", () => {
         } else if (invalidation === "device change") {
           ObservedAndroidDisplayCache.clear(duo.deviceId);
         } else {
-          expect(observedIosDisplay(duo, cover).posture).toBe("closed");
+          expect(observedIosDisplay(duo, cover, undefined, angles).posture).toBe("closed");
         }
-        expect(observedIosDisplay(duo, inner).posture).toBe("opened");
+        // The remembered posture is gone, but the requested 130 degrees still reads half open, as
+        // getDeviceState reports it; a fully open angle reads opened again.
+        expect(observedIosDisplay(duo, inner, undefined, angles).posture).toBe("half_opened");
+        angles.record(duo.deviceId, 180);
+        expect(observedIosDisplay(duo, inner, undefined, angles).posture).toBe("opened");
       } finally {
         tracker.reset(duo.deviceId);
       }
@@ -1894,6 +1900,7 @@ describe("SetPosture", () => {
     const feature = new SetPosture(duo, {
       observeFactory: () => observe,
       iosClientProvider: () => new FakeIOSCtrlProxy(timer),
+      iosHingeAngleStore: new InMemoryIosRequestedHingeAngleStore(),
       timer,
       transitionSink: tracker,
     });

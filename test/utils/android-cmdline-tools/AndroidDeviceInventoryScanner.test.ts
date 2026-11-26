@@ -246,6 +246,22 @@ describe("DefaultAndroidDeviceInventoryScanner runtime facts (#18988)", () => {
     );
   });
 
+  test("a read missing a fact is not cached, so the next scan fills it", async () => {
+    adb.setCommandError("shell wm density", new Error("timed out"));
+    const first = await scanner.getBootedDevicesWithDiagnostics(false, {
+      devices: [emulator()],
+      timeoutMs: 5_000,
+    });
+    expect(first.devices[0].screenDensity).toBeUndefined();
+
+    adb.clearCommandError("shell wm density");
+    const second = await scanner.getBootedDevicesWithDiagnostics(false, {
+      devices: [emulator()],
+      timeoutMs: 5_000,
+    });
+    expect(second.devices[0]).toMatchObject({ apiLevel: 24, screenDensity: 420 });
+  });
+
   test("readiness-only scans do not read runtime facts", async () => {
     const scan = await scanner.getBootedDevicesWithDiagnostics(false, {
       devices: [emulator()],

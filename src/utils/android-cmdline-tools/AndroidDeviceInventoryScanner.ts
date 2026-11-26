@@ -710,7 +710,14 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       timeoutMs,
       signal,
     });
-    if (cacheKey && facts.apiLevel !== undefined) {
+    // Cache only a complete read, so a transient wm failure is retried on the next scan.
+    const complete = [
+      facts.apiLevel,
+      facts.osVersion,
+      facts.screenWidth,
+      facts.screenDensity,
+    ].every((fact) => fact !== undefined);
+    if (cacheKey && complete) {
       this.runtimeFactsCache.set(cacheKey, facts);
     }
     return facts;

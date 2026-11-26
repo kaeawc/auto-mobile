@@ -4,12 +4,15 @@ import { defaultDemoAllowedReceipts, type DemoAllowedReceipts } from "./DemoAllo
 import { parseBattery } from "./power/PowerParsers";
 import { logger } from "../../utils/logger";
 import { errorMessage } from "../../utils/describeUnknownError";
+import { runOutsideRequestContext } from "../../utils/AbortContext";
+import { readAndroidEmulatorFlag } from "../../utils/android-cmdline-tools/deviceTraits";
 import {
   STATUS_BAR_COMMAND_TIMEOUT_MS,
   StatusBarRequestRejectedError,
   requestedStatusBarFields,
   throwOnExecError,
   type StatusBarApplyOutcome,
+  type StatusBarClearOptions,
   type StatusBarController,
   type StatusBarField,
   type StatusBarOverrides,
@@ -17,6 +20,8 @@ import {
 
 const DEMO_ACTION = "com.android.systemui.demo";
 const DEMO_ALLOWED_SETTING = "sysui_demo_allowed";
+/** Bound on the battery reset that ends a refresh; it runs even after the clear was aborted. */
+export const BATTERY_RESET_TIMEOUT_MS = 5_000;
 
 /** Android's demo clock takes `hhmm`; a 12/24-hour `H:MM` or `HH:MM` maps onto it. */
 export function androidDemoClock(time: string): string | null {
@@ -175,7 +180,7 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
     }
   }
 
-  async clear(signal?: AbortSignal): Promise<void> {
+  async clear(signal?: AbortSignal, options: StatusBarClearOptions = {}): Promise<void> {
     await this.demo([["command", "exit"]], signal);
     const prior = this.receipts.take(this.deviceId);
     if (prior !== undefined) {
@@ -186,6 +191,7 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
         signal,
       );
     }
+    await options.beforeBatteryRefresh?.();
     await this.refreshBattery(signal);
   }
 
@@ -193,20 +199,48 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
    * SystemUI keeps drawing the demo battery level after `exit` until the next real
    * ACTION_BATTERY_CHANGED (#19189). `dumpsys battery set -f level <current>` forces that
    * broadcast with the level the device already reports; `reset` then hands the battery back
-   * to the hardware unless a `dumpsys battery` fake was already active, which is kept.
+   * to the hardware unless a `dumpsys battery` fake was already active, which is kept. Once the
+   * set may have run on an unfaked battery the reset always follows, even when the clear was
+   * aborted or the set failed, so the device is never left faked. Physical devices are skipped:
+   * AutoMobile does not fake their battery (PowerPlan refuses it).
    */
   private async refreshBattery(signal?: AbortSignal): Promise<void> {
+    let resetAfter = false;
     try {
-      const battery = parseBattery((await this.shell(["dumpsys", "battery"], signal)).stdout);
-      await this.shell(["dumpsys", "battery", "set", "-f", "level", String(battery.level)], signal);
-      if (!battery.faked) {
-        await this.shell(["dumpsys", "battery", "reset"], signal);
+      const emulator = await readAndroidEmulatorFlag(
+        async (prop) => (await this.shell(["getprop", prop], signal)).stdout,
+      );
+      if (emulator !== true) {
+        return;
       }
+      const battery = parseBattery((await this.shell(["dumpsys", "battery"], signal)).stdout);
+      resetAfter = !battery.faked;
+      await this.shell(["dumpsys", "battery", "set", "-f", "level", String(battery.level)], signal);
     } catch (error) {
       signal?.throwIfAborted();
       // Demo mode already exited; only the drawn battery level may stay stale until the next
       // real battery broadcast.
       logger.warn(`statusBar clear: battery refresh failed: ${errorMessage(error)}`, error);
+    } finally {
+      if (resetAfter) {
+        await this.resetBattery();
+      }
+    }
+  }
+
+  /** `dumpsys battery reset`, bounded on its own: the caller's signal may already be aborted. */
+  private async resetBattery(): Promise<void> {
+    const args = ["dumpsys", "battery", "reset"];
+    try {
+      const result = await runOutsideRequestContext(() =>
+        this.adb.execute(["shell", ...args], { timeoutMs: BATTERY_RESET_TIMEOUT_MS }),
+      );
+      throwOnExecError(result, `adb shell ${args.join(" ")}`);
+    } catch (error) {
+      logger.warn(
+        `statusBar clear: battery reset failed; the battery may stay faked until \`adb shell dumpsys battery reset\`: ${errorMessage(error)}`,
+        error,
+      );
     }
   }
 

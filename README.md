@@ -16,9 +16,11 @@
 
 ![AutoMobile sticker](docs/img/auto_mobile_sticker_splash.png)
 
-**AutoMobile lets AI agents control your mobile devices using natural language.** Tell an AI what you want to do, and it interacts with your Android or iOS app.
-
-It can do all this by being an MCP server that uses standard platform tools like adb & simctl paired with additional Kotlin & Swift libraries and apps. All components are open source. The point is to provide mobile engineers with AI workflow tools to perform UX deep dives, reproduce bugs, and run automated tests.
+**Hand your AI agent a phone.** AutoMobile is an MCP server that lets Claude, Cursor, Goose or any
+MCP client see and drive Android and iOS devices: phones, tablets, foldables, watches, TVs, cars and
+headsets, real or emulated. Ask for a bug repro, a UX walkthrough or a UI test in plain English,
+and the agent taps through your app on a real device and shows you what it found. No root, no
+jailbreak, no app changes: it rides on `adb`, `simctl` and open-source Kotlin and Swift companions.
 
 ![Setting an alarm in the Clock app](docs/img/clock-app.gif)
 _An AI agent navigating to the Clock app, creating a new alarm_
@@ -26,7 +28,29 @@ _An AI agent navigating to the Clock app, creating a new alarm_
 ![Searching YouTube for a video](docs/img/youtube-search.gif)
 _An AI agent searching YouTube and browsing results_
 
-### Explore and Test
+## Compared with driving the device yourself
+
+An agent with a shell can already run `adb` and `simctl`. Here is what AutoMobile adds:
+
+|                               | AutoMobile                                                                                                          | An agent with `adb` and `simctl`                                                                        |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Seeing the screen             | view hierarchy and screenshot from an on-device Accessibility Service and XCTestService, settled after every action | `uiautomator dump` and `screencap` by hand; on iOS, a screenshot and no hierarchy without a test runner |
+| Targeting                     | tap, swipe, pinch, drag and type on elements by text or id                                                          | raw coordinates guessed from a screenshot                                                               |
+| iOS simulator input           | **0.5 ms** per tap, **1 ms** per Home press, no runner needed                                                       | 438 ms per tap and 482 ms per Home press through an XCTest runner                                       |
+| Getting around an app         | learns its screens and jumps to one by name (`explore`, `navigateTo`)                                               | taps its way there every time                                                                           |
+| Sharing devices               | sessions own devices, so parallel agents never collide                                                              | whoever runs `adb` last wins                                                                            |
+| iOS network conditions        | per simulator, no root, no profile, works on headless CI Macs                                                       | Network Link Conditioner for the whole Mac                                                              |
+| Traces and audits             | Perfetto and Instruments traces, accessibility and performance audits, visual regression                            | assemble each tool yourself                                                                             |
+| Turning a session into a test | YAML plans run natively by a Kotlin JUnitRunner and a Swift XCTestRunner                                            | write it from scratch                                                                                   |
+
+The input times were measured on one iOS simulator under the same load, 2026-11-23
+([devlog](docs/devlog/2026-11-23-simulator-hid-input-default-on.md)).
+
+**129 tools** cover Android (113), iOS (94), tvOS (21), watchOS (18) and visionOS (15). Every one
+runs from MCP, the CLI and the daemon's HTTP endpoint, with the same names and arguments
+([tools](docs/tools.md)).
+
+### What you can ask for
 
 | Task                                                         | What it does                                                                         |
 | ------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
@@ -36,16 +60,10 @@ _An AI agent searching YouTube and browsing results_
 | **[Measure startup time](docs/using/agent-examples.md)**     | Profile cold and warm launch performance                                             |
 | **[Check scroll performance](docs/using/agent-examples.md)** | Detect jank and dropped frames                                                       |
 
-## How it works
-
-- 🤖 **Fast UX Inspection** Kotlin Accessibility Service and Swift XCTestService to enable fast, accurate observations. 10x faster than the next fastest observation toolkit.
-- 🦾 **Full Touch Injection** Tap, Swipe, Pinch, Drag & Drop, Shake with automatic element targeting.
-- ♻️ **Tool Feedback** [Observations](docs/how-it-works/mcp/interaction-loop.md) drive the interaction loop for all [tool calls](docs/tools.md).
-- 🧪 **Test Execution** [Kotlin JUnitRunner](docs/how-it-works/plat/android/junit-runner/index.md) & [Swift XCTestRunner](docs/using/ui-tests.md#1-install-a-test-runner) execute tests natively handling device pooling, multi-device tests, and automatically optimizing test timing.
-
 ## Get Started
 
-You can use our interactive installer to step through all host platform requirements and configuration options. It checks host dependencies, optionally downloads Android or iOS developer tools, and configured the MCP daemon.
+The interactive installer checks host dependencies, optionally downloads the Android or iOS
+developer tools, and configures the MCP daemon:
 
 ```bash title="One-line install (click to copy)"
 curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/refs/heads/main/scripts/install.sh | bash
@@ -57,21 +75,43 @@ Prefer Homebrew for the CLI:
 brew install kaeawc/tap/auto-mobile
 ```
 
-or follow the [installation guide](docs/index.md#install).
-
-Using Claude Code? Install the AutoMobile plugin from this repository's marketplace:
+Using Claude Code? Install the plugin from this repository's marketplace:
 
 ```text title="Claude Code plugin (click to copy)"
 /plugin marketplace add kaeawc/auto-mobile
 /plugin install auto-mobile@auto-mobile-marketplace
 ```
 
+Then ask your agent to explore your app. It uses a connected device if there is one, and otherwise
+finds or provisions an emulator or simulator. Other routes: the [installation guide](docs/index.md#install).
+
+## What it covers
+
+Android phones, tablets, foldables, Android TV, Wear OS, Android Automotive, Android Auto and
+Android XR; iPhone, iPad, Apple TV, Apple Watch, CarPlay and visionOS. Physical devices and
+emulators or simulators alike. Android works from macOS or Linux; Apple platforms need macOS with Xcode.
+
+## Not yet
+
+- Some capabilities work only on emulators and simulators, such as vehicle property injection on
+  Automotive; physical head units answer `unsupported`.
+- CarPlay needs an iOS 26 simulator, and its input effects are not confirmed yet.
+- Fast iOS simulator input does not handle rotated screens yet; landscape input goes through the
+  XCTest runner.
+- `heapDump` is not available on physical iPhones.
+- The navigation graph tools (`explore`, `navigateTo`) are off by default.
+
 ## Documentation
 
-- **[Full Documentation](docs/index.md)** - Complete guide with examples
-- **[FAQ](docs/faq.md)** - Common questions answered
-- **[How It Works](docs/how-it-works/index.md)** - Architecture and implementation details
-- **[Devlog](docs/devlog/index.md)** - Dated decision records and ideas
+|                                                |                                                |
+| ---------------------------------------------- | ---------------------------------------------- |
+| [Full documentation](docs/index.md)            | install, first use, every platform             |
+| [Tools](docs/tools.md)                         | all 129 tools, with platforms and requirements |
+| [Agent examples](docs/using/agent-examples.md) | prompts that work, and what they produce       |
+| [UI tests](docs/using/ui-tests.md)             | YAML plans run by JUnitRunner and XCTestRunner |
+| [How it works](docs/how-it-works/index.md)     | architecture and implementation details        |
+| [FAQ](docs/faq.md)                             | common questions answered                      |
+| [Devlog](docs/devlog/index.md)                 | dated decision records and measurements        |
 
 ## Contributing
 

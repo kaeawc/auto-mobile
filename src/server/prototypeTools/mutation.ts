@@ -156,12 +156,15 @@ export async function performPrototypeAction(
     queue,
     signal,
     mcpSessionId,
+    authoredSpec,
   }: {
     scope: PrototypeScope;
     queue: PrototypePatchQueue;
     signal?: AbortSignal;
     /** The MCP connection issuing the call, recorded on the spec revision it adds (#17358). */
     mcpSessionId?: string;
+    /** The show's spec before component expansion, for the spec lints (#19367). */
+    authoredSpec?: unknown;
   },
 ): Promise<PrototypeOutput> {
   if (args.action === "patch") {
@@ -201,7 +204,7 @@ export async function performPrototypeAction(
     dependencies,
     device,
     { ...args, action: args.action },
-    { scope, signal, mcpSessionId },
+    { scope, signal, mcpSessionId, authoredSpec },
   );
 }
 
@@ -210,13 +213,15 @@ interface MutationCallOptions {
   signal?: AbortSignal;
   /** The MCP connection issuing the call, recorded on the spec revision it adds (#17358). */
   mcpSessionId?: string;
+  /** The show's spec before component expansion, for the spec lints (#19367). */
+  authoredSpec?: unknown;
 }
 
 async function performMutation(
   dependencies: PrototypeHandlerDependencies,
   device: BootedDevice,
   args: Omit<z.infer<typeof prototypeSchema>, "action"> & { action: PrototypeMutation },
-  { scope, signal, mcpSessionId }: MutationCallOptions,
+  { scope, signal, mcpSessionId, authoredSpec }: MutationCallOptions,
 ): Promise<PrototypeOutput> {
   const { store, events, target: prototypeTarget, commits } = dependencies;
   const target = mutationTarget(args);
@@ -351,7 +356,11 @@ async function performMutation(
       lastResult,
       ...(stage.uploaded.length > 0 ? { uploadedAssets: stage.uploaded } : {}),
       ...anchorsOutput(resolved),
-      ...(await showAdviceOutput(authoredArgs, device, dependencies, { result, signal })),
+      ...(await showAdviceOutput(authoredArgs, device, dependencies, {
+        result,
+        signal,
+        lintedSpec: authoredSpec ?? authoredArgs.spec,
+      })),
       ...visibility,
       ...missingAssetsOutput(result, [warning, placed.warning, visibilityWarning], legacy, {
         spec: authoredArgs.spec,
@@ -411,9 +420,12 @@ async function showAdviceOutput(
   {
     result,
     signal,
+    lintedSpec,
   }: {
     result: Pick<PrototypeResult, "success" | "screenRound" | "platformRuntime">;
     signal?: AbortSignal;
+    /** The spec the accessibility and placeholder lints read: the authored one, components unexpanded. */
+    lintedSpec: unknown;
   },
 ): Promise<
   Pick<
@@ -430,8 +442,8 @@ async function showAdviceOutput(
   const { success, screenRound: deviceScreenRound } = result;
   return {
     ...(await platformNotesOutput(args, device, dependencies.target, result)),
-    ...(args.action === "show" && success ? prototypeAccessibilityOutput(args.spec) : {}),
-    ...(args.action === "show" && success ? prototypePlaceholderOutput(args.spec) : {}),
+    ...(args.action === "show" && success ? prototypeAccessibilityOutput(lintedSpec) : {}),
+    ...(args.action === "show" && success ? prototypePlaceholderOutput(lintedSpec) : {}),
     ...(await prototypeScreenShapeOutput(
       { action: args.action, success, device, deviceScreenRound, signal },
       dependencies,

@@ -147,19 +147,38 @@ export const performanceTraceResultSchema = z.object({
   warnings: z.array(z.string()),
 });
 
-/** Releasing a session, or losing its device, stops its recorders so none are orphaned. */
-function subscribeTraceCleanup(manager: PerformanceTraceManager): () => void {
+/** Who registers a shutdown-fallback stop as pending device cleanup (`SessionManager` fits). */
+type TraceCleanupHost = Pick<SessionPowerHost<PowerSessionView>, "registerPendingDeviceCleanup">;
+
+/**
+ * Losing a device stops its recorders, since it has no next owner to wait for them. A release
+ * delivered by `SessionManager.onSessionRelease` (it carries a snapshot) is stopped there, as
+ * pending device cleanup (`registerPerformanceTraceSessionCleanup`). The daemon-shutdown fallback
+ * broadcast has no snapshot and no `onSessionRelease`, so its stops are registered here, as
+ * pending device cleanup the shutdown drains (#19316).
+ */
+function subscribeTraceCleanup(
+  manager: PerformanceTraceManager,
+  cleanupHost: () => TraceCleanupHost | undefined,
+): () => void {
   const cleanups = [
-    // Not part of whichever request triggered the release: its abort must not cut the stops short.
-    SessionReleaseBroadcaster.subscribe((sessionUuid, _reason, snapshot, extras) =>
-      runOutsideRequestContext(() => {
-        void manager.stopTracesForSession(sessionUuid);
-        // An upgrade-only re-announcement's device may belong to its next owner by now (#11206).
-        if (snapshot?.deviceId && !extras?.upgradeOnly) {
-          void manager.stopTracesOnDevice(snapshot.deviceId);
-        }
-      }),
-    ),
+    SessionReleaseBroadcaster.subscribe((sessionUuid, _reason, snapshot) => {
+      const host = snapshot ? undefined : cleanupHost();
+      if (!host) {
+        return;
+      }
+      manager.sessionTraceDeviceIds(sessionUuid).forEach((deviceId) =>
+        host.registerPendingDeviceCleanup(
+          deviceId,
+          // Not part of whichever request triggered the release: its abort must not cut the stop short.
+          runOutsideRequestContext(() => manager.stopSessionTracesOnDevice(sessionUuid, deviceId)),
+          {
+            name: "stop a performance trace recorder at daemon shutdown",
+            leftover: "a perfetto or xctrace recorder the released session started",
+          },
+        ),
+      );
+    }),
     getDaemonStreamDeviceLifecycleEmitter().onDeviceRemoved((deviceId) =>
       runOutsideRequestContext(() => void manager.stopTracesOnDevice(deviceId)),
     ),
@@ -288,6 +307,7 @@ export function createPerformanceTraceHandler<S extends PowerSessionView = Sessi
  */
 export function registerPerformanceTraceTools(
   manager: PerformanceTraceManager = getDefaultPerformanceTraceManager(),
+  cleanupHost: () => TraceCleanupHost | undefined = () => defaultDaemonContext.sessionManager(),
 ): () => void {
   ToolRegistry.registerDeviceAware(
     "performanceTrace",
@@ -304,7 +324,7 @@ export function registerPerformanceTraceTools(
   );
   registerPerformanceTraceResources(manager);
   unsubscribeTraceCleanup?.();
-  const unsubscribe = subscribeTraceCleanup(manager);
+  const unsubscribe = subscribeTraceCleanup(manager, cleanupHost);
   unsubscribeTraceCleanup = unsubscribe;
   return () => {
     unsubscribe();

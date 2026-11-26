@@ -169,15 +169,37 @@ describe("performanceTrace tool (#14102)", () => {
     expect(manager.lookup("trace-t-1")).toBeUndefined();
   });
 
-  test("a session release stops the traces that session started", async () => {
+  test("a release with a snapshot leaves its stop to the pending device cleanup (#19316)", async () => {
     const { manager, stops } = fakeManager();
-    unregister = registerPerformanceTraceTools(manager);
+    const host = new FakeTraceSessionHost();
+    unregister = registerPerformanceTraceTools(manager, () => host);
     await call(manager, { action: "start", template: "hangs", sessionUuid: "session-a" });
 
-    SessionReleaseBroadcaster.emit("session-a");
-    await Promise.resolve();
+    SessionReleaseBroadcaster.emit("session-a", "explicit-release", {
+      sessionId: "session-a",
+      deviceId: device.deviceId,
+      releaseReason: "explicit-release",
+      releasedAtMs: 0,
+      terminal: true,
+      heartbeat: { lastHeartbeatMs: 0, hasReceivedHeartbeat: true, timeoutMs: 20_000, ageMs: 1 },
+    });
     await Promise.resolve();
 
+    expect(host.pending).toEqual([]);
+    expect(stops).toEqual([]);
+    expect(manager.activeTraceIds()).toEqual(["trace-t-1"]);
+  });
+
+  test("the daemon-shutdown fallback registers its stop as pending device cleanup (#19316)", async () => {
+    const { manager, stops } = fakeManager();
+    const host = new FakeTraceSessionHost();
+    unregister = registerPerformanceTraceTools(manager, () => host);
+    await call(manager, { action: "start", template: "hangs", sessionUuid: "session-a" });
+
+    SessionReleaseBroadcaster.emit("session-a", "daemon-shutdown");
+
+    expect(host.pending.map(({ deviceId }) => deviceId)).toEqual([device.deviceId]);
+    await Promise.all(host.pending.map(({ cleanup }) => cleanup));
     expect(stops).toEqual(["trace-t-1"]);
     expect(manager.activeTraceIds()).toEqual([]);
   });

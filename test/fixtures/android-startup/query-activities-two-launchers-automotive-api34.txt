@@ -1,0 +1,7 @@
+2 activities found:
+  Activity #0:
+    priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false
+    dev.jasonpearson.automobile.automotivefixture/.DrivingSafeActivity
+  Activity #1:
+    priority=0 preferredOrder=0 match=0x108000 specificIndex=-1 isDefault=false
+    dev.jasonpearson.automobile.automotivefixture/androidx.car.app.activity.CarAppActivity

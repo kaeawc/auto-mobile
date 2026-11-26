@@ -130,6 +130,7 @@ portable test/utils/ios-cmdline-tools/iosDeviceType.property.test.ts     # Andro
 portable test/ctrlProxy/ios/IosRunnerLaunchGate.test.ts                  # FIFO admission and env parsing use no platform commands
 portable test/ctrlProxy/ios/IosRunnerLaunchFailure.test.ts               # pure output classification and PID failure ledger
 portable test/utils/ios-cmdline-tools/simctlFailureClassifier.test.ts # pure simctl failure-text classifier over captured fixtures and a fake port
+portable test/utils/ios-cmdline-tools/SimulatorLocationdClients.test.ts # pure clients.plist parser over captured fixtures and an injected plutil
 portable test/utils/ios-cmdline-tools/simctlFailureClassifierWiring.test.ts # classifier callers over captured fixtures, injected exec and FakeTimer; no simctl runs
 portable test/utils/ios-cmdline-tools/CoreSimulatorJxa.test.ts         # injected exec only; no osascript runs
 portable test/utils/ios-cmdline-tools/SimulatorBacklight.test.ts        # injected exec only; no osascript runs

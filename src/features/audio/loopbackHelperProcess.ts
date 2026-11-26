@@ -9,6 +9,8 @@ import type { Timer } from "../../utils/SystemTimer";
 
 /** Stderr markers written by the audio-loopback helper, one per line. */
 export const LOOPBACK_READY_PREFIX = "audio-loopback-ready:";
+/** The permission TapRecorder.swift names in its ready marker: `…, System Audio Recording <state>)`. */
+const PROCESS_TAP_PERMISSION = /System Audio Recording (\w+)\)\s*$/;
 export const LOOPBACK_ERROR_PREFIX = "audio-loopback-error:";
 /** Opening a CoreAudio device takes milliseconds; this only bounds a wedged helper. */
 export const LOOPBACK_READY_TIMEOUT_MS = 5_000;
@@ -40,6 +42,11 @@ export interface RunningLoopbackHelper {
   sinkBusy(): boolean;
   /** The error the helper reported, as a typed tool error. */
   failure(): EmulatorAudioError;
+  /**
+   * The macOS System Audio Recording state a process tap reported when it opened (`authorized`,
+   * `denied`, `undetermined` or `unknown`); absent for the loopback device modes.
+   */
+  capturePermission(): string | undefined;
 }
 
 interface HelperReport {
@@ -116,9 +123,16 @@ export async function startLoopbackHelper(options: {
     markReady = resolve;
   });
   let pending = "";
+  let capturePermission: string | undefined;
   const handleLine = (line: string) => {
     if (line.startsWith(LOOPBACK_READY_PREFIX)) {
       logger.debug(`audio-loopback-helper: ${line}`);
+      capturePermission = PROCESS_TAP_PERMISSION.exec(line)?.[1];
+      if (capturePermission !== undefined && capturePermission !== "authorized") {
+        logger.warn(
+          `audio-loopback-helper: System Audio Recording is ${capturePermission}, so the process tap records silence (#19115)`,
+        );
+      }
       markReady();
     } else if (line.startsWith(LOOPBACK_ERROR_PREFIX)) {
       report = parseError(line);
@@ -188,6 +202,7 @@ export async function startLoopbackHelper(options: {
     outputEnded,
     sinkBusy: () => sinkBusy,
     failure: () => loopbackError(options.operation, report, exitCode),
+    capturePermission: () => capturePermission,
   };
   await waitForReady(helper, ready, options, () => report);
   return helper;

@@ -20,6 +20,8 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
   captureTimedOut = false;
   /** The route a host-audio capture reports, when the session overrides the service's. */
   captureRoute: "process-tap" | "host-loopback" | undefined;
+  /** Warnings a host-audio capture reports. */
+  captureWarnings: string[] | undefined;
 
   constructor(readonly endpoint: EmulatorGrpcEndpoint) {}
 
@@ -48,6 +50,7 @@ export class FakeEmulatorAudioSession implements EmulatorAudioSession {
       pcm: { sampleRate: options.sampleRate ?? 48_000, channels: 1, samples: this.captureSamples },
       timedOut: this.captureTimedOut,
       route: this.captureRoute,
+      ...(this.captureWarnings ? { warnings: this.captureWarnings } : {}),
     };
   }
 

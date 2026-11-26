@@ -442,6 +442,7 @@ describe("DisplayConfig setConfig", () => {
         expect(result.success).toBe(true);
         expect(result.current).toMatchObject({ fontScale: 1.0, density: 440 });
         expect(result.current?.theme).toBeUndefined();
+        expect(result.supported).toMatchObject({ fontScale: true, density: true, theme: false });
       });
 
       test("setting theme is refused with an actionable error and writes nothing", async () => {

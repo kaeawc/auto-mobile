@@ -1,7 +1,7 @@
 {
   "provenance": "captured",
   "summary": "xcrun simctl list JSON, defaults exports, residue reads, unified log, crash report, launchctl and failure stderr from iOS, tvOS, watchOS and visionOS simulators",
-  "source": "README.md, PR #11005, PR #11032, PR #15321, PR #17076, PR #19103",
+  "source": "README.md, PR #11005, PR #11032, PR #15321, PR #17076, PR #19103, issue #19119",
   "capturedOn": [
     {
       "device": "macOS host (xcrun simctl list)",

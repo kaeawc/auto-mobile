@@ -23,6 +23,7 @@ import { setActiveDeviceSchema } from "../../src/server/utilityTools";
 import { unsupportedPlatformToolMessage } from "../../src/server/applePlatformToolSupport";
 import type { Platform } from "../../src/models";
 import type { ForeignDeviceOwnership } from "../../src/daemon/foreignDeviceOwnership";
+import type { WatchForegroundProbe } from "../../src/features/watch/WatchForegroundApps";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeDeviceSessionPersistence } from "../fakes/FakeDeviceSessionPersistence";
@@ -95,12 +96,14 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       pooledWatch = true,
       watchOwnership,
       retargetReason,
+      watchForegroundProbe,
     }: {
       untypedListing?: boolean;
       autolock?: "0" | "1";
       pooledWatch?: boolean;
       watchOwnership?: ForeignDeviceOwnership;
       retargetReason?: string;
+      watchForegroundProbe?: WatchForegroundProbe;
     } = {},
   ) {
     const env: Record<string, string | undefined> = { AUTOMOBILE_DEVICE_POOL_AUTOLOCK: autolock };
@@ -179,6 +182,7 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
     const retargets: Array<{ deviceId: string; bundleId: string }> = [];
     registerAppTools({
       watchApps: (device) => new WatchAppManager(device, { simctl: watchSimctl, plist, dataWipe }),
+      watchForegroundProbe: watchForegroundProbe ?? { foregroundBundleIds: async () => new Set() },
       retargetWatchRunner: async (deviceId, bundleId) => {
         expect(watchSimctl.pidOf(deviceId, bundleId)).toBeDefined();
         retargets.push({ deviceId, bundleId });
@@ -456,6 +460,39 @@ describe("app tools and setActiveDevice on an Apple Watch simulator", () => {
       bundles: ["com.apple.NanoSettings"],
       type: "launchable",
     });
+  });
+
+  test("listApps on a watch marks the app the runner reports in front, read fresh per call", async () => {
+    const asked: Array<{ deviceId: string; bundleIds: string[] }> = [];
+    let front = "com.apple.NanoSettings";
+    const { watchSimctl } = await arrange([iphone], {
+      watchForegroundProbe: {
+        foregroundBundleIds: async (deviceId, bundleIds) => {
+          asked.push({ deviceId, bundleIds: [...bundleIds] });
+          return new Set([front]);
+        },
+      },
+    });
+    watchSimctl.seed(watch.deviceId, { CFBundleIdentifier: BUNDLE, ApplicationType: "User" });
+    const foreground = async () =>
+      listAppsResultSchema
+        .parse(toolJson(await call("listApps", { platform: "watchos", deviceId: watch.deviceId })))
+        .devices.flatMap((device) => device.apps)
+        .map((app) => [app.packageName, app.foreground]);
+
+    expect(await foreground()).toEqual([
+      ["com.apple.NanoSettings", true],
+      [BUNDLE, false],
+    ]);
+    front = BUNDLE;
+    expect(await foreground()).toEqual([
+      ["com.apple.NanoSettings", false],
+      [BUNDLE, true],
+    ]);
+    expect(asked).toEqual([
+      { deviceId: watch.deviceId, bundleIds: ["com.apple.NanoSettings", BUNDLE] },
+      { deviceId: watch.deviceId, bundleIds: ["com.apple.NanoSettings", BUNDLE] },
+    ]);
   });
 
   test("a watch listing with no ApplicationType lists user apps and refuses type=launchable", async () => {

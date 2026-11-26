@@ -1845,6 +1845,9 @@ jobs:
 
       - name: "Post Consolidated Comment"
         if: ${{ !cancelled() && env.TS_CHANGED == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}
+        # Informational only: "Check Benchmark Results" decides pass/fail, so a GitHub API
+        # error writing the comment must not turn the job red (#19309).
+        continue-on-error: true
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
@@ -2177,31 +2180,58 @@ jobs:
               body += '\n\n';
             }
 
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
+            // Retry GitHub 5xx responses with backoff; any other error is not retried (#19309).
+            const withRetry = async (label, call) => {
+              const attempts = 3;
+              for (let attempt = 1; ; attempt++) {
+                try {
+                  return await call();
+                } catch (error) {
+                  const status = error?.status ?? 0;
+                  if (status < 500 || attempt >= attempts) {
+                    throw error;
+                  }
+                  console.log(`${label} got HTTP ${status} (attempt ${attempt}/${attempts}); retrying`);
+                  await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+                }
+              }
+            };
 
-            const botComment = comments.find(comment =>
-              comment.user.type === 'Bot' &&
-              comment.body.includes('## MCP Benchmarks')
-            );
+            try {
+              const { data: comments } = await withRetry('listComments', () =>
+                github.rest.issues.listComments({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                })
+              );
 
-            if (botComment) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: botComment.id,
-                body: body
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body: body
-              });
+              const botComment = comments.find(comment =>
+                comment.user.type === 'Bot' &&
+                comment.body.includes('## MCP Benchmarks')
+              );
+
+              if (botComment) {
+                await withRetry('updateComment', () =>
+                  github.rest.issues.updateComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    comment_id: botComment.id,
+                    body: body
+                  })
+                );
+              } else {
+                await withRetry('createComment', () =>
+                  github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: context.issue.number,
+                    body: body
+                  })
+                );
+              }
+            } catch (error) {
+              core.warning(`Could not write the MCP Benchmarks comment: ${error.message}`);
             }
 
       - name: "Check Benchmark Results"

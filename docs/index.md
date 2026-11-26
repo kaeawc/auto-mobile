@@ -1,11 +1,34 @@
 # AutoMobile
 
-AutoMobile is an MCP server that lets AI agents control your Android & iOS
-devices using natural language. It uses standard platform tools like `adb` &
-`simctl` paired with its own additional Kotlin & Swift libraries and apps. All
-components are open source. The point is to provide mobile engineers with AI
-workflow tools to perform UX deep dives, reproduce bugs, and run automated
-tests.
+**Hand your AI agent a phone.** AutoMobile is an MCP server that lets Claude, Cursor, Goose or any
+MCP client see and drive Android and iOS devices: phones, tablets, foldables, watches, TVs, cars and
+headsets, real or emulated. Ask for a bug repro, a UX walkthrough or a UI test in plain English,
+and the agent taps through your app on a real device and shows you what it found. No root, no
+jailbreak, no app changes: it rides on `adb`, `simctl` and open-source Kotlin and Swift companions.
+
+![Setting an alarm in the Clock app](img/clock-app.gif)
+
+## Compared with driving the device yourself
+
+An agent with a shell can already run `adb` and `simctl`. Here is what AutoMobile adds:
+
+|                               | AutoMobile                                                                                                                                | An agent with `adb` and `simctl`                                                                        |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Seeing the screen             | view hierarchy and screenshot from an on-device Accessibility Service and XCTestService, settled after every action                       | `uiautomator dump` and `screencap` by hand; on iOS, a screenshot and no hierarchy without a test runner |
+| Targeting                     | tap, swipe, pinch, drag and type on elements by text or id                                                                                | raw coordinates guessed from a screenshot                                                               |
+| iOS simulator input           | **0.5 ms** per tap, **1 ms** per Home press, no runner needed                                                                             | 438 ms per tap and 482 ms per Home press through an XCTest runner                                       |
+| Getting around an app         | learns its screens and jumps to one by name ([navigation graph](using/navigation-graph.md))                                               | taps its way there every time                                                                           |
+| Sharing devices               | [sessions own devices](using/device-ownership.md), so parallel agents never collide                                                       | whoever runs `adb` last wins                                                                            |
+| iOS network conditions        | [per simulator](using/ios-network-condition.md), no root, no profile, works on headless CI Macs                                           | Network Link Conditioner for the whole Mac                                                              |
+| Traces and audits             | [Perfetto and Instruments traces](using/performance-trace.md), [accessibility and performance audits](using/audits.md), visual regression | assemble each tool yourself                                                                             |
+| Turning a session into a test | [YAML plans](using/ui-tests.md) run natively by a Kotlin JUnitRunner and a Swift XCTestRunner                                             | write it from scratch                                                                                   |
+
+The input times were measured on one iOS simulator under the same load, 2026-11-23
+([devlog](devlog/2026-11-23-simulator-hid-input-default-on.md)).
+
+**129 tools** cover Android (113), iOS (94), tvOS (21), watchOS (18) and visionOS (15). Every one
+runs from MCP, the CLI and the daemon's HTTP endpoint, with the same names and arguments
+([tools](tools.md)).
 
 ## Install
 

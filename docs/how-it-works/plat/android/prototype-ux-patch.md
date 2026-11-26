@@ -43,7 +43,8 @@ op, including `test`, requires `baseRevision`. A device supporting the capabilit
 must refuse the whole patch with `conflict` if the user changed a touched state
 key since that revision, returning the current revision and those keys' values.
 
-There are at most 64 ops, the frame is capped at 1 MiB, and the resulting whole
+There are at most 64 ops. The frame is capped at 1 MiB, or 4 MiB for a prototype shown on a
+runtime advertising `prototype_large_budget_v1`. The resulting whole
 spec must satisfy every spec/data limit, including node count and depth. The
 host tracks a cloned copy of each id's device spec from its last acknowledged show,
 with components expanded and anchors resolved. It applies ops to a copy and

@@ -4,6 +4,7 @@ import { GUIDE_MOTION_V3 } from "./prototypeGuideMotionV3";
 import { GUIDE_M3_EXPRESSIVE } from "./prototypeGuideM3Expressive";
 import { MAX_PROTOTYPE_PATCH_OPS } from "./prototypePatch";
 import * as spec from "./prototypeSpec";
+import { PROTOTYPE_LARGE_BUDGET } from "./prototypeRuntimeBudget";
 export const GUIDE_GESTURES = `${GUIDE_PLATFORM_NAMESPACES}
 
 ## Gestures
@@ -1084,7 +1085,7 @@ Data actions). Any state op, including \`test\`, requires \`baseRevision\`. A de
 must refuse the whole patch with \`conflict\` if the user changed a touched state
 key since that revision, returning the current revision and those keys' values.
 
-There are at most ${MAX_PROTOTYPE_PATCH_OPS} ops, the frame is capped at ${spec.MAX_PROTOTYPE_SPEC_BYTES / (1024 * 1024)} MiB, and the resulting whole
+There are at most ${MAX_PROTOTYPE_PATCH_OPS} ops. The frame is capped at ${spec.MAX_PROTOTYPE_SPEC_BYTES / (1024 * 1024)} MiB, or ${PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES / (1024 * 1024)} MiB on a \`prototype_large_budget_v1\` runtime. The resulting whole
 spec must satisfy every spec/data limit, including node count and depth. The
 host tracks a cloned copy of each id's device spec from its last acknowledged show,
 with components expanded and anchors resolved. It applies ops to a copy and

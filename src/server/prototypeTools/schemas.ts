@@ -32,7 +32,6 @@ import {} from "../../features/prototype/prototypeAccessibilityLint";
 import {} from "../../features/prototype/prototypePlaceholderLint";
 import {
   MAX_PROTOTYPE_LIST_ITEMS,
-  MAX_PROTOTYPE_SPEC_BYTES,
   prototypeSpecSchema,
   type PrototypeData,
 } from "../../features/prototype/prototypeSpec";
@@ -387,7 +386,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .min(1)
         .optional()
         .describe(
-          `show, screenMap or share: instead of spec, an absolute path of a local JSON file holding the same spec (up to ${MAX_PROTOTYPE_SPEC_BYTES} bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.`,
+          `show, screenMap or share: instead of spec, an absolute path of a local JSON file holding the same spec (up to ${PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES} bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.`,
         ),
       display: z
         .string()

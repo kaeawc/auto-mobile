@@ -1,5 +1,10 @@
 import { prototypeDegradedEffectsOutput } from "../features/prototype/prototypeDegradedEffects";
-import type { PrototypeRuntimeBudget } from "../features/prototype/prototypeRuntimeBudget";
+import {
+  PROTOTYPE_BASE_BUDGET,
+  PROTOTYPE_LARGE_BUDGET,
+  type PrototypeRuntimeBudget,
+} from "../features/prototype/prototypeRuntimeBudget";
+import { PROTOTYPE_LARGE_BUDGET_CAPABILITY } from "../features/observe/android/ctrlProxyProtocol";
 import { prototypeTimerWarnings } from "../features/prototype/prototypeTimers";
 import { prototypeTopAppBarInsetWarnings } from "../features/prototype/prototypeTopAppBarInsetLint";
 import { prototypeSettingsPagePlatformError } from "../features/prototype/prototypeSettings";
@@ -20,7 +25,7 @@ import {
 import type { PrototypeStatusStore } from "../features/prototype/PrototypeStatusStore";
 import type { PrototypeTransport } from "../features/prototype/PrototypeTransport";
 import type { PrototypeResult } from "../features/observe/android/ctrlProxyProtocol";
-import { MAX_PROTOTYPE_SPEC_BYTES, type PrototypeSpec } from "../features/prototype/prototypeSpec";
+import type { PrototypeSpec } from "../features/prototype/prototypeSpec";
 import { validatePrototypeSpec } from "../features/prototype/prototypeValidation";
 import {
   prototypeAccessibilityOutput,
@@ -58,6 +63,11 @@ export function createPrototypePatchQueue(): PrototypePatchQueue {
 export interface PrototypePatchDependencies {
   /** A disposable app owns its installed spec and validates patches itself. */
   deviceOwnsSpec?: boolean;
+  /**
+   * The runtime budget of a device that owns its spec, from the capability it advertises (#19306).
+   * Host-tracked specs use the budget they were shown under instead. Absent is the base budget.
+   */
+  deviceBudget?: () => Promise<PrototypeRuntimeBudget>;
   store: Pick<PrototypeStatusStore, "shownSpecs" | "recordPatch">;
   transport: Pick<PrototypeTransport, "patch">;
   supportsPatch: () => Promise<boolean>;
@@ -76,6 +86,8 @@ export interface PrototypePatchInput {
   baseRevision?: number;
   timeoutMs?: number;
 }
+/** A patch input with the UTF-8 byte length of its frame (`id`, `baseRevision`, `ops`). */
+type MeasuredPatchInput = PrototypePatchInput & { frameBytes: number };
 export interface PrototypePatchOutput {
   success: boolean;
   error?: string;
@@ -88,6 +100,27 @@ export interface PrototypePatchOutput {
   placeholderFindingsTotal?: number;
 }
 const failure = (error: string): PrototypePatchOutput => ({ success: false, error });
+
+/**
+ * A patch frame is capped at the spec byte limit of the target runtime's budget (#19306): a frame
+ * over the base cap reaches only a runtime advertising `prototype_large_budget_v1`.
+ */
+function frameLimitFailure(
+  frameBytes: number,
+  budget: PrototypeRuntimeBudget,
+): PrototypePatchOutput | undefined {
+  const limit = budget.MAX_PROTOTYPE_SPEC_BYTES;
+  if (frameBytes <= limit) {
+    return undefined;
+  }
+  const raise =
+    limit < PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES
+      ? ` A runtime advertising ${PROTOTYPE_LARGE_BUDGET_CAPABILITY} takes up to ${PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES} bytes; on this one, split the patch into smaller ones.`
+      : " Split the patch into smaller ones.";
+  return failure(
+    `Invalid patch at ops: Patch byte limit exceeded (the frame is ${frameBytes} bytes; this prototype's runtime budget allows ${limit}).${raise}`,
+  );
+}
 
 /** `budget` is the runtime budget the spec was shown under (#18804). */
 function patchSpec(
@@ -133,21 +166,35 @@ async function sendPatch(
   }
 }
 
+/** A disposable app validates the patch itself; the host only caps its frame and sends it. */
+async function deviceOwnedPatch(
+  deps: PrototypePatchDependencies,
+  args: MeasuredPatchInput,
+  signal?: AbortSignal,
+): Promise<PrototypePatchOutput> {
+  const budget = (await deps.deviceBudget?.()) ?? PROTOTYPE_BASE_BUDGET;
+  const tooLarge = frameLimitFailure(args.frameBytes, budget);
+  if (tooLarge) {
+    return tooLarge;
+  }
+  signal?.throwIfAborted();
+  const result = await sendPatch(deps, args);
+  deps.retire(result);
+  return {
+    success: result.success,
+    ...prototypePatchReplyFields(result),
+    ...(result.error ? { error: result.error } : {}),
+  };
+}
+
 async function queuedPatch(
   deps: PrototypePatchDependencies,
   deviceId: string,
-  args: PrototypePatchInput,
+  args: MeasuredPatchInput,
   signal?: AbortSignal,
 ): Promise<PrototypePatchOutput> {
   if (deps.deviceOwnsSpec) {
-    signal?.throwIfAborted();
-    const result = await sendPatch(deps, args);
-    deps.retire(result);
-    return {
-      success: result.success,
-      ...prototypePatchReplyFields(result),
-      ...(result.error ? { error: result.error } : {}),
-    };
+    return deviceOwnedPatch(deps, args, signal);
   }
   const read = deps.store.shownSpecs.read(deviceId, args.id);
   if (read.kind === "busy") {
@@ -159,6 +206,13 @@ async function queuedPatch(
     return failure(
       `Prototype ${args.id} was not patched: this host is not tracking its spec on this device (it was not shown by this host, or a dismiss, a failed show or an overlapping show ended the tracking). Show it, then patch.`,
     );
+  }
+  const tooLarge = frameLimitFailure(
+    args.frameBytes,
+    deps.store.shownSpecs.budgetOf(deviceId, args.id),
+  );
+  if (tooLarge) {
+    return tooLarge;
   }
   const applied = plannedPatch(deps, deviceId, args, read.spec);
   if (!("spec" in applied)) {
@@ -299,15 +353,12 @@ export async function performPrototypePatch(
   if (args.baseRevision === undefined && prototypePatchTouchesState(args.ops)) {
     return failure("Invalid patch at baseRevision: required when a patch has /state ops");
   }
+  let frameBytes: number;
   try {
-    if (
-      Buffer.byteLength(
-        JSON.stringify({ id: args.id, baseRevision: args.baseRevision, ops: args.ops }),
-        "utf8",
-      ) > MAX_PROTOTYPE_SPEC_BYTES
-    ) {
-      return failure("Invalid patch at ops: Patch byte limit exceeded");
-    }
+    frameBytes = Buffer.byteLength(
+      JSON.stringify({ id: args.id, baseRevision: args.baseRevision, ops: args.ops }),
+      "utf8",
+    );
   } catch (error) {
     logger.warn("[prototype] Patch serialization failed", error);
     if (!(error instanceof RangeError)) {
@@ -315,5 +366,12 @@ export async function performPrototypePatch(
     }
     return failure("Invalid patch at ops: Patch is nested too deeply");
   }
-  return deps.queue.run(deviceId, () => queuedPatch(deps, deviceId, args, signal));
+  // No runtime takes a frame over the large budget, so it never waits for the queue.
+  const tooLarge = frameLimitFailure(frameBytes, PROTOTYPE_LARGE_BUDGET);
+  if (tooLarge) {
+    return tooLarge;
+  }
+  return deps.queue.run(deviceId, () =>
+    queuedPatch(deps, deviceId, { ...args, frameBytes }, signal),
+  );
 }

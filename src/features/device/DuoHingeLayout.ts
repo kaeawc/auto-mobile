@@ -20,6 +20,8 @@ export const IOS_FULLY_OPEN_DEGREES = 180;
 export interface IosRequestedHingeAngleStore {
   record(deviceId: string, degrees: number): void;
   requested(deviceId: string): number | undefined;
+  /** Drops the recorded angle once the hinge is known to have reset (a simulator boot, #19406). */
+  forget(deviceId: string): void;
 }
 
 export class InMemoryIosRequestedHingeAngleStore implements IosRequestedHingeAngleStore {
@@ -31,6 +33,10 @@ export class InMemoryIosRequestedHingeAngleStore implements IosRequestedHingeAng
 
   requested(deviceId: string): number | undefined {
     return this.angles.get(deviceId);
+  }
+
+  forget(deviceId: string): void {
+    this.angles.delete(deviceId);
   }
 }
 

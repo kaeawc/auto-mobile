@@ -27,6 +27,7 @@ portable test/features/utility/WatchNotificationDeliveryLog.test.ts     # pure w
 
 portable test/ctrlProxy/IosCtrlProxyBuilder.localBuildOverwrite.test.ts  # fake downloader and directory lock over temp dirs only
 portable test/features/audit/IosOnDemandAuditEngines.test.ts              # fake observer, clock and process commands over a captured launchctl listing
+portable test/daemon/iosHingeAngleBootCleanup.test.ts                 # in-memory store and boot hooks only
 portable test/features/utility/ios/*.test.ts  # registry, env construction and injected compiler/filesystem only
 portable test/features/action/iosRotateFloatingWindow.test.ts           # pure rotate verification over captured iPad values
 portable test/daemon/iosCameraPosterSessionCleanup.test.ts  # fake session manager and in-memory registry only

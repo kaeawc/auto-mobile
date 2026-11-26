@@ -62,10 +62,11 @@ derived from it. AutoMobile cannot read the iPhone Duo hinge:
 - Inner panel active, and the last `setPosture` hinge angle (a named posture sets 0, 130 or 180) was strictly between 0 and 180
   degrees: `half_opened`, `postureSource: "requested_hinge_angle"`.
 - Inner panel active otherwise (180 degrees, or no angle set since the AutoMobile daemon
-  started): `opened`, `postureSource: "inferred_from_active_panel"`.
+  started or last booted the simulator): `opened`, `postureSource: "inferred_from_active_panel"`.
 
 `requestedHingeAngle` is the last angle `setPosture` requested. It repeats the request; it is not
-a reading of the hinge, and it goes stale if the hinge is changed outside AutoMobile.
+a reading of the hinge, and it goes stale if the hinge is changed outside AutoMobile. A boot
+resets the hinge to the cover panel, so a simulator boot through AutoMobile forgets the angle.
 Do not treat either source as a confirmed hinge posture. Use `activePanel` to decide which screen
 you are on, and call `setPosture` when a test needs a specific posture. When the active panel
 cannot be determined, `displays.current` is omitted.

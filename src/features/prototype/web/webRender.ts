@@ -988,7 +988,7 @@ export function renderWebNode(
     element.attrs["data-node"] === undefined
       ? element
       : withOverContentLayers(element, styled.style, own.style);
-  return withAnchorNames(withLaterMinStrut(layered, styled.style, own.style), styled, path, own);
+  return withAnchorNames(withLaterMinStrut(layered, styled, own.style), styled, path, own);
 }
 
 /** A node a menu or tooltip anchors to, named for CSS anchor positioning (#16536). */

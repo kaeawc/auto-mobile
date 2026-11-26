@@ -747,6 +747,38 @@ for (const engine of ENGINES) {
                 },
               ],
             },
+            // Any row's minWidth is clamped into its parent's width, fill or content (#19373).
+            {
+              type: "column",
+              style: { width: { dp: 100 } },
+              children: [
+                {
+                  type: "row",
+                  testTag: "min-content",
+                  style: { minWidth: 300 },
+                  children: [text("min-content-text", "clamped")],
+                },
+                {
+                  type: "row",
+                  testTag: "min-fill",
+                  style: { minWidth: 300, width: "fill" },
+                  children: [text("min-fill-text", "clamped")],
+                },
+              ],
+            },
+            // In a wrap-sized parent the minimum still holds, as the parent wraps around it.
+            {
+              type: "column",
+              testTag: "min-wrap-parent",
+              children: [
+                {
+                  type: "row",
+                  testTag: "min-wrapped",
+                  style: { minWidth: 120 },
+                  children: [text("min-wrapped-text", "a")],
+                },
+              ],
+            },
             // A repeated row measures its instances as one row: the first ratio takes what the
             // first text leaves, and the second instance gets no width (#16711).
             {
@@ -810,6 +842,10 @@ for (const engine of ENGINES) {
         expect(width("min-before")).toBeCloseTo(40, 0);
         expect(width("min-capped")).toBeCloseTo(60, 0);
         expect(width("min-bounded")).toBeCloseTo(100, 0);
+        expect(width("min-content")).toBeCloseTo(100, 0);
+        expect(width("min-fill")).toBeCloseTo(100, 0);
+        expect(width("min-wrapped")).toBeCloseTo(120, 0);
+        expect(width("min-wrap-parent")).toBeCloseTo(120, 0);
         expect(width("bounded-capped")).toBeCloseTo(50, 0);
         expect(width("gap-taker")).toBeCloseTo(200 - width("gap-start") - 10, 0);
         expect(width("gap-end")).toBeCloseTo(0, 0);
@@ -1031,7 +1067,9 @@ describeBrowser("a row's aspect-ratio height cap in headless Chromium (#16720)",
     "a row's safe-area padding leaves its aspect ratio the rest of its height",
     async () => {
       const safe = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
-      const { ratio, row } = await boxes(heightCapSpec(safe, false));
+      // A full-height sheet leaves the inset to the row; a framed fullscreen window takes it (#19372).
+      const window = { placement: { type: "sheet", edge: "top", height: 800 } };
+      const { ratio, row } = await boxes({ ...heightCapSpec(safe, false), window });
       // Pixel 9's 48 dp top inset leaves 52 of the row's 100 dp: a 104 x 52 box inside the row.
       expect(ratio.height / row.height).toBeCloseTo(0.52, 2);
       expect(ratio.width / ratio.height).toBeCloseTo(2, 2);

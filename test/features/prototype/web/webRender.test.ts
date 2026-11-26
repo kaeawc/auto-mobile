@@ -38,6 +38,12 @@ const labelText = (node: WebChild): string =>
   typeof node === "string" ? node : node.children.map(labelOf).join("");
 const byTag = (still: { element: WebElement }, tag: string) =>
   find(still.element, (element) => element.attrs["data-testid"] === tag);
+/**
+ * A window that reaches the screen's edges without padding them: a framed fullscreen window draws
+ * inside the safe area and consumes every edge (#19372), so safeAreaPadding adds the frame's insets
+ * only in a window that leaves them, such as a full-height sheet.
+ */
+const EDGE_WINDOW = { placement: { type: "sheet", edge: "top", height: 800 } };
 
 describe("prototype web still (#16346)", () => {
   const still = renderPrototypeStill(reference, { frame: "pixel-9" });
@@ -332,6 +338,7 @@ describe("prototype web still (#16346)", () => {
   test("adds the frame's safe area to the edges safeAreaPadding names", () => {
     const spec = {
       ...reference,
+      window: EDGE_WINDOW,
       root: {
         type: "column",
         testTag: "padded",
@@ -372,11 +379,15 @@ describe("prototype web still (#16346)", () => {
       expect(screen["--safe-start"]).toBe("var(--safe-left)");
     });
 
-    test("without safeAreaPadding no content takes the left inset, as both devices draw edge to edge", () => {
-      expect(insetUsers(landscape(screens.cart!))).toEqual([]);
+    test("the framed window insets every row by the left inset once, as the viewers do (#19372)", () => {
+      const users = insetUsers(landscape(screens.cart!));
+      expect(users.map((node) => node.attrs["data-window"])).toEqual(["fullscreen"]);
+      expect(users[0]!.style.padding).toBe(
+        "var(--safe-top, 0px) var(--safe-right, 0px) var(--safe-bottom, 0px) var(--safe-left, 0px)",
+      );
     });
 
-    test("safeAreaPadding on the screen column insets every row once", () => {
+    test("safeAreaPadding on the screen column adds nothing the window already took", () => {
       const users = insetUsers(
         landscape({
           ...screens.cart,
@@ -384,9 +395,87 @@ describe("prototype web still (#16346)", () => {
           safeAreaPadding: { edges: ["start", "end"], types: ["systemBars", "cutout"] },
         }),
       );
-      expect(users.map((node) => node.attrs["data-testid"])).toEqual(["cart"]);
-      expect(users[0]!.style["padding-inline-start"]).toBe("calc(0px + var(--safe-start))");
+      expect(users.map((node) => node.attrs["data-window"])).toEqual(["fullscreen"]);
     });
+  });
+
+  describe("a framed fullscreen window draws inside the safe area (#19372)", () => {
+    const SAFE_DRAWING =
+      "var(--safe-top, 0px) var(--safe-right, 0px) var(--safe-bottom, 0px) var(--safe-left, 0px)";
+    const windowOf = (element: WebElement) =>
+      find(element, (node) => node.attrs["data-window"] !== undefined)[0]!;
+
+    test("the window pads every edge by the frame's inset, so the first line clears the status bar", () => {
+      const done = renderPrototypeStill(reference, { frame: "pixel-9", screen: "done" });
+      const window = windowOf(done.element);
+      expect(window.style.padding).toBe(SAFE_DRAWING);
+      expect(textOf(window)).toBe("Thanks");
+      const cart = windowOf(renderPrototypeStill(reference, { frame: "iphone-16" }).element);
+      expect(cart.style.padding).toBe(SAFE_DRAWING);
+    });
+
+    test("the band behind the status bar takes the colour just below it", () => {
+      const window = windowOf(
+        renderPrototypeStill({
+          ...reference,
+          root: {
+            type: "column",
+            style: { width: "fill", height: "fill", background: "#ffffff" },
+            children: [{ type: "topAppBar", title: "Inbox", style: { background: "#1d1b20" } }],
+          },
+        }).element,
+      );
+      expect(window.style).toMatchObject({
+        "background-image": "linear-gradient(rgba(29,27,32,1), rgba(29,27,32,1))",
+        "background-size": "100% var(--safe-top, 0px)",
+        "background-repeat": "no-repeat",
+      });
+    });
+
+    test("a chromeless, edge-to-edge or TV screen, a sheet and a floating window keep their own placement", () => {
+      const chromeless = renderPrototypeStill(reference, { chromeless: true });
+      expect(windowOf(chromeless.element).style).not.toHaveProperty("padding");
+      const edgeToEdge = renderPrototypeStill(reference, { edgeToEdge: true });
+      expect(windowOf(edgeToEdge.element).style).not.toHaveProperty("padding");
+      expect(windowOf(edgeToEdge.element).style).not.toHaveProperty("background-image");
+      const sheet = renderPrototypeStill({ ...reference, window: EDGE_WINDOW });
+      expect(windowOf(sheet.element).style).not.toHaveProperty("padding");
+      const floating = renderPrototypeStill({
+        ...reference,
+        window: { placement: { type: "floating", gravity: "center" } },
+      });
+      expect(windowOf(floating.element).style).not.toHaveProperty("padding");
+      // A TV frame's insets are overscan margins, not system bars, so its window stays edge to edge.
+      for (const frame of ["android-tv-1080p", "apple-tv"]) {
+        const tv = renderPrototypeStill(reference, { frame });
+        expect(windowOf(tv.element).style).not.toHaveProperty("padding");
+      }
+    });
+  });
+
+  test("a row's minWidth stays inside its parent's width (#19373)", () => {
+    const still = renderPrototypeStill({
+      ...reference,
+      root: {
+        type: "column",
+        style: { width: { dp: 100 } },
+        children: [
+          {
+            type: "row",
+            testTag: "clamped",
+            style: { minWidth: 300, background: "#e0ffe0" },
+            children: [{ type: "text", text: "clamped" }],
+          },
+        ],
+      },
+    });
+    const row = byTag(still, "clamped")[0]!;
+    const cell = find(still.element, (node) => node.children.includes(row))[0]!;
+    // The cell is at most the parent's width; its strut holds the minimum below that.
+    expect(cell.style).toMatchObject({ display: "grid", "max-width": "100%", "min-width": "0" });
+    const strut = cell.children[1] as WebElement;
+    expect(strut.style).toMatchObject({ width: "300px", "max-width": "100%", height: "0" });
+    expect(row.style["min-width"]).toBe("0");
   });
 
   test("draws a button disabled only when its enabledWhen is decidably false", () => {
@@ -413,18 +502,20 @@ describe("prototype web still (#16346)", () => {
   });
 
   test("a top app bar takes the safe area only from authored safeAreaPadding", () => {
-    const barOf = (extra: Record<string, unknown>) =>
+    const barOf = (extra: Record<string, unknown>, window: unknown = EDGE_WINDOW) =>
       byTag(
         renderPrototypeStill({
           ...reference,
+          window,
           root: { type: "topAppBar", testTag: "bar", title: "T", ...extra },
         }),
         "bar",
       )[0]!.style;
+    const safe = { safeAreaPadding: { edges: ["top"], types: ["systemBars"] } };
     expect(JSON.stringify(barOf({}))).not.toContain("--safe-top");
-    expect(
-      barOf({ safeAreaPadding: { edges: ["top"], types: ["systemBars"] } })["padding-top"],
-    ).toBe("calc(0px + var(--safe-top))");
+    expect(barOf(safe)["padding-top"]).toBe("calc(0px + var(--safe-top))");
+    // The framed fullscreen window already took the top inset (#19372).
+    expect(JSON.stringify(barOf(safe, reference.window))).not.toContain("--safe-top");
   });
 
   test("a top app bar draws its navigation icon and actions around the title", () => {
@@ -1352,6 +1443,7 @@ describe("prototype web still (#16346)", () => {
         renderPrototypeStill(
           {
             ...reference,
+            window: EDGE_WINDOW,
             root: {
               type: "column",
               ...column,
@@ -1385,6 +1477,7 @@ describe("prototype web still (#16346)", () => {
     const ratio = byTag(
       renderPrototypeStill({
         ...reference,
+        window: EDGE_WINDOW,
         root: {
           type: "column",
           style: { height: { dp: 100 } },
@@ -1414,6 +1507,7 @@ describe("prototype web still (#16346)", () => {
     });
     const still = renderPrototypeStill({
       ...reference,
+      window: EDGE_WINDOW,
       root: {
         type: "column",
         style: { height: { dp: 100 } },
@@ -1433,6 +1527,7 @@ describe("prototype web still (#16346)", () => {
         renderPrototypeStill(
           {
             ...reference,
+            window: EDGE_WINDOW,
             root: {
               type: "row",
               style: { height: { dp: 100 } },
@@ -1650,6 +1745,7 @@ describe("prototype web still (#16346)", () => {
     const safe = { edges: ["top"], types: ["systemBars"] };
     const still = renderPrototypeStill({
       ...reference,
+      window: EDGE_WINDOW,
       root: {
         type: "column",
         testTag: "outer",
@@ -1786,6 +1882,7 @@ describe("prototype web still (#16346)", () => {
     const button = byTag(
       renderPrototypeStill({
         ...reference,
+        window: EDGE_WINDOW,
         root: {
           type: "button",
           testTag: "b",

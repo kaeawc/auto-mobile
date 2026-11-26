@@ -95,6 +95,12 @@ export interface PrototypeStillOptions {
    * renderer's goldens capture (#16534).
    */
   readonly chromeless?: boolean;
+  /**
+   * Draws a fullscreen window edge to edge, under the status bar and cutout, as the CtrlProxy
+   * overlay and the iOS Viewer app do. By default a framed fullscreen window draws inside the safe
+   * area, as ProtoViewer does (#19372).
+   */
+  readonly edgeToEdge?: boolean;
   /** Asset ids the page can inline, to their CSS slots; any other asset draws a placeholder. */
   readonly imageSlots?: ReadonlyMap<string, number>;
   /**
@@ -239,10 +245,12 @@ function windowDirection(spec: unknown, locale: string): "ltr" | "rtl" | undefin
 function placed(
   spec: unknown,
   content: WebElement | undefined,
-  { layers, style }: Pick<WebRenderScope, "layers" | "style">,
+  scope: Pick<WebRenderScope, "layers" | "style" | "consumedInsets">,
   locale: string,
 ): WebElement {
-  const window = placedWindow(spec, content, layers, style);
+  // Only a framed fullscreen window consumes the insets at the top (see safeDrawingScope).
+  const safeDrawing = (scope.consumedInsets ?? []).length > 0;
+  const window = placedWindow(spec, content, scope, safeDrawing);
   const direction = windowDirection(spec, locale);
   if (direction === undefined) {
     return window;
@@ -302,8 +310,8 @@ function themedFamily(window: WebElement, style: WebStyleContext): WebElement {
 function placedWindow(
   spec: unknown,
   content: WebElement | undefined,
-  layers: readonly WebElement[],
-  style: WebStyleContext,
+  { layers, style }: Pick<WebRenderScope, "layers" | "style">,
+  safeDrawing: boolean,
 ): WebElement {
   const placement = record(record(record(spec)?.window)?.placement) ?? {};
   const children = [...(content ? [content] : []), ...layers];
@@ -316,9 +324,13 @@ function placedWindow(
   // Android paints a set scrim behind the fullscreen content, resolved like a sheet's scrim slot.
   const scrim: Record<string, string> =
     placement.scrim === undefined ? {} : { [BACKGROUND_COLOR]: scrimCss(placement.scrim, style) };
+  // The layers stay at `inset: 0`: an absolute box spans the padding, as the scrim does.
   return el(
     "div",
-    { attrs: { [DATA_WINDOW]: "fullscreen" }, style: { ...LAYER, ...scrim } },
+    {
+      attrs: { [DATA_WINDOW]: "fullscreen" },
+      style: { ...LAYER, ...scrim, ...(safeDrawing ? { padding: SAFE_DRAWING_PADDING } : {}) },
+    },
     children,
   );
 }
@@ -400,6 +412,7 @@ function stillScope(
     safeInsets: options.chromeless
       ? { top: 0, bottom: 0 }
       : { top: frame.safeArea[orientation].top, bottom: frame.safeArea[orientation].bottom },
+    ...safeDrawingScope(spec, options, frame),
     ...optionalScope(options),
     ...anchorTargetsScope(expanded),
     stacks: [],
@@ -416,6 +429,35 @@ function stillScope(
     ...scope,
     style: { ...scope.style, mode, palette: prototypeDrawnPalette(expanded, mode, surface) },
   };
+}
+
+/** Every safe-area edge, padded by a framed fullscreen window (see safeDrawingScope). */
+const SAFE_DRAWING_EDGES: readonly string[] = ["top", "bottom", "start", "end"];
+const SAFE_DRAWING_PADDING =
+  "var(--safe-top, 0px) var(--safe-right, 0px) var(--safe-bottom, 0px) var(--safe-left, 0px)";
+
+/**
+ * A framed fullscreen window draws its content inside the device's safe area, below the status
+ * bar and clear of the cutout, as ProtoViewer pads its renderer by `WindowInsets.safeDrawing`
+ * (#19372). The window consumes every edge, so a node's own `safeAreaPadding` adds nothing more,
+ * as `windowInsetsPadding` consumes them. A chromeless screen (the renderers' golden content path)
+ * has no insets, an edge-to-edge one leaves them to the spec, and a sheet or floating window places
+ * itself. A TV frame's insets are overscan and title-safe margins, not system bars or a cutout, so
+ * its window still leaves them to the spec.
+ */
+function safeDrawingScope(
+  spec: Raw,
+  options: PrototypeStillOptions,
+  frame: DeviceFrame,
+): Partial<WebRenderScope> {
+  const type = record(record(spec.window)?.placement)?.type;
+  const skipped =
+    options.chromeless ||
+    options.edgeToEdge ||
+    frame.formFactor === "tv" ||
+    type === "sheet" ||
+    type === "floating";
+  return skipped ? {} : { consumedInsets: SAFE_DRAWING_EDGES };
 }
 
 /** The node ids the spec's tooltips anchor to (#16536); a spec without one sets none. */
@@ -466,13 +508,51 @@ interface StatusBarSample {
  * screen background there, and a floating panel that reaches the edge sets it.
  */
 function stillStatusBarContent(spec: unknown, sample: StatusBarSample): WebStatusBarContent {
-  const { content, background, dark, screen, vars } = sample;
   const authored = record(record(spec)?.window)?.statusBar;
   if (authored === "light" || authored === "dark") {
     return authored;
   }
-  const top = appTopColor(content, background, screen, vars);
-  return statusBarContentFor(top, dark ? "light" : "dark");
+  return statusBarContentFor(stillTopColor(sample), sample.dark ? "light" : "dark");
+}
+
+/**
+ * The colour the window paints at the screen's top edge. A framed fullscreen window pads its
+ * content below the status bar (see safeDrawingScope), so this samples the window as it would draw
+ * edge to edge: the colour just below the status bar.
+ */
+function stillTopColor({ content, background, screen, vars }: StatusBarSample): string {
+  return appTopColor(withoutSafeDrawing(content), background, screen, vars);
+}
+
+function withoutSafeDrawing(window: WebElement): WebElement {
+  if (window.style.padding !== SAFE_DRAWING_PADDING) {
+    return window;
+  }
+  return {
+    ...window,
+    style: Object.fromEntries(Object.entries(window.style).filter(([key]) => key !== "padding")),
+  };
+}
+
+/**
+ * The band behind the status bar in the colour just below it (see stillTopColor), so a header
+ * runs up behind the status bar as an edge-to-edge app bar does, and the status bar content keeps
+ * contrast with what it draws over. Only a framed fullscreen window pads that band.
+ */
+function withStatusBand(window: WebElement, sample: StatusBarSample): WebElement {
+  if (window.style.padding !== SAFE_DRAWING_PADDING) {
+    return window;
+  }
+  const top = stillTopColor(sample);
+  return {
+    ...window,
+    style: {
+      ...window.style,
+      "background-image": `linear-gradient(${top}, ${top})`,
+      "background-size": "100% var(--safe-top, 0px)",
+      "background-repeat": "no-repeat",
+    },
+  };
 }
 
 /** The requested orientation, which the frame must support, else the frame's default. */
@@ -543,6 +623,13 @@ export function renderPrototypeStill(
     ...(backdrop ? { wallpaper: WEB_BACKDROP_WALLPAPER } : {}),
     ...(scope.style.textScale ? { fontSize: fontPx(14, scope.style) } : {}),
   };
+  const sample = {
+    content,
+    background,
+    dark,
+    screen: screenSize(frame, orientation),
+    vars: safeAreaVars(frame, orientation),
+  };
   const element = options.chromeless
     ? renderChromelessScreen(frame, orientation, paint, content)
     : renderDeviceFrame(
@@ -550,16 +637,10 @@ export function renderPrototypeStill(
         orientation,
         {
           ...paint,
-          statusBarContent: stillStatusBarContent(expanded, {
-            content,
-            background,
-            dark,
-            screen: screenSize(frame, orientation),
-            vars: safeAreaVars(frame, orientation),
-          }),
+          statusBarContent: stillStatusBarContent(expanded, sample),
           ...postureFrameOptions(view, fold),
         },
-        content,
+        withStatusBand(content, sample),
       );
   const stack = scope.stacks?.[0];
   return {

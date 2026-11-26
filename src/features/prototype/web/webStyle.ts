@@ -401,6 +401,48 @@ function boundsStyle(css: Css, style: Raw, pinnedAxis: WebStyleContext["parentAx
 }
 
 /**
+ * A `fill` width's authored `minWidth`, clamped into the parent's width as Compose's `sizeIn`
+ * coerces the minimum into the incoming constraints (#19373). The fill already resolves against
+ * that width, so `min(100%, minWidth)` never shrinks a wrap-sized parent. Not on a row's main axis,
+ * where the fill grows by flex instead, nor under an unbounded width.
+ */
+function fillMinWidthStyle(css: Css, style: Raw, context: WebStyleContext) {
+  if (
+    style.width !== "fill" ||
+    typeof style.minWidth !== "number" ||
+    context.parentAxis === "row" ||
+    context.unboundedWidth === true
+  ) {
+    return;
+  }
+  css[MIN_WIDTH] = `min(100%, ${px(style.minWidth)})`;
+}
+
+/**
+ * The authored `minWidth` of a content-width row outside a row, under a bounded width; undefined
+ * otherwise. Compose's `sizeIn` coerces it into the parent's width, where a CSS `min-width` would
+ * overflow the parent, and `min(100%, minWidth)` would collapse a wrap-sized parent (its intrinsic
+ * width reads the percentage as zero). Rendering wraps such a row in the strut cell a later
+ * sibling's minimum uses (webLaterMin.ts), capped at the parent's width (#19373). A row bounded
+ * around a capped aspect ratio already clamps its minimum (see rowBoundStyle).
+ */
+export function rowMinStrut(node: Raw, context: WebStyleContext): number | undefined {
+  const style = record(node.style);
+  const sized = style?.width === "fill" || typeof record(style?.width)?.dp === "number";
+  if (
+    node.type !== "row" ||
+    typeof style?.minWidth !== "number" ||
+    sized ||
+    style[ROW_BOUND_KEY] === true ||
+    context.parentAxis === "row" ||
+    context.unboundedWidth === true
+  ) {
+    return undefined;
+  }
+  return style.minWidth;
+}
+
+/**
  * A row bounded to its parent's width (ROW_BOUND_KEY), intersected with its authored maxWidth as
  * Compose's sizeIn does, unless a weight pins its width to its share. Its authored `minWidth` is
  * clamped into that bound too, as sizeIn coerces the minimum into the incoming constraints; a CSS
@@ -434,6 +476,7 @@ function sizeStyle(css: Css, style: Raw, context: WebStyleContext) {
   // A weight pins its main axis to its share on both devices, where its parent shares by weight.
   const pinnedAxis = weighted && context.weightsChildren === true ? context.parentAxis : undefined;
   boundsStyle(css, style, pinnedAxis);
+  fillMinWidthStyle(css, style, context);
   rowBoundStyle(css, style, context, pinnedAxis);
   // After the bound: a nested row its parent row measures against no width stays at zero.
   rowMeasureStyle(css, style, context);

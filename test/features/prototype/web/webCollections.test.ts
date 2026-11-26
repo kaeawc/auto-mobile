@@ -36,6 +36,8 @@ const byNode = (element: WebElement, type: string) =>
 const byPart = (element: WebElement, part: string) =>
   find(element, (candidate) => candidate.attrs["data-part"] === part);
 const rootOf = (root: Spec, extra: Spec = {}) => ({ id: "s", root, ...extra });
+/** A full-height sheet: unlike a framed fullscreen window, it leaves the insets to its content (#19372). */
+const EDGE_WINDOW = { placement: { type: "sheet", edge: "bottom", height: 800 } };
 
 // Material 3 baseline light roles, as rgba() strings.
 const PRIMARY = "rgba(103,80,164,1)";
@@ -507,7 +509,7 @@ describe("web still carousel (#16382)", () => {
 });
 
 describe("web still navigation bars (#16382)", () => {
-  const nav = (type: string, extra: Spec = {}, state: Spec = {}) =>
+  const nav = (type: string, extra: Spec = {}, state: Spec = {}, window?: Spec) =>
     byTag(
       renderPrototypeStill(
         rootOf(
@@ -523,7 +525,7 @@ describe("web still navigation bars (#16382)", () => {
               },
             ],
           },
-          { state },
+          { state, ...(window ? { window } : {}) },
         ),
       ).element,
       "bar",
@@ -545,32 +547,47 @@ describe("web still navigation bars (#16382)", () => {
   });
 
   test("a bottom nav pads its bottom edge by the safe area unless an ancestor took it", () => {
-    expect(nav("bottomNav").style["padding-bottom"]).toContain("var(--safe-bottom)");
+    expect(nav("bottomNav", {}, {}, EDGE_WINDOW).style["padding-bottom"]).toContain(
+      "var(--safe-bottom)",
+    );
     const consumed = byTag(
       renderPrototypeStill(
-        rootOf({
-          type: "column",
-          safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] },
-          children: [
-            { type: "bottomNav", testTag: "bar", items: [{ label: "A" }, { label: "B" }] },
-          ],
-        }),
+        rootOf(
+          {
+            type: "column",
+            safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] },
+            children: [
+              { type: "bottomNav", testTag: "bar", items: [{ label: "A" }, { label: "B" }] },
+            ],
+          },
+          { window: EDGE_WINDOW },
+        ),
       ).element,
       "bar",
     )[0]!;
     expect(JSON.stringify(consumed.style)).not.toContain("--safe-bottom");
+    // A framed fullscreen window already took the bottom inset (#19372).
+    expect(JSON.stringify(nav("bottomNav").style)).not.toContain("--safe-bottom");
   });
 
   test("a bottom nav keeps an authored IME-only edge apart from its own bottom inset", () => {
-    const bar = nav("bottomNav", { safeAreaPadding: { edges: ["top"], types: ["ime"] } });
+    const bar = nav(
+      "bottomNav",
+      { safeAreaPadding: { edges: ["top"], types: ["ime"] } },
+      {},
+      EDGE_WINDOW,
+    );
     expect(bar.style["padding-bottom"]).toContain("var(--safe-bottom)");
     expect(JSON.stringify(bar.style)).not.toContain("--safe-top");
   });
 
   test("a bottom nav asking for its bottom inset itself takes it only once", () => {
-    const bar = nav("bottomNav", {
-      safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] },
-    });
+    const bar = nav(
+      "bottomNav",
+      { safeAreaPadding: { edges: ["bottom"], types: ["systemBars"] } },
+      {},
+      EDGE_WINDOW,
+    );
     expect(bar.style["padding-bottom"]!.match(/--safe-bottom/g)).toHaveLength(1);
   });
 

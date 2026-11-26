@@ -166,18 +166,24 @@ test("a sheet leaves the status area on the screen background", () => {
 });
 
 test("a root padded by the top safe area keeps its own colour behind the status bar", () => {
-  const still = renderPrototypeStill({
-    id: "padded",
-    window: { placement: { type: "fullscreen" } },
-    theme: { mode: "light" },
-    root: {
-      type: "column",
-      style: { width: "fill", height: "fill", background: "#ffffff" },
-      safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
-      children: [{ type: "topAppBar", title: "Inbox", style: { background: "#1d1b20" } }],
-    },
-  });
-  expect(statusBarOf(still.element)?.attrs["data-status-content"]).toBe("dark");
+  const paddedIn = (placement: Record<string, unknown>) =>
+    renderPrototypeStill({
+      id: "padded",
+      window: { placement },
+      theme: { mode: "light" },
+      root: {
+        type: "column",
+        style: { width: "fill", height: "fill", background: "#ffffff" },
+        safeAreaPadding: { edges: ["top"], types: ["systemBars"] },
+        children: [{ type: "topAppBar", title: "Inbox", style: { background: "#1d1b20" } }],
+      },
+    });
+  // A full-height sheet leaves the inset to the root, whose own colour fills it.
+  const sheet = paddedIn({ type: "sheet", edge: "top", height: 800 });
+  expect(statusBarOf(sheet.element)?.attrs["data-status-content"]).toBe("dark");
+  // A framed fullscreen window already took the inset (#19372): the bar sits right below it.
+  const fullscreen = paddedIn({ type: "fullscreen" });
+  expect(statusBarOf(fullscreen.element)?.attrs["data-status-content"]).toBe("light");
 });
 
 test("in a box the last stretching child paints over its siblings, so its colour wins", () => {

@@ -28,6 +28,10 @@ import {
 } from "./appResourcesQuery";
 import type { AppsQueryOptions, AppsQueryType } from "./appResourcesTypes";
 import type { LaunchAppExecutor } from "./appToolsLaunch";
+import {
+  markWatchForeground,
+  type WatchForegroundProbe,
+} from "../features/watch/WatchForegroundApps";
 
 /** Builds the app manager for a watch, Apple TV or Vision Pro; tests pass a factory over a fake simctl. */
 export type WatchAppManagerFactory = (device: BootedDevice) => WatchAppManager;
@@ -150,6 +154,7 @@ export function assertWatchLaunchSupported(
 /** listApps' query: a watch, Apple TV or Vision Pro is listed straight from simctl, every other device keeps the cache. */
 export function createPlatformQueryInstalledApps(
   watchApps: WatchAppManagerFactory = defaultWatchAppManager,
+  watchForegroundProbe?: WatchForegroundProbe,
 ): typeof queryInstalledApps {
   return (options, signal, deps) => {
     const deviceId = options.deviceId;
@@ -160,6 +165,7 @@ export function createPlatformQueryInstalledApps(
     return queryWatchApps(
       watchApps(device),
       { ...options, deviceId, platform: options.platform },
+      deps?.watchForegroundProbe ?? watchForegroundProbe,
       signal,
     );
   };
@@ -173,6 +179,7 @@ export function createPlatformQueryInstalledApps(
 async function queryWatchApps(
   manager: WatchAppManager,
   options: AppsQueryOptions & { deviceId: string; platform: "watchos" | "tvos" | "visionos" },
+  foregroundProbe: WatchForegroundProbe | undefined,
   signal?: AbortSignal,
 ): Promise<AppsQueryResourceContent> {
   const { queryApps } = normalizeIosApps(await manager.listRecords(signal), false);
@@ -186,7 +193,14 @@ async function queryWatchApps(
   }
   const type: AppsQueryType = options.type ?? (launchabilityUnknown ? "user" : "launchable");
   const query: AppsQueryOptions = { ...options, type };
-  const apps = filterAppsByQuery(queryApps, query);
+  // simctl has no foreground signal; a connected watch runner does, read per call (#19359).
+  const apps = await markWatchForeground(
+    options,
+    filterAppsByQuery(queryApps, query),
+    foregroundProbe,
+    signal,
+  );
+  signal?.throwIfAborted();
   // As on iOS: a launchable listing names the apps it left out because no record says.
   const unknownApps = type === "launchable" ? launchabilityUnknownApps(queryApps, query) : [];
   const lastUpdated = new Date().toISOString();

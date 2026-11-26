@@ -418,28 +418,41 @@ function fillMinWidthStyle(css: Css, style: Raw, context: WebStyleContext) {
   css[MIN_WIDTH] = `min(100%, ${px(style.minWidth)})`;
 }
 
+/** Containers whose authored `minWidth` the strut cell clamps into the incoming width. */
+const MIN_STRUT_TYPES = new Set(["row", "column", "box"]);
+
 /**
- * The authored `minWidth` of a content-width row outside a row, under a bounded width; undefined
- * otherwise. Compose's `sizeIn` coerces it into the parent's width, where a CSS `min-width` would
- * overflow the parent, and `min(100%, minWidth)` would collapse a wrap-sized parent (its intrinsic
- * width reads the percentage as zero). Rendering wraps such a row in the strut cell a later
- * sibling's minimum uses (webLaterMin.ts), capped at the parent's width (#19373). A row bounded
- * around a capped aspect ratio already clamps its minimum (see rowBoundStyle).
+ * The strut a container's authored `minWidth` needs, under a bounded width; undefined otherwise.
+ * Compose's `sizeIn` coerces the minimum into the incoming constraints for every node, where a
+ * CSS `min-width` would overflow the parent, and `min(100%, minWidth)` would collapse a wrap-sized
+ * parent (its intrinsic width reads the percentage as zero). Rendering wraps such a node in the
+ * strut cell a later sibling's minimum uses (webLaterMin.ts), capped at the parent's width
+ * (#19373, #19382). `sizeIn` runs before `width`, so a dp width is coerced into the clamped
+ * minimum: the node is `min(incoming, max(dp, minWidth))` wide, whatever its content (`fixed`).
+ * In a row the incoming width is what the row has left, so the cell is the flex item and gives
+ * way like one. A `fill` width clamps with `min(100%, minWidth)` instead (fillMinWidthStyle), a
+ * row child the row measures (RowMeasure) has its own minimum handling, and a row bounded around
+ * a capped aspect ratio already clamps its minimum (see rowBoundStyle).
  */
-export function rowMinStrut(node: Raw, context: WebStyleContext): number | undefined {
+export function rowMinStrut(
+  node: Raw,
+  context: WebStyleContext,
+): { readonly min: number; readonly fixed: boolean } | undefined {
   const style = record(node.style);
-  const sized = style?.width === "fill" || typeof record(style?.width)?.dp === "number";
+  const dp = record(style?.width)?.dp;
   if (
-    node.type !== "row" ||
+    !MIN_STRUT_TYPES.has(String(node.type)) ||
     typeof style?.minWidth !== "number" ||
-    sized ||
+    style.width === "fill" ||
     style[ROW_BOUND_KEY] === true ||
-    context.parentAxis === "row" ||
+    (context.parentAxis === "row" && style[ROW_MEASURE_KEY] !== undefined) ||
     context.unboundedWidth === true
   ) {
     return undefined;
   }
-  return style.minWidth;
+  return typeof dp === "number"
+    ? { min: Math.max(dp, style.minWidth), fixed: true }
+    : { min: style.minWidth, fixed: false };
 }
 
 /**

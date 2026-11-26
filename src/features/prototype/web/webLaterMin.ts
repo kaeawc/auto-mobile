@@ -2,8 +2,10 @@ import {
   ARIA_HIDDEN,
   BORDER_BOX,
   BOX_SIZING,
+  CONTAIN,
   GRID_AREA,
   GRID_TEMPLATE_COLUMNS,
+  INLINE_SIZE,
   JUSTIFY_SELF,
   MAX_WIDTH,
   MIN_WIDTH,
@@ -23,13 +25,13 @@ const ROW_FACING = /^(flex|flex-grow|flex-shrink|flex-basis|align-self|order|mar
 function strutMin(
   node: Raw,
   context: WebStyleContext,
-): { readonly min: number; readonly capped: boolean } | undefined {
+): { readonly min: number; readonly capped: boolean; readonly fixed: boolean } | undefined {
   const later = laterMinStrut(node.style, context);
   if (later !== undefined) {
-    return { min: later, capped: false };
+    return { min: later, capped: false, fixed: false };
   }
-  const row = rowMinStrut(node, context);
-  return row === undefined ? undefined : { min: row, capped: true };
+  const own = rowMinStrut(node, context);
+  return own === undefined ? undefined : { ...own, capped: true };
 }
 
 /**
@@ -58,13 +60,13 @@ export function withLaterMinStrut(
   if (strut === undefined) {
     return element;
   }
-  const { min, capped } = strut;
+  const { min, capped, fixed } = strut;
   const outer: Record<string, string> = {};
   const inner: Record<string, string> = {};
   for (const [key, value] of Object.entries(element.style)) {
     (ROW_FACING.test(key) ? outer : inner)[key] = value;
   }
-  // A width here is a component default (an authored dp width never wraps): the node stretches
+  // A width here is a component default or a dp width the strut now holds: the node stretches
   // across the cell instead, as the folded minimum replaced that default before.
   delete inner.width;
   // An authored maximum also bounds the growing cell, so a `fill` width stops where it did.
@@ -75,7 +77,13 @@ export function withLaterMinStrut(
     outer[MAX_WIDTH] = authoredMax;
   }
   // Explicit: grid does not stretch an item with an aspect ratio or a replaced element by default.
-  const cell = { [GRID_AREA]: "1 / 1", [MIN_WIDTH]: "0", [JUSTIFY_SELF]: STRETCH };
+  // A dp width ignores the content, so the node adds no width of its own to the cell.
+  const cell = {
+    [GRID_AREA]: "1 / 1",
+    [MIN_WIDTH]: "0",
+    [JUSTIFY_SELF]: STRETCH,
+    ...(fixed ? { [CONTAIN]: INLINE_SIZE } : {}),
+  };
   const spacer = el("div", {
     attrs: { [ARIA_HIDDEN]: "true" },
     style: { [GRID_AREA]: "1 / 1", width: px(min), [MAX_WIDTH]: "100%", height: "0" },

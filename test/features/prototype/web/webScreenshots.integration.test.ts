@@ -779,6 +779,59 @@ for (const engine of ENGINES) {
                 },
               ],
             },
+            // A dp width, a row parent and a box or column clamp the minimum the same way (#19382).
+            {
+              type: "column",
+              style: { width: { dp: 100 } },
+              children: [
+                {
+                  type: "row",
+                  testTag: "min-dp",
+                  style: { width: { dp: 50 }, minWidth: 300 },
+                  children: [text("min-dp-text", "a")],
+                },
+                box("min-box", { minWidth: 300, height: { dp: 10 } }),
+                {
+                  type: "column",
+                  testTag: "min-column",
+                  style: { minWidth: 300 },
+                  children: [text("min-column-text", "a")],
+                },
+              ],
+            },
+            row(100, [
+              {
+                type: "row",
+                testTag: "min-nested",
+                style: { minWidth: 300 },
+                children: [text("min-nested-text", "a")],
+              },
+            ]),
+            // sizeIn runs before width: a dp width under its minimum grows to it, room allowing.
+            {
+              type: "column",
+              style: { width: { dp: 400 } },
+              children: [
+                {
+                  type: "row",
+                  testTag: "min-dp-room",
+                  style: { width: { dp: 50 }, minWidth: 300 },
+                  children: [text("min-dp-room-text", "a")],
+                },
+              ],
+            },
+            {
+              type: "column",
+              testTag: "min-dp-wrap-parent",
+              children: [
+                {
+                  type: "row",
+                  testTag: "min-dp-wrapped",
+                  style: { width: { dp: 50 }, minWidth: 120 },
+                  children: [text("min-dp-wrapped-text", "a")],
+                },
+              ],
+            },
             // A repeated row measures its instances as one row: the first ratio takes what the
             // first text leaves, and the second instance gets no width (#16711).
             {
@@ -846,6 +899,13 @@ for (const engine of ENGINES) {
         expect(width("min-fill")).toBeCloseTo(100, 0);
         expect(width("min-wrapped")).toBeCloseTo(120, 0);
         expect(width("min-wrap-parent")).toBeCloseTo(120, 0);
+        expect(width("min-dp")).toBeCloseTo(100, 0);
+        expect(width("min-box")).toBeCloseTo(100, 0);
+        expect(width("min-column")).toBeCloseTo(100, 0);
+        expect(width("min-nested")).toBeCloseTo(100, 0);
+        expect(width("min-dp-room")).toBeCloseTo(300, 0);
+        expect(width("min-dp-wrapped")).toBeCloseTo(120, 0);
+        expect(width("min-dp-wrap-parent")).toBeCloseTo(120, 0);
         expect(width("bounded-capped")).toBeCloseTo(50, 0);
         expect(width("gap-taker")).toBeCloseTo(200 - width("gap-start") - 10, 0);
         expect(width("gap-end")).toBeCloseTo(0, 0);

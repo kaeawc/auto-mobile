@@ -47,7 +47,7 @@ of each app without another launchd change.
 
 ### Undo
 
-The registry records each activation in `ios-camera-poster-active/devices/<udid>.json`
+`IosCameraPosterDeviceWide` records each activation in `ios-camera-poster-active/devices/<udid>.json`
 (`IosCameraPosterActivationStore`): the gate path. The store treats a record it cannot read as no
 activation and deletes it. AutoMobile runs activation and deactivation of one simulator one at a
 time, in call order, so a clear during an activation waits for it and then undoes it. Every clear

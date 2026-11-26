@@ -138,6 +138,14 @@ class WebSocketRequestApplicationsTest : WebSocketRequestTestSupport() {
   }
 
   @Test
+  fun `inspect prototypes carries includeLocation`() {
+    val literal = """{"type":"inspect_prototypes","requestId":"r9","includeLocation":true}"""
+    val request = json.decodeFromString<WebSocketRequest>(literal)
+    assertEquals(literal, json.encodeToString(request))
+    assertEquals(true, assertIs<InspectPrototypes>(request).includeLocation)
+  }
+
+  @Test
   fun `prototype asset requests round trip byte identical shared literals`() {
     val put =
       """{"type":"put_prototype_asset","requestId":"r6","id":"hero","mimeType":"image/png","dataBase64":"iVBORw0KGgo="}"""

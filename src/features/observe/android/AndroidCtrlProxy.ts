@@ -41,6 +41,7 @@ import type {
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
+  PrototypeInspectOptions,
   PrototypeResult,
 } from "./ctrlProxyProtocol";
 import type { PackageInfoOptions } from "./CtrlProxyPackages";
@@ -390,7 +391,11 @@ export interface AndroidCtrlProxy
     timeoutMs?: number,
     perf?: PerformanceTracker,
   ): Promise<PrototypeResult>;
-  requestInspectPrototypes(timeoutMs?: number, perf?: PerformanceTracker): Promise<PrototypeResult>;
+  requestInspectPrototypes(
+    timeoutMs?: number,
+    perf?: PerformanceTracker,
+    options?: PrototypeInspectOptions,
+  ): Promise<PrototypeResult>;
   requestPutPrototypeAsset(
     asset: PrototypeAssetUpload,
     options?: PrototypeAssetRequestOptions,

@@ -114,12 +114,12 @@ function unsafeSchemaParses(file: string, source: string): string[] {
       ) {
         return;
       }
-      // Device-reported prototype entries parsed from an inspect reply are not tool
-      // arguments, so there is no transport metadata to strip.
+      // Device-reported prototype entries (and their /platform) parsed from an inspect reply
+      // are not tool arguments, so there is no transport metadata to strip.
       if (
         file === "prototypeTools/inspection.ts" &&
         receiver.type === "Identifier" &&
-        receiver.name === "devicePrototypeEntrySchema" &&
+        ["devicePrototypeEntrySchema", "reportedPlatformSchema"].includes(receiver.name) &&
         first?.type === "Identifier" &&
         first.name === "entry"
       ) {

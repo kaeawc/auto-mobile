@@ -7,7 +7,10 @@ import { performPrototypeSimulate, type PrototypeSimulateTarget } from "../proto
 import { PROTOTYPE_TIMERS_CAPABILITY } from "../../features/observe/android/ctrlProxyProtocol";
 import { parsePrototypePlatformReport } from "../../features/prototype/prototypePlatformReport";
 import { parsePrototypeFeedbackLog } from "../../features/prototype/prototypeFeedbackLog";
-import { redactPrototypeInspectPlatform } from "../../features/prototype/prototypeLocationPrivacy";
+import {
+  redactPrototypeInspectPlatform,
+  type PrototypeInspectPlatform,
+} from "../../features/prototype/prototypeLocationPrivacy";
 import { parsePrototypeTimerReports } from "../../features/prototype/prototypeTimerSchema";
 import { z } from "zod/v4";
 import {
@@ -89,6 +92,49 @@ function parseReportedPrototypes(
     }
     return [parsed.data];
   });
+}
+
+const reportedPlatformSchema = z.object({ id: z.string().min(1), platform: z.json() });
+
+/**
+ * Each reported prototype's `/platform` (#16463), redacted again: the device redacts before
+ * replying, and this keeps an older or faulty runtime from handing coordinates to the host. Read
+ * apart from {@link devicePrototypeEntrySchema}, which strips it, so the store never keeps it.
+ */
+function reportedPlatforms(
+  prototypes: readonly unknown[] | undefined,
+  includeLocation: boolean,
+): Map<string, PrototypeInspectPlatform> {
+  return new Map(
+    (prototypes ?? []).flatMap((entry) => {
+      const parsed = reportedPlatformSchema.safeParse(entry);
+      return parsed.success
+        ? [
+            [
+              parsed.data.id,
+              redactPrototypeInspectPlatform(parsed.data.platform, { includeLocation }),
+            ] as const,
+          ]
+        : [];
+    }),
+  );
+}
+
+/**
+ * Only an inspect answer carries /platform: the store never keeps it, so a later status cannot
+ * replay a fix an includeLocation inspect revealed.
+ */
+function withReportedPlatforms<O extends Pick<PrototypeOutput, "prototypes">>(
+  output: O,
+  platforms: ReadonlyMap<string, PrototypeInspectPlatform>,
+): O {
+  return {
+    ...output,
+    prototypes: output.prototypes?.map((entry) => {
+      const platform = entry.id === undefined ? undefined : platforms.get(entry.id);
+      return platform === undefined ? entry : { ...entry, platform };
+    }),
+  };
 }
 
 /** Events the device replayed before its reply, grouped by prototype id in wire order. */
@@ -246,7 +292,7 @@ async function inspectDevice(
         error: new ActionableError(prototypeInspectUnsupportedMessage()).message,
       };
     }
-    result = await client.inspect(timeoutMs);
+    result = await client.inspect(timeoutMs, { includeLocation });
   } catch (error) {
     signal?.throwIfAborted();
     logger.warn("[prototype] Inspect request failed", error);
@@ -269,7 +315,10 @@ async function inspectDevice(
   });
   return {
     success: true,
-    ...statusOutput(store, events, scope, { deviceDark: "fresh" }),
+    ...withReportedPlatforms(
+      statusOutput(store, events, scope, { deviceDark: "fresh" }),
+      reportedPlatforms(result.prototypes, includeLocation),
+    ),
     deviceDroppedEvents: result.droppedEvents ?? 0,
   };
 }
@@ -424,20 +473,11 @@ async function inspectIosAgent(
       timersSupported: ios.supportsCapability(PROTOTYPE_TIMERS_CAPABILITY),
     },
   });
-  const output = statusOutput(store, events, scope, { deviceDark: "fresh" });
-  // Only this answer carries /platform: the store never keeps it, so a later status cannot
-  // replay a fix an includeLocation inspect revealed.
-  const reportedPlatform =
-    platform === undefined
-      ? undefined
-      : redactPrototypeInspectPlatform(platform, { includeLocation });
   return {
     success: true,
-    ...output,
-    prototypes: output.prototypes?.map((entry) =>
-      reportedPlatform !== undefined && entry.id === id
-        ? { ...entry, platform: reportedPlatform }
-        : entry,
+    ...withReportedPlatforms(
+      statusOutput(store, events, scope, { deviceDark: "fresh" }),
+      reportedPlatforms(shown && id !== null ? [{ id, platform }] : [], includeLocation),
     ),
   };
 }

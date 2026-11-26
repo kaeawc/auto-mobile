@@ -34817,7 +34817,7 @@
                 }
               },
               "platform": {
-                "description": "iOS inspect only: the shown prototype's /platform state by module. location.current is {accuracyM, approximate, redacted: true} unless includeLocation: true; other sensitive keys (auth.userId) are omitted. Never in status",
+                "description": "inspect only: the shown prototype's /platform state by module. location.current is {accuracyM, approximate, redacted: true} unless includeLocation: true; other sensitive keys (auth.userId) are omitted. Never in status; absent from an older CtrlProxy or agent",
                 "type": "object",
                 "propertyNames": {
                   "type": "string"

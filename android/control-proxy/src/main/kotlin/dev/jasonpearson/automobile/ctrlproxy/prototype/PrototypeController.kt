@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.protocol.PrototypeAppearanceOverride
 import dev.jasonpearson.automobile.protocol.PrototypeDataResolver
 import dev.jasonpearson.automobile.protocol.PrototypeDegradedEffect
 import dev.jasonpearson.automobile.protocol.PrototypeHiddenReason
+import dev.jasonpearson.automobile.protocol.PrototypeInspectPlatformRedaction
 import dev.jasonpearson.automobile.protocol.PrototypeNode
 import dev.jasonpearson.automobile.protocol.PrototypePatchConflict
 import dev.jasonpearson.automobile.protocol.PrototypePlatformCalls
@@ -1160,9 +1161,11 @@ class PrototypeController(
   /**
    * Answers `inspect_prototypes`: delivers any buffered events first, then reports every prototype
    * the device is showing, so a host that lost its status (a released session, a new daemon) can
-   * adopt it again. The wire order is the events, then the single `prototype_result`.
+   * adopt it again. The wire order is the events, then the single `prototype_result`. Each entry's
+   * `/platform` goes through [PrototypeInspectPlatformRedaction]: no coordinates unless
+   * [includeLocation] (#16463).
    */
-  suspend fun inspect(requestId: String?) = mutex.withLock {
+  suspend fun inspect(requestId: String?, includeLocation: Boolean = false) = mutex.withLock {
     try {
       check(!destroyed) { "Prototype host destroyed" }
       // Reporting lastSequence while events are still held would make the host skip them as
@@ -1170,7 +1173,8 @@ class PrototypeController(
       check(replayOfflineEvents()) {
         "Buffered prototype events could not be delivered; the device kept them, retry inspect"
       }
-      val prototypes = surfaces.values.filter { it.runtime.current.active }.map { statusOf(it) }
+      val prototypes =
+        surfaces.values.filter { it.runtime.current.active }.map { statusOf(it, includeLocation) }
       sink.sendPrototypeStatus(requestId, prototypes, offlineEvents.dropped)
     } catch (error: CancellationException) {
       throw error
@@ -1281,7 +1285,7 @@ class PrototypeController(
     return removed
   }
 
-  private suspend fun statusOf(surface: Surface): PrototypeStatusEntry {
+  private suspend fun statusOf(surface: Surface, includeLocation: Boolean): PrototypeStatusEntry {
     val runtime = surface.runtime
     val id = runtime.current.spec.id
     return PrototypeStatusEntry(
@@ -1305,6 +1309,8 @@ class PrototypeController(
       platformRuntime = runtime.platformRuntimeReport(PrototypePlatformReport.Runtime.CTRL_PROXY),
       orientation = surface.request.windowControls.orientation,
       statusBar = surface.request.windowControls.statusBarSupport,
+      platform =
+        PrototypeInspectPlatformRedaction.redact(runtime.current.platformState, includeLocation),
     )
   }
 

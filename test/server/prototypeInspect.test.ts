@@ -339,6 +339,55 @@ describe("prototype inspect (#10494)", () => {
     expect(payload.prototypes).toEqual([]);
     expect((await call({ action: "status" })).prototypes).toEqual([]);
   });
+
+  describe("/platform location redaction (#19297)", () => {
+    const fix = {
+      latitude: 37.7749,
+      longitude: -122.4194,
+      accuracyM: 12,
+      timestampMs: 1_700_000_000_000,
+      approximate: false,
+    };
+    const platform = {
+      location: { current: fix, servicesEnabled: true },
+      auth: { signedIn: true, userId: "user-42" },
+    };
+
+    test("inspect re-redacts a reported /platform to the accuracy summary", async () => {
+      client.setInspectReply({ success: true, prototypes: [{ ...reported(1), platform }] });
+      const payload = await call({ action: "inspect" });
+      expect(client.getInspectOptions()).toEqual([{ includeLocation: false }]);
+      expect(payload.prototypes?.[0].platform).toEqual({
+        location: {
+          current: { accuracyM: 12, approximate: false, redacted: true },
+          servicesEnabled: true,
+        },
+        auth: { signedIn: true },
+      });
+      expect(JSON.stringify(payload)).not.toContain("37.7749");
+      expect(JSON.stringify(payload)).not.toContain("user-42");
+    });
+
+    test("includeLocation asks the device for the fix and reports it only in that answer", async () => {
+      client.setInspectReply({ success: true, prototypes: [{ ...reported(1), platform }] });
+      const payload = await call({ action: "inspect", includeLocation: true });
+      expect(client.getInspectOptions()).toEqual([{ includeLocation: true }]);
+      expect(payload.prototypes?.[0].platform?.location).toEqual({
+        current: fix,
+        servicesEnabled: true,
+      });
+      expect(payload.prototypes?.[0].platform?.auth).toEqual({ signedIn: true });
+      const status = await call({ action: "status" });
+      expect(status.prototypes?.[0].platform).toBeUndefined();
+      expect(JSON.stringify(status)).not.toContain("37.7749");
+    });
+
+    test("an older CtrlProxy that reports no /platform gets none", async () => {
+      client.setInspectReply({ success: true, prototypes: [reported(1)] });
+      const payload = await call({ action: "inspect" });
+      expect(payload.prototypes?.[0]).not.toHaveProperty("platform");
+    });
+  });
 });
 
 describe("prototype inspect across sessions (#10494)", () => {

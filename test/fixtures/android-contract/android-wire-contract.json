@@ -322,6 +322,12 @@
           "type": "string",
           "nullable": true,
           "hasDefault": true
+        },
+        {
+          "name": "includeLocation",
+          "type": "boolean",
+          "nullable": true,
+          "hasDefault": true
         }
       ]
     },
@@ -10503,6 +10509,12 @@
       {
         "name": "images",
         "type": "object:dev.jasonpearson.automobile.protocol.PrototypeRemoteImageCounts",
+        "nullable": true,
+        "hasDefault": true
+      },
+      {
+        "name": "platform",
+        "type": "json",
         "nullable": true,
         "hasDefault": true
       }

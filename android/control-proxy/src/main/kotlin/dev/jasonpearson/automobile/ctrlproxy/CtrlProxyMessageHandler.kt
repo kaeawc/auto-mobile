@@ -290,7 +290,8 @@ class CtrlProxyMessageHandler(
     when (request) {
       is ShowPrototype -> return handleShowPrototype(request)
       is DismissPrototype -> return handleDismissPrototype(request)
-      is InspectPrototypes -> actions.inspectPrototypes(request.requestId)
+      is InspectPrototypes ->
+        actions.inspectPrototypes(request.requestId, request.includeLocation == true)
       is SavePrototype ->
         actions.savePrototype(request.requestId, request.spec, request.label, request.icon)
       is PinSavedPrototype -> actions.pinSavedPrototype(request.requestId, request.id, request.icon)

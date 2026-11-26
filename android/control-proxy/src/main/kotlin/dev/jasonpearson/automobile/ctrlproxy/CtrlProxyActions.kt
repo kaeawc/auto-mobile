@@ -184,7 +184,7 @@ interface CtrlProxyActions {
 
   suspend fun patchPrototype(requestId: String?, id: String, baseRevision: Long?, ops: JsonArray)
 
-  suspend fun inspectPrototypes(requestId: String?)
+  suspend fun inspectPrototypes(requestId: String?, includeLocation: Boolean)
 
   suspend fun savePrototype(requestId: String?, spec: PrototypeSpec, label: String, icon: String?)
 

@@ -97,6 +97,7 @@ import type {
   PrototypeAssetResult,
   PrototypeDismiss,
   PrototypeEvent,
+  PrototypeInspectOptions,
   PrototypeResult,
 } from "./ctrlProxyProtocol";
 import type {
@@ -562,8 +563,9 @@ export abstract class AndroidCtrlProxyDelegatingFacade extends DeviceServiceClie
   requestInspectPrototypes(
     timeoutMs?: number,
     perf?: PerformanceTracker,
+    options?: PrototypeInspectOptions,
   ): Promise<PrototypeResult> {
-    return this.prototypes.requestInspectPrototypes(timeoutMs, perf);
+    return this.prototypes.requestInspectPrototypes(timeoutMs, perf, options);
   }
   requestPutPrototypeAsset(
     asset: PrototypeAssetUpload,

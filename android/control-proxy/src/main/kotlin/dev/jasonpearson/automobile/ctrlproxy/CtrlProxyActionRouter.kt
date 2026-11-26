@@ -455,8 +455,10 @@ internal class CtrlProxyActionRouter(private val service: CtrlProxy) : CtrlProxy
     }
   }
 
-  override suspend fun inspectPrototypes(requestId: String?) {
-    service.launchRequestScope(requestId) { service.prototypeController.inspect(requestId) }
+  override suspend fun inspectPrototypes(requestId: String?, includeLocation: Boolean) {
+    service.launchRequestScope(requestId) {
+      service.prototypeController.inspect(requestId, includeLocation)
+    }
   }
 
   override suspend fun putPrototypeAsset(

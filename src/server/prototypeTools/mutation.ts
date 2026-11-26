@@ -174,6 +174,7 @@ export async function performPrototypeAction(
         store,
         transport: target.transport,
         deviceOwnsSpec: target.disposableApp,
+        deviceBudget: () => runtimeBudget(target),
         supportsPatch: async () =>
           target.android
             ? target.android.supportsCommand(PROTOTYPE_PATCH_CAPABILITY)
@@ -549,11 +550,14 @@ async function targetBudget(
   target: PrototypeTarget,
   args: { action: string },
 ): Promise<PrototypeRuntimeBudget> {
-  const large =
-    args.action === "show" &&
-    (target.android
-      ? await target.android.supportsCommand(PROTOTYPE_LARGE_BUDGET_CAPABILITY)
-      : target.ios?.supportsCapability(PROTOTYPE_LARGE_BUDGET_CAPABILITY) === true);
+  return args.action === "show" ? runtimeBudget(target) : prototypeRuntimeBudget([]);
+}
+
+/** The runtime budget the target advertises (#18804). */
+async function runtimeBudget(target: PrototypeTarget): Promise<PrototypeRuntimeBudget> {
+  const large = target.android
+    ? await target.android.supportsCommand(PROTOTYPE_LARGE_BUDGET_CAPABILITY)
+    : target.ios?.supportsCapability(PROTOTYPE_LARGE_BUDGET_CAPABILITY) === true;
   return prototypeRuntimeBudget(large ? [PROTOTYPE_LARGE_BUDGET_CAPABILITY] : []);
 }
 

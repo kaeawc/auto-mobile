@@ -33647,7 +33647,7 @@
           "maximum": 9007199254740991
         },
         "specPath": {
-          "description": "show, screenMap or share: instead of spec, an absolute path of a local JSON file holding the same spec (up to 1048576 bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.",
+          "description": "show, screenMap or share: instead of spec, an absolute path of a local JSON file holding the same spec (up to 4194304 bytes) that the daemon reads and validates like an inline spec; the path is never sent to the device. Exactly one of spec or specPath. Use it for a spec a script generated, instead of pasting the JSON into the call.",
           "type": "string",
           "minLength": 1
         },

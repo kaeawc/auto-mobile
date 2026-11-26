@@ -639,7 +639,7 @@ describe("prototype patch host", () => {
           { op: "add", path: "/data/large", value: "x".repeat(MAX_PROTOTYPE_SPEC_BYTES) },
         ])
       ).error,
-    ).toBe("Invalid patch at ops: Patch byte limit exceeded");
+    ).toStartWith("Invalid patch at ops: Patch byte limit exceeded");
     expect<unknown>(proxy.patchRequests).toEqual([]);
   });
   test("strict schema action fields, op counts and revisions", () => {

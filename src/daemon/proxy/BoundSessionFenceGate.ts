@@ -516,7 +516,7 @@ export class BoundSessionFenceGate {
       this.port.noteReleaseSurfacedBy(answer);
       throw answer;
     }
-    throw new DaemonConnectionSessionReleasedError(terminal.reason);
+    throw new DaemonConnectionSessionReleasedError(terminal.reason, terminal.sessionUuid);
   }
 
   /**

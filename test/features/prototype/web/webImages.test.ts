@@ -512,13 +512,24 @@ describe("an image with an inlinable asset", () => {
     }
     expect(image({ width: { dp: 20 }, height: { dp: 20 } }).style["aspect-ratio"]).toBeUndefined();
     expect(image({ width: "fill", aspectRatio: 2 }).style["aspect-ratio"]).toBe("2");
-    // A safe-area inset is padding the page resolves at runtime, so the node keeps no ratio.
-    const safe = image(
-      { width: "fill" },
-      { safeAreaPadding: { types: ["systemBars"], edges: ["top"] } },
-    );
+    // A safe-area inset is padding the page resolves at runtime, so the node keeps no ratio, in a
+    // full-height sheet that leaves the insets to its content.
+    const safeArea = { safeAreaPadding: { types: ["systemBars"], edges: ["top"] } };
+    const sheet = { window: { placement: { type: "sheet", edge: "top", height: 800 } } };
+    const safe = find(
+      still(
+        {
+          type: "column",
+          children: [{ type: "image", asset: "photo", style: { width: "fill" }, ...safeArea }],
+        },
+        sheet,
+      ).element,
+      (e) => e.attrs["data-node"] === "image",
+    )[0]!;
     expect(safe.style["aspect-ratio"]).toBeUndefined();
     expect((safe.children[0] as WebElement).style.position).toBe("relative");
+    // A framed fullscreen window already took the inset, so the image adds none (#19372).
+    expect(image({ width: "fill" }, safeArea).style["aspect-ratio"]).toBe("var(--pa-3-ar, auto)");
   });
 
   test("a zeroed row child's draw takes out none of the inline padding its box drops (#17681)", () => {

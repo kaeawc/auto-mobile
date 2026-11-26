@@ -16,6 +16,7 @@ import {
 import {
   laterMinStrut,
   nodeCss,
+  rowMinStrut,
   ROW_BOUND_KEY,
   ROW_MEASURE_KEY,
   containerChildStyle,
@@ -703,4 +704,35 @@ test("a bounded row clamps its authored minWidth into its bound (#16711)", () =>
       "min-width"
     ],
   ).toBe("300px");
+});
+
+test("a fill row clamps its authored minWidth into its parent's width (#19373)", () => {
+  const context = { mode: "light" as const, palette: new Map(), parentAxis: "column" as const };
+  // Compose's sizeIn coerces the minimum into the incoming width; a bare min-width overflows.
+  expect(nodeCss({ width: "fill", minWidth: 300 }, context)).toMatchObject({
+    width: "100%",
+    "min-width": "min(100%, 300px)",
+  });
+  // In a box (no parent axis) the fill resolves against the same width.
+  const inBox = { mode: "light" as const, palette: new Map() };
+  expect(nodeCss({ width: "fill", minWidth: 300 }, inBox)["min-width"]).toBe("min(100%, 300px)");
+  // Under an unbounded width there is no parent width to clamp into.
+  expect(
+    nodeCss({ width: "fill", minWidth: 300 }, { ...context, unboundedWidth: true }),
+  ).toMatchObject({ "min-width": "300px" });
+});
+
+test("a content-width row outside a row holds its minWidth in a strut cell (#19373)", () => {
+  const column = { mode: "light" as const, palette: new Map(), parentAxis: "column" as const };
+  const row = (style: Record<string, unknown>) => ({ type: "row", style, children: [] });
+  expect(rowMinStrut(row({ minWidth: 300 }), column)).toBe(300);
+  expect(rowMinStrut(row({ minWidth: 300 }), { mode: "light", palette: new Map() })).toBe(300);
+  // A fill or dp width, a bounded row, a row parent and an unbounded width each settle it elsewhere.
+  expect(rowMinStrut(row({ minWidth: 300, width: "fill" }), column)).toBeUndefined();
+  expect(rowMinStrut(row({ minWidth: 300, width: { dp: 50 } }), column)).toBeUndefined();
+  expect(rowMinStrut(row({ minWidth: 300, [ROW_BOUND_KEY]: true }), column)).toBeUndefined();
+  expect(rowMinStrut(row({ minWidth: 300 }), { ...column, parentAxis: "row" })).toBeUndefined();
+  expect(rowMinStrut(row({ minWidth: 300 }), { ...column, unboundedWidth: true })).toBeUndefined();
+  expect(rowMinStrut(row({}), column)).toBeUndefined();
+  expect(rowMinStrut({ type: "column", style: { minWidth: 300 } }, column)).toBeUndefined();
 });

@@ -73,7 +73,7 @@ Part of [the prototype web renderer](prototype-web-renderer.md).
     the browser's local time in the same `h:mm` 12-hour form, re-armed at each minute boundary. An iPhone with an island centres the clock and the marks in the
     ears beside it, and Android puts them at the start and end. Its content is light or dark: `window.statusBar`
     `light` or `dark` picks it. With `auto` or none, it takes whichever of white or black contrasts more with the
-    app's top colour.
+    app's top colour, sampled as if the window drew edge to edge.
   - Top colour: the top colour comes from geometry, not from reading CSS properties one by one. A
     small layout pass places the window's content on the screen, then samples evenly spaced points along the screen's top edge.
     The pass handles flex lines with growth and shrink, gaps, arrangement
@@ -104,10 +104,15 @@ Part of [the prototype web renderer](prototype-web-renderer.md).
     `windowInsetsPadding`, an edge an ancestor already applied adds nothing more. An inset adds to a component's own
     padding on that edge (`ime` adds nothing,
     since the still has no keyboard). The renderer exposes safe areas as
-    `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`. Both devices draw a
-    window's content edge to edge, and a top app bar takes no inset of its own. So it clears the
-    status bar only through `safeAreaPadding`. Likewise content clears the landscape cutout side
-    (an iPhone's 59 pt left inset) only through `safeAreaPadding` on the `start` edge.
+    `--safe-top`, `--safe-bottom`, `--safe-left` and `--safe-right`.
+  - Window insets: a framed fullscreen window draws its content inside the safe area, as
+    ProtoViewer pads its renderer by `WindowInsets.safeDrawing`. Content starts below the status
+    bar and clear of the cutout and navigation handle. Every top-level row sits behind the same
+    horizontal inset. The window consumes every edge, so `safeAreaPadding` inside it adds nothing. The band behind the status bar takes the colour just
+    below it. A sheet or floating window leaves the insets to its content, where a top app bar
+    takes none of its own and `safeAreaPadding` adds them. The `edgeToEdge` still option draws a
+    fullscreen window under the bars and cutout instead, as the CtrlProxy overlay and the iOS Viewer
+    app do; the iOS parity check uses it. A chromeless screen has no insets.
 - **Determinism.** Serialization writes attributes and style properties in sorted order, so the
   same input renders the same bytes. Event-handler attributes are rejected.
 

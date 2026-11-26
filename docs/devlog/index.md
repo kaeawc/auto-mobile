@@ -15,6 +15,7 @@ regenerates the table below.
 
 | Date | Kind | Entry |
 | --- | --- | --- |
+| 2026-11-26 | decision | [Prototype web window draws inside the safe area](2026-11-26-prototype-web-safe-drawing.md) |
 | 2026-11-25 | concept | [ProtoViewer store policy fit](2026-11-25-protoviewer-store-policy-fit.md) |
 | 2026-11-25 | concept | [Prototype SDK vendor prerequisites](2026-11-25-prototype-sdk-vendor-prerequisites.md) |
 | 2026-11-25 | decision | [An incomplete audio capture gives no silence verdict](2026-11-25-incomplete-audio-capture-verdict.md) |

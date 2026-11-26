@@ -315,6 +315,13 @@ static int is_remote(const struct sockaddr *sa) {
 
 static int shaped(int fd) { return fd >= 0 && fd < MAX_FD && atomic_load(&g_shaped[fd]); }
 
+static void unshape(int fd) {
+    if (fd < 0 || fd >= MAX_FD) return;
+    atomic_store(&g_shaped[fd], 0);
+    atomic_store(&g_rule[fd], 0);
+    atomic_store(&g_seen[fd], 0);
+}
+
 /// Binds an unbound socket to a free source port in the profile's range, so host packet filters
 /// (pf + dummynet) can shape exactly this app's traffic. Best effort: failures leave it unbound.
 static void bind_port(int fd, const struct sockaddr *dst, const profile_t *p) {
@@ -430,7 +437,7 @@ static int inspect_first(int fd, const void *buf, size_t n) {
     if (!tls_sni(buf, n, name, sizeof name) && !http_host(buf, n, name, sizeof name)) return 0;
     struct sockaddr_storage peer;
     socklen_t len = sizeof peer;
-    if (getpeername(fd, (struct sockaddr *)&peer, &len) != 0) return 0;
+    if (getpeername(fd, (struct sockaddr *)&peer, &len) != 0 || !is_remote((struct sockaddr *)&peer)) return 0;
     learn(name, (struct sockaddr *)&peer);
     int rule = match_rule((struct sockaddr *)&peer);
     int before = atomic_exchange(&g_rule[fd], (signed char)rule);
@@ -466,11 +473,21 @@ static int datagram_out(int fd, const struct sockaddr *to) {
 /// Gate before I/O on a shaped (remote) stream: a live switch to offline also stops connections
 /// opened before it (#19120). Returns 1 with errno set while the socket's profile is offline.
 /// Loopback streams are never shaped, and the data stays queued, so I/O resumes once online.
-static int sock_fd(int fd);
 static int stream_offline(int fd) {
-    // The flag outlives a descriptor reused without our close (dup2, close$NOCANCEL): confirm it
-    // is still a socket, a check paid only on shaped descriptors while offline.
-    if (!shaped(fd) || !for_fd(fd).offline || is_dgram(fd) || !sock_fd(fd)) return 0;
+    if (!shaped(fd) || !for_fd(fd).offline || is_dgram(fd)) return 0;
+    // The flag outlives a descriptor reused without our close (dup2, close$NOCANCEL): confirm the
+    // current peer is remote, a check paid only on shaped descriptors while offline. A loopback
+    // (or non-socket) descriptor drops the stale state.
+    struct sockaddr_storage peer;
+    socklen_t len = sizeof peer;
+    if (getpeername(fd, (struct sockaddr *)&peer, &len) != 0) {
+        if (errno == ENOTSOCK) unshape(fd);
+        return 0;
+    }
+    if (!is_remote((struct sockaddr *)&peer)) {
+        unshape(fd);
+        return 0;
+    }
     errno = ENETDOWN;
     return 1;
 }
@@ -537,6 +554,14 @@ static pthread_once_t g_bucket_once = PTHREAD_ONCE_INIT;
 // Largest single reservation: one read returns at most a socket buffer, capped by kern.ipc.maxsockbuf.
 static int64_t g_max_chunk = 8 << 20;
 
+/// Clears the times read as `old` before a new boot or profile generation was published. Only the
+/// process whose CAS published it calls this, and each slot is cleared only from its old value, so
+/// a reservation another process made under the new identity is never erased (an old time the CAS
+/// misses is bounded as stale).
+static void clear_times(bucket_t *b, int64_t old[2]) {
+    for (int i = 0; i < 2; i++) atomic_compare_exchange_strong(&b->free_ns[i], &old[i], 0);
+}
+
 static uint64_t boot_id(void) {
     struct timeval tv = {0};
     size_t len = sizeof tv;
@@ -563,13 +588,8 @@ static void map_bucket(void) {
     if (mem == MAP_FAILED) return;
     bucket_t *b = mem;
     uint64_t boot = boot_id(), seen = atomic_load(&b->boot);
-    if (seen != boot) {
-        // Clear the previous boot's times before publishing the new boot, so no process reserves
-        // against them once it sees the current boot.
-        atomic_store(&b->free_ns[0], 0);
-        atomic_store(&b->free_ns[1], 0);
-        atomic_compare_exchange_strong(&b->boot, &seen, boot);
-    }
+    int64_t old[2] = {atomic_load(&b->free_ns[0]), atomic_load(&b->free_ns[1])};
+    if (seen != boot && atomic_compare_exchange_strong(&b->boot, &seen, boot)) clear_times(b, old);
     g_bucket = b;
 }
 
@@ -585,11 +605,10 @@ static int64_t profile_gen(void) {
 static double reserve(int sending, ssize_t bytes, long rate) {
     pthread_once(&g_bucket_once, map_bucket);
     int64_t gen = profile_gen(), seen = atomic_load(&g_bucket->gen);
+    // A newer profile: times reserved under the previous one no longer apply.
     if (gen > seen) {
-        // A newer profile: times reserved under the previous one no longer apply.
-        atomic_store(&g_bucket->free_ns[0], 0);
-        atomic_store(&g_bucket->free_ns[1], 0);
-        atomic_compare_exchange_strong(&g_bucket->gen, &seen, gen);
+        int64_t old[2] = {atomic_load(&g_bucket->free_ns[0]), atomic_load(&g_bucket->free_ns[1])};
+        if (atomic_compare_exchange_strong(&g_bucket->gen, &seen, gen)) clear_times(g_bucket, old);
     }
     _Atomic int64_t *slot = &g_bucket->free_ns[sending ? 1 : 0];
     struct timespec ts;
@@ -655,11 +674,6 @@ static void pace(int fd, ssize_t bytes, int sending) {
     sleep_s(reserve(sending, bytes, rate));
 }
 
-static int sock_fd(int fd) {
-    struct stat st;
-    return fd >= 0 && fstat(fd, &st) == 0 && S_ISSOCK(st.st_mode);
-}
-
 static int my_connect(int fd, const struct sockaddr *sa, socklen_t len) {
     if (admit(fd, sa) != 0) return -1;
     return connect(fd, sa, len);
@@ -681,8 +695,8 @@ static ssize_t my_send(int fd, const void *b, size_t n, int fl) {
         int gate = datagram_out(fd, NULL);
         if (gate < 0) return -1;
         if (gate > 0) return (ssize_t)n;
-        if (stream_offline(fd)) return -1;
         if (!is_dgram(fd) && inspect_first(fd, b, n) < 0) return -1;
+        if (stream_offline(fd)) return -1;
     }
     if (OUTER(send(fd, b, n, fl))) pace(fd, _r, 1);
     return _r;
@@ -695,8 +709,8 @@ static ssize_t my_sendto(int fd, const void *b, size_t n, int fl, const struct s
         int gate = datagram_out(fd, to);
         if (gate < 0) return -1;
         if (gate > 0) return (ssize_t)n;
-        if (stream_offline(fd)) return -1;
         if (!is_dgram(fd) && inspect_first(fd, b, n) < 0) return -1;
+        if (stream_offline(fd)) return -1;
     }
     if (OUTER(sendto(fd, b, n, fl, to, tl))) pace(fd, _r, 1);
     return _r;
@@ -715,8 +729,8 @@ static ssize_t my_sendmsg(int fd, const struct msghdr *m, int fl) {
         int gate = datagram_out(fd, m ? (const struct sockaddr *)m->msg_name : NULL);
         if (gate < 0) return -1;
         if (gate > 0) return m ? iov_total(m->msg_iov, m->msg_iovlen) : 0;
-        if (stream_offline(fd)) return -1;
         if (m && m->msg_iovlen > 0 && !is_dgram(fd) && inspect_first(fd, m->msg_iov[0].iov_base, m->msg_iov[0].iov_len) < 0) return -1;
+        if (stream_offline(fd)) return -1;
     }
     if (OUTER(sendmsg(fd, m, fl))) pace(fd, _r, 1);
     return _r;
@@ -819,7 +833,7 @@ DYLD_INTERPOSE(my_recvmsg_x, recvmsg_x)
 
 static ssize_t my_write(int fd, const void *b, size_t n) {
     ssize_t _r;
-    if (g_depth == 0 && (stream_offline(fd) || (shaped(fd) && !is_dgram(fd) && inspect_first(fd, b, n) < 0))) return -1;
+    if (g_depth == 0 && ((shaped(fd) && !is_dgram(fd) && inspect_first(fd, b, n) < 0) || stream_offline(fd))) return -1;
     if (OUTER(write(fd, b, n)) && shaped(fd)) pace(fd, _r, 1);
     return _r;
 }
@@ -835,7 +849,7 @@ DYLD_INTERPOSE(my_read, read)
 
 static ssize_t my_writev(int fd, const struct iovec *v, int c) {
     ssize_t _r;
-    if (g_depth == 0 && (stream_offline(fd) || (shaped(fd) && c > 0 && !is_dgram(fd) && inspect_first(fd, v[0].iov_base, v[0].iov_len) < 0))) return -1;
+    if (g_depth == 0 && ((shaped(fd) && c > 0 && !is_dgram(fd) && inspect_first(fd, v[0].iov_base, v[0].iov_len) < 0) || stream_offline(fd))) return -1;
     if (OUTER(writev(fd, v, c)) && shaped(fd)) pace(fd, _r, 1);
     return _r;
 }
@@ -850,7 +864,7 @@ static ssize_t my_readv(int fd, const struct iovec *v, int c) {
 DYLD_INTERPOSE(my_readv, readv)
 
 static int my_close(int fd) {
-    if (fd >= 0 && fd < MAX_FD) { atomic_store(&g_shaped[fd], 0); atomic_store(&g_rule[fd], 0); atomic_store(&g_seen[fd], 0); }
+    unshape(fd);
     return close(fd);
 }
 DYLD_INTERPOSE(my_close, close)

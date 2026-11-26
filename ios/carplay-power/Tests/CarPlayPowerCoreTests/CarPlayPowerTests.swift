@@ -447,7 +447,7 @@ final class CarPlayInputTests: XCTestCase {
 
 final class SimulatorKitLocationTests: XCTestCase {
     func testXcode27SharedFrameworksComeBeforeTheXcode26Path() {
-        let xcode = "/Applications/Xcode-27.2.0.app/Contents"
+        let xcode = "/nonexistent-simkit/Xcode-27.2.0.app/Contents"
         XCTAssertEqual(
             SimulatorKitLocation.candidatePaths(developerDirectory: "\(xcode)/Developer"),
             [
@@ -458,7 +458,7 @@ final class SimulatorKitLocationTests: XCTestCase {
     }
 
     func testATrailingSlashResolvesTheSamePaths() {
-        let xcode = "/Applications/Xcode.app/Contents"
+        let xcode = "/nonexistent-simkit/Xcode.app/Contents"
         XCTAssertEqual(
             SimulatorKitLocation.candidatePaths(developerDirectory: "\(xcode)/Developer/"),
             [
@@ -469,7 +469,7 @@ final class SimulatorKitLocationTests: XCTestCase {
     }
 
     func testAnAppBundlePathNormalizesToItsDeveloperDirectory() {
-        let app = "/Applications/Xcode.app"
+        let app = "/nonexistent-simkit/Xcode.app"
         let expected = [
             "\(app)/Contents/SharedFrameworks/SimulatorKit.framework/SimulatorKit",
             "\(app)/Contents/Developer/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",

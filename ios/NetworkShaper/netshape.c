@@ -659,16 +659,20 @@ static ssize_t datalen(const struct msghdr_x *m, ssize_t count) {
 
 static ssize_t my_sendmsg_x(int fd, const struct msghdr_x *m, unsigned int cnt, int fl) {
     ssize_t _r;
+    int dropped = 0; // m[cnt] (after truncation) rolled loss: report it sent so it is never resent
     if (g_depth == 0 && cnt > 0) {
         int gate = datagram_out(fd, (const struct sockaddr *)m[0].msg_name);
         if (gate < 0) return -1;
         if (gate > 0) return 1; // the first datagram is lost; the caller resends the rest
         if (m[0].msg_iovlen > 0 && !is_dgram(fd) && inspect_first(fd, m[0].msg_iov[0].iov_base, m[0].msg_iov[0].iov_len) < 0) return -1;
-        // Each datagram has its own destination and loss roll (#19120): send the run that passes,
-        // and let the caller's next call start at the first one that does not.
+        // Each datagram has its own destination and loss roll (#19120): send the run that passes.
+        // A lost datagram counts as sent, so its one loss roll stands; an unreachable one ends the
+        // batch, so the caller's next call starts at it and gets ENETUNREACH.
         if (is_dgram(fd)) {
             for (unsigned int i = 1; i < cnt; i++) {
-                if (datagram_out(fd, (const struct sockaddr *)m[i].msg_name) != 0) {
+                int g = datagram_out(fd, (const struct sockaddr *)m[i].msg_name);
+                if (g != 0) {
+                    dropped = g > 0;
                     cnt = i;
                     break;
                 }
@@ -680,6 +684,7 @@ static ssize_t my_sendmsg_x(int fd, const struct msghdr_x *m, unsigned int cnt, 
         for (ssize_t i = 0; i < _r; i++) total += iov_total(m[i].msg_iov, m[i].msg_iovlen);
         pace(fd, total, 1);
     }
+    if (dropped && _r == (ssize_t)cnt) return _r + 1; // a partial native send keeps its own count
     return _r;
 }
 DYLD_INTERPOSE(my_sendmsg_x, sendmsg_x)

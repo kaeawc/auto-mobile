@@ -611,7 +611,11 @@ export class DisplayConfig {
       success: true,
       deviceId: this.device.deviceId,
       platform: this.platform,
-      supported: { ...this.support(), ...accessibility.supported },
+      supported: {
+        ...this.support(),
+        ...(this.platform === "android" && current.theme === undefined && { theme: false }),
+        ...accessibility.supported,
+      },
       ...supportNotes(accessibility.notes),
       current: { ...current, ...accessibility.values },
     };

@@ -8,6 +8,7 @@ import os
 /// aggregate are rebuilt whenever a client starts or stops. A tap delivers frames only while a tapped
 /// process is playing, so once no frames have arrived for `lagMs` the output is padded with silence up
 /// to the wall clock: a capture always has its full duration, and quiet stretches keep their length.
+/// A failed rebuild keeps the running tap and retries on the next tick (#19115).
 /// All mutable state is touched only on `queue`. The IOProc runs on its own `ioQueue`: stopping the
 /// aggregate waits for a running IOProc, so sharing one serial queue would deadlock a rebuild.
 final class TapRecorder: @unchecked Sendable {
@@ -22,7 +23,6 @@ final class TapRecorder: @unchecked Sendable {
         let tapID: AudioObjectID
         let aggregateID: AudioObjectID
         let procID: AudioDeviceIOProcID
-        let clients: [AudioObjectID: Int32]
     }
 
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.audio-loopback.tap")
@@ -33,7 +33,7 @@ final class TapRecorder: @unchecked Sendable {
     private let mute: Bool
     private let finished: @Sendable (Int32) -> Void
     private var remainingFrames: Int
-    private var active: ActiveTap?
+    private var swap = TapSwap<AudioObjectID, ActiveTap>()
     private var resampler: MonoResampler?
     private var generation = 0
     private var startNanos: UInt64 = 0
@@ -71,7 +71,9 @@ final class TapRecorder: @unchecked Sendable {
         let permission = AudioCapturePermission.state()
         try queue.sync {
             startNanos = DispatchTime.now().uptimeNanoseconds
-            try rebuild(clients: SimulatorAudioClients.current(launchdPid: launchdPid))
+            if case let .failed(error) = rebuild(clients: SimulatorAudioClients.current(launchdPid: launchdPid)) {
+                throw error
+            }
             watchClients()
             startTicker()
             // Installed only after startNanos is set: an immediate EOF flushes the quiet tail from
@@ -80,7 +82,7 @@ final class TapRecorder: @unchecked Sendable {
                 stopWhenStdinCloses()
             }
             LoopbackMain.report(LoopbackMarker.ready(
-                deviceName: "process tap of launchd_sim \(launchdPid) (\(active?.clients.count ?? 0) clients, "
+                deviceName: "process tap of launchd_sim \(launchdPid) (\(swap.clients.count) clients, "
                     + "System Audio Recording \(permission))"
             ))
         }
@@ -123,12 +125,12 @@ final class TapRecorder: @unchecked Sendable {
             return
         }
         ticks += 1
-        if ticks.isMultiple(of: Self.recheckTicks) {
+        if swap.retryPending || ticks.isMultiple(of: Self.recheckTicks) {
             refresh()
         }
         let now = DispatchTime.now().uptimeNanoseconds
         let lastTap = lastTapNanos.withLock { $0 }
-        guard active == nil || now < lastTap || Int((now - lastTap) / 1_000_000) > Self.lagMs else {
+        guard swap.tap == nil || now < lastTap || Int((now - lastTap) / 1_000_000) > Self.lagMs else {
             return
         }
         padSilence(lagMs: Self.lagMs)
@@ -158,26 +160,23 @@ final class TapRecorder: @unchecked Sendable {
         guard !done else {
             return
         }
-        let clients = SimulatorAudioClients.current(launchdPid: launchdPid)
-        guard clients != (active?.clients ?? [:]) else {
-            return
-        }
-        do {
-            try rebuild(clients: clients)
-        } catch let error as LoopbackError {
-            LoopbackMain.fail(error)
-        } catch {
-            LoopbackMain.fail(LoopbackError(.audioFailed, "\(error)"))
+        if case let .failed(error) = rebuild(clients: SimulatorAudioClients.current(launchdPid: launchdPid)) {
+            // A plain stderr line: the daemon logs it at debug level. The running tap keeps capturing.
+            LoopbackMain.report("tap rebuild failed, retrying on the next tick: \(error)")
         }
     }
 
-    private func rebuild(clients: [AudioObjectID: Int32]) throws {
-        destroyTap()
-        // A plain stderr line: the daemon logs it at debug level.
-        LoopbackMain.report("tapping \(clients.count) audio clients of launchd_sim \(launchdPid)")
-        guard !clients.isEmpty else {
-            return
+    /// Builds the new clients' tap before tearing down the old one, so remaining clients keep playing.
+    private func rebuild(clients: [AudioObjectID: Int32]) -> TapSwap<AudioObjectID, ActiveTap>.Outcome {
+        let outcome = swap.update(to: clients, build: makeTap, destroy: destroy)
+        if case .rebuilt = outcome {
+            // A plain stderr line: the daemon logs it at debug level.
+            LoopbackMain.report("tapping \(clients.count) audio clients of launchd_sim \(launchdPid)")
         }
+        return outcome
+    }
+
+    private func makeTap(clients: [AudioObjectID: Int32]) throws -> ActiveTap {
         let description = CATapDescription(stereoMixdownOfProcesses: Array(clients.keys))
         description.name = "AutoMobile simulator tap \(launchdPid)"
         description.isPrivate = true
@@ -204,8 +203,8 @@ final class TapRecorder: @unchecked Sendable {
         }
         do {
             let procID = try startIO(tapID: tapID, aggregateID: aggregateID)
-            active = ActiveTap(tapID: tapID, aggregateID: aggregateID, procID: procID, clients: clients)
             markTapDelivered()
+            return ActiveTap(tapID: tapID, aggregateID: aggregateID, procID: procID)
         } catch {
             AudioHardwareDestroyAggregateDevice(aggregateID)
             AudioHardwareDestroyProcessTap(tapID)
@@ -234,9 +233,9 @@ final class TapRecorder: @unchecked Sendable {
         }
         let interleaved = format.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0
         let channels = Int(format.mChannelsPerFrame)
-        resampler = MonoResampler(inputRate: format.mSampleRate, outputRate: Double(sampleRate))
-        generation += 1
-        let current = generation
+        // Committed only once the IOProc runs: a failed build must leave the running tap's stream alone.
+        let nextResampler = MonoResampler(inputRate: format.mSampleRate, outputRate: Double(sampleRate))
+        let current = generation + 1
         var procID: AudioDeviceIOProcID?
         status = AudioDeviceCreateIOProcIDWithBlock(&procID, aggregateID, ioQueue) { [weak self] _, input, _, _, _ in
             // The buffers are only valid during the call, so mix them to mono here and hand off a copy.
@@ -254,6 +253,10 @@ final class TapRecorder: @unchecked Sendable {
             AudioDeviceDestroyIOProcID(aggregateID, procID)
             throw LoopbackError.status(status, "Starting the tap's aggregate device")
         }
+        // Still on `queue`, so no frame of the new tap is received before this; the old tap's later
+        // frames are dropped from here on.
+        resampler = nextResampler
+        generation = current
         return procID
     }
 
@@ -314,12 +317,8 @@ final class TapRecorder: @unchecked Sendable {
         }
     }
 
-    private func destroyTap() {
-        guard let tap = active else {
-            return
-        }
-        active = nil
-        generation += 1
+    /// Does not bump `generation`: after a swap it already names the new tap.
+    private func destroy(_ tap: ActiveTap) {
         AudioDeviceStop(tap.aggregateID, tap.procID)
         AudioDeviceDestroyIOProcID(tap.aggregateID, tap.procID)
         AudioHardwareDestroyAggregateDevice(tap.aggregateID)
@@ -336,7 +335,8 @@ final class TapRecorder: @unchecked Sendable {
             var property = Self.processListAddress
             AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &property, queue, listener)
         }
-        destroyTap()
+        generation += 1
+        swap.tearDown(destroy: destroy)
         finished(code)
     }
 

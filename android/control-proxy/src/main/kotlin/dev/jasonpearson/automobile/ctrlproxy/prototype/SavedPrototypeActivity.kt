@@ -7,9 +7,11 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -88,25 +90,29 @@ class SavedPrototypeActivity : ComponentActivity() {
     val ready = state is SavedPrototypeScreenState.Ready
     val tag = if (ready) Modifier.testTag("saved-prototype-state-ready") else Modifier
     Surface(Modifier.fillMaxSize().then(tag)) {
-      // A document relaunch must replace even an identical spec, without a dismissal.
-      key(current) {
-        ProvideEmbeddedPrototypeHost(current.host) {
-          AutoMobilePrototype(
-            platform = platform,
-            spec = current.spec,
-            assets = current.assets,
-            storage = current.storage,
-            network = current.network,
-            onEvent = { if (current.host.eventSink == null) SavedPrototypeEvents.send(it) },
-            onDismiss = { finish() },
-            handleBack = true,
-            onError = {
-              SideEffect {
-                content = null
-                state = SavedPrototypeScreenState.Corrupt
-              }
-            },
-          )
+      // The activity draws edge to edge. Keep the content clear of the system bars and cutout so a
+      // tap on a top-row element is not taken by the status bar (#18901).
+      Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+        // A document relaunch must replace even an identical spec, without a dismissal.
+        key(current) {
+          ProvideEmbeddedPrototypeHost(current.host) {
+            AutoMobilePrototype(
+              platform = platform,
+              spec = current.spec,
+              assets = current.assets,
+              storage = current.storage,
+              network = current.network,
+              onEvent = { if (current.host.eventSink == null) SavedPrototypeEvents.send(it) },
+              onDismiss = { finish() },
+              handleBack = true,
+              onError = {
+                SideEffect {
+                  content = null
+                  state = SavedPrototypeScreenState.Corrupt
+                }
+              },
+            )
+          }
         }
       }
       // Keep the loading screen and withhold the ready tag until storage has restored. Opening

@@ -63,7 +63,10 @@ reports `route: host-loopback`.
 - A running tap's process list cannot change, so the helper rebuilds the tap and its private
   aggregate device when the client set changes. Clients are keyed by process object and PID,
   because the HAL reuses an object ID for a later process. A HAL listener on the process object list
-  triggers the check, and a 500 ms re-check backs it up.
+  triggers the check, and a 500 ms re-check backs it up. The helper builds the new tap before it
+  tears down the old one, so remaining clients keep playing. If the build fails (a client exited
+  after the helper listed it), the old tap keeps running and the helper retries on its next 20 ms
+  tick.
 - The IOProc runs on its own queue and hands mono copies to the state queue. Stopping an aggregate
   waits for a running IOProc, so one shared serial queue would deadlock a rebuild.
 - A tap delivers frames only while a tapped process is playing. Once nothing has arrived for

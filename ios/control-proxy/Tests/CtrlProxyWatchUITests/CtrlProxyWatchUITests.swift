@@ -64,7 +64,7 @@ final class CtrlProxyWatchUITests: XCTestCase {
         )
         app.launch()
         let source = WatchXCUISource(app: app, failureCoordinator: commandFailureCoordinator)
-        let handler = WatchCommandHandler(snapshotSource: source, gestures: source)
+        let handler = WatchCommandHandler(snapshotSource: source, gestures: source, appStates: source)
         let service = try WatchRunnerService(port: port, handler: handler)
         defer { service.stop() }
 

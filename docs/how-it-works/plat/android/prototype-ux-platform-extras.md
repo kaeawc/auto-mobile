@@ -213,7 +213,7 @@ overflow or blocked writes close the peer, and events and requests continue with
   Each canonical permission maps to its manifest permissions (`location` maps to fine and coarse;
   `photosAdd` maps to none). Each `requires.background` kind adds `FOREGROUND_SERVICE` and its
   `FOREGROUND_SERVICE_<TYPE>` permission; `remoteNotification` adds none. A `requires.platform`
-  module whose runtime needs an install-time permission adds it (`biometric` adds `USE_BIOMETRIC`);
+  module whose runtime needs an install-time permission adds it (`biometric` adds `USE_BIOMETRIC`, `cast` adds `ACCESS_NETWORK_STATE`);
   it is never granted or denied. The permission mode is
   `prompt` (default), `grantDeclared`, or `{grant, deny}`, which may name only declared
   permissions and must not name one in both lists.

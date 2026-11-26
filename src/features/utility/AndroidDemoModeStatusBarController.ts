@@ -1,6 +1,9 @@
 import type { ExecResult } from "../../models";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { defaultDemoAllowedReceipts, type DemoAllowedReceipts } from "./DemoAllowedReceipts";
+import { parseBattery } from "./power/PowerParsers";
+import { logger } from "../../utils/logger";
+import { errorMessage } from "../../utils/describeUnknownError";
 import {
   STATUS_BAR_COMMAND_TIMEOUT_MS,
   StatusBarRequestRejectedError,
@@ -175,15 +178,36 @@ export class AndroidDemoModeStatusBarController implements StatusBarController {
   async clear(signal?: AbortSignal): Promise<void> {
     await this.demo([["command", "exit"]], signal);
     const prior = this.receipts.take(this.deviceId);
-    if (prior === undefined) {
-      return;
+    if (prior !== undefined) {
+      await this.shell(
+        prior === null
+          ? ["settings", "delete", "global", DEMO_ALLOWED_SETTING]
+          : ["settings", "put", "global", DEMO_ALLOWED_SETTING, prior],
+        signal,
+      );
     }
-    await this.shell(
-      prior === null
-        ? ["settings", "delete", "global", DEMO_ALLOWED_SETTING]
-        : ["settings", "put", "global", DEMO_ALLOWED_SETTING, prior],
-      signal,
-    );
+    await this.refreshBattery(signal);
+  }
+
+  /**
+   * SystemUI keeps drawing the demo battery level after `exit` until the next real
+   * ACTION_BATTERY_CHANGED (#19189). `dumpsys battery set -f level <current>` forces that
+   * broadcast with the level the device already reports; `reset` then hands the battery back
+   * to the hardware unless a `dumpsys battery` fake was already active, which is kept.
+   */
+  private async refreshBattery(signal?: AbortSignal): Promise<void> {
+    try {
+      const battery = parseBattery((await this.shell(["dumpsys", "battery"], signal)).stdout);
+      await this.shell(["dumpsys", "battery", "set", "-f", "level", String(battery.level)], signal);
+      if (!battery.faked) {
+        await this.shell(["dumpsys", "battery", "reset"], signal);
+      }
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Demo mode already exited; only the drawn battery level may stay stale until the next
+      // real battery broadcast.
+      logger.warn(`statusBar clear: battery refresh failed: ${errorMessage(error)}`, error);
+    }
   }
 
   /** The `sysui_demo_allowed` value the device holds now, or null when the setting is unset. */

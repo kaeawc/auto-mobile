@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   AndroidDemoModeStatusBarController,
   androidDemoClock,
@@ -121,6 +123,63 @@ describe("SimctlStatusBarController (#14105)", () => {
   });
 });
 
+const DUMPSYS_BATTERY = ["shell", "dumpsys", "battery"];
+const powerFixture = (name: string) =>
+  readFileSync(join(import.meta.dir, "../../fixtures/android-power", name), "utf8");
+
+/** Answers `dumpsys battery` with a captured dump and everything else with empty output. */
+class BatteryDumpAdb extends RecordingAdb {
+  constructor(private readonly dump: string) {
+    super();
+  }
+  override async execute(args: string[]): Promise<ExecResult> {
+    await super.execute(args);
+    return execResult(args.join(" ") === DUMPSYS_BATTERY.join(" ") ? this.dump : "");
+  }
+}
+
+describe("AndroidDemoModeStatusBarController battery refresh on clear (#19189)", () => {
+  test("forces a battery broadcast at the real level, then hands the battery back", async () => {
+    const adb = new BatteryDumpAdb(powerFixture("dumpsys-battery-phone-api37.txt"));
+    await new AndroidDemoModeStatusBarController(
+      adb,
+      "d",
+      new InMemoryDemoAllowedReceipts(),
+    ).clear();
+    expect(adb.calls).toEqual([
+      demo("-e", "command", "exit"),
+      DUMPSYS_BATTERY,
+      ["shell", "dumpsys", "battery", "set", "-f", "level", "100"],
+      ["shell", "dumpsys", "battery", "reset"],
+    ]);
+  });
+
+  test("keeps an active dumpsys battery fake instead of resetting it", async () => {
+    const adb = new BatteryDumpAdb(
+      powerFixture("dumpsys-battery-faked-unplugged-level-15-phone-api34.txt"),
+    );
+    await new AndroidDemoModeStatusBarController(
+      adb,
+      "d",
+      new InMemoryDemoAllowedReceipts(),
+    ).clear();
+    expect(adb.calls.slice(1)).toEqual([
+      DUMPSYS_BATTERY,
+      ["shell", "dumpsys", "battery", "set", "-f", "level", "15"],
+    ]);
+  });
+
+  test("an unreadable battery dump leaves clear successful without touching the battery", async () => {
+    const adb = new BatteryDumpAdb("Can't find service: battery\n");
+    await new AndroidDemoModeStatusBarController(
+      adb,
+      "d",
+      new InMemoryDemoAllowedReceipts(),
+    ).clear();
+    expect(adb.calls).toEqual([demo("-e", "command", "exit"), DUMPSYS_BATTERY]);
+  });
+});
+
 describe("AndroidDemoModeStatusBarController (#14105)", () => {
   test("override allows demo mode, enters it, then sends one broadcast per command", async () => {
     const adb = new RecordingAdb();
@@ -198,6 +257,7 @@ describe("AndroidDemoModeStatusBarController (#14105)", () => {
     expect(adb.calls).toEqual([
       demo("-e", "command", "exit"),
       ["shell", "settings", "put", "global", "sysui_demo_allowed", "0"],
+      DUMPSYS_BATTERY,
     ]);
   });
 
@@ -209,7 +269,7 @@ describe("AndroidDemoModeStatusBarController (#14105)", () => {
     await controller.override({ time: "9:41" });
     adb.calls.length = 0;
     await controller.clear();
-    expect(adb.calls.at(-1)).toEqual([
+    expect(adb.calls.at(-2)).toEqual([
       "shell",
       "settings",
       "delete",
@@ -218,7 +278,7 @@ describe("AndroidDemoModeStatusBarController (#14105)", () => {
     ]);
     adb.calls.length = 0;
     await controller.clear();
-    expect(adb.calls).toEqual([demo("-e", "command", "exit")]);
+    expect(adb.calls).toEqual([demo("-e", "command", "exit"), DUMPSYS_BATTERY]);
   });
 
   test("operatorName has no demo-mode command and is reported unsupported", async () => {
@@ -257,6 +317,7 @@ describe("AndroidDemoModeStatusBarController (#14105)", () => {
     expect(await controller.read()).toBe("sysui_demo_allowed=1");
     expect(adb.calls).toEqual([
       demo("-e", "command", "exit"),
+      DUMPSYS_BATTERY,
       ["shell", "settings", "get", "global", "sysui_demo_allowed"],
     ]);
   });

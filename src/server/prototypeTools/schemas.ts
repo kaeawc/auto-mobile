@@ -13,6 +13,7 @@ import { z } from "zod/v4";
 import { deleteInternalToolParams } from "../../daemon/wire/constants";
 import { PROTOTYPE_EVENT_KINDS } from "../../features/observe/android/ctrlProxyProtocol";
 import { PROTOTYPE_APPEARANCE_INPUTS } from "../../features/prototype/prototypeAppearance";
+import { prototypePlatformModeSchema } from "../../features/prototype/prototypeSharePlatformMode";
 import {
   MAX_PROTOTYPE_ASSET_COUNT,
   MAX_PROTOTYPE_ASSET_ID_LENGTH,
@@ -444,6 +445,11 @@ export const prototypeSchema = addDeviceTargetingToSchema(
         .describe(
           'show only: what the system light/dark setting means for this prototype. device (default) follows the device; light or dark pins it without changing the device or the app behind, so a spec with theme.mode "system" or no mode can be checked in both modes. It replaces the system setting only: an explicit theme.mode, a flat theme.colors.background/surface override and an opaque authored background still decide first. Each show states it afresh (a same-id show without it follows the device again). light and dark need a device advertising prototype_appearance_v1 and are refused otherwise.',
         ),
+      platformMode: prototypePlatformModeSchema
+        .optional()
+        .describe(
+          'show only: run a platform module on the device\'s fake instead of the real platform. share: "fake" is required for a spec that declares share, since no runtime has a real share sheet yet; share.open then resolves {outcome:"shared", simulated:true}, or the outcome queued with simulate call "share.open". It needs share in requires.platform and a device advertising prototype_platform_share_v1. Each show states it afresh.',
+        ),
       advanceTimeMs: z
         .number()
         .int()
@@ -633,6 +639,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
     "locale",
     "pseudoLocale",
     "appearance",
+    "platformMode",
     "eventName",
     "kind",
     "afterSequence",
@@ -677,6 +684,7 @@ export const prototypeSchema = addDeviceTargetingToSchema(
       "display",
       "reset",
       "appearance",
+      "platformMode",
       "assets",
       "replaceOthers",
       "variant",

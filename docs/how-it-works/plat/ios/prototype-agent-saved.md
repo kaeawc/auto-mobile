@@ -112,8 +112,14 @@ splitting a surrogate pair. The pure function defaults to `unknown`; only a futu
 supply completion evidence. Android `shared` will mean a chosen target, not completed delivery;
 iOS uses its activity completion flag. `target` is the chosen package/activity raw value.
 
-The contract has no system-sheet dispatcher or fake-mode behavior. `platformMode` and
-`prototype simulate` are not accepted by this vocabulary.
+The contract has no system-sheet dispatcher. The host shows a spec that uses or declares `share`
+only with `show platformMode: {share: "fake"}`, and refuses `platformMode.share` on a spec that does
+not declare it. A fake share module resolves the payload and answers
+`{outcome:"shared",simulated:true,items}`, or the next outcome queued with
+`prototype simulate call: "share.open"`. The host accepts a queued result of only
+`{outcome:"shared"|"unknown",target?}` (target 1 to 256 characters); the module adds `items` and
+`simulated`. The resolver takes `simulated: true` and copies it into the summary. The fake modules
+and the `platformMode` field on the `show_prototype` wire belong to the runtimes (#19308).
 
 ## Runtime permissions (#14297)
 

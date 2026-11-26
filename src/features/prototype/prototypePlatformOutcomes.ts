@@ -59,6 +59,22 @@ function mediaFilesResultIssue(call: string, result: unknown): string | undefine
   return `A simulated ${call} result needs device media injection, which no connected runtime supports yet, so it cannot be queued. Simulate a cancel or failure with {error: {code: "cancelled"}} instead.`;
 }
 
+/**
+ * A queued `share.open` result (#19308) names only what the person did; the fake share module adds
+ * the resolved `items` and `simulated: true`, so neither is accepted here.
+ */
+const shareOpenResultSchema = z.strictObject({
+  outcome: z.enum(["shared", "unknown"]),
+  target: z.string().min(1).max(256).optional(),
+});
+
+function shareResultIssue(call: string, result: unknown): string | undefined {
+  if (call !== "share.open" || shareOpenResultSchema.safeParse(result).success) {
+    return undefined;
+  }
+  return 'A share.open result is {outcome: "shared" | "unknown", target?} with a target of 1 to 256 characters; the runtime adds items and simulated: true. To simulate a cancel, use {error: {code: "cancelled"}}.';
+}
+
 type OutcomeValidation =
   | { outcome: PrototypePlatformOutcome; issue?: never }
   | { issue: [string, string]; outcome?: never };
@@ -90,9 +106,10 @@ export function validatePrototypePlatformOutcome(
     if (!result.success) {
       return { issue: ["outcome", "simulate result must be a JSON value"] };
     }
-    const mediaIssue = mediaFilesResultIssue(call, result.data);
-    if (mediaIssue !== undefined) {
-      return { issue: ["outcome", mediaIssue] };
+    const resultIssue =
+      mediaFilesResultIssue(call, result.data) ?? shareResultIssue(call, result.data);
+    if (resultIssue !== undefined) {
+      return { issue: ["outcome", resultIssue] };
     }
     validated = { result: result.data };
   } else {

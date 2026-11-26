@@ -288,6 +288,23 @@ devices are unverified.
 
 Show agent-authored UI on a device: `show`, `patch`, `inspect`, `dismiss {id}` / `{all: true}`, `status`. Android can hold up to four prototypes (`replaceOthers: false`); iOS shows one at a time. Features (data model, gestures, checks) require the matching device capability and are refused before upload otherwise. Spec: [prototype UX](how-it-works/plat/android/prototype-ux.md). Camera and media support per runtime: [camera and media guide](how-it-works/prototype-camera-media.md).
 
+#### Media assets, location and simulated pushes
+
+- On Android, `show` also accepts `.mp4`, `.webm`, `.m4a`, `.mp3`, `.ogg` and `.vtt` files by path
+  in `assets`. Each file can be up to 64 MiB, and a caption file up to 256 KiB. A show takes at most 16
+  media assets and 128 MiB in total, streamed in chunks. `save`, `share`, `installApp` and iOS refuse
+  media assets before anything is uploaded. On iOS, AVPlayer cannot play WebM or Ogg.
+- On iOS, `inspect` reports the shown prototype's device state as `prototypes[].platform`, by module;
+  `status` never does. `/platform/location/current` reads `{accuracyM, approximate, redacted: true}`
+  unless `inspect` gets `includeLocation: true`, which reveals the fix in that one answer only. Other
+  sensitive keys, such as `auth.userId`, are never reported.
+- To follow a prototype through a location route, start the route with `setDeviceState.location`,
+  then call `prototype` `awaitEvent` with `kind: "emit"` and `eventName: "prototype_platform_event"`
+  once per update. Each delivered `location.updated` carries only `{accuracyM, approximate}`.
+- `simulate` with `event: "notifications.push"` uses the live runtime connection when the shown
+  prototype's runtime advertises `prototype_platform_push_v1`. It reports `transport: "connection"`,
+  `handled` and `delivery`. No runtime advertises push yet, so devices answer `unavailable`.
+
 #### Watch-sized mockups
 
 Prototypes cannot run on watchOS, but a watch-sized spec gives a quick visual mockup of a watch

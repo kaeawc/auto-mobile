@@ -6,6 +6,7 @@ import { PROTOTYPE_LARGE_BUDGET } from "../../src/features/prototype/prototypeRu
 
 // A specPath file may hold a spec for a large-budget runtime (#18804); the show preflight gates it.
 const MAX_PROTOTYPE_SPEC_BYTES = PROTOTYPE_LARGE_BUDGET.MAX_PROTOTYPE_SPEC_BYTES;
+import { z } from "zod/v4";
 import type { BootedDevice } from "../../src/models";
 import { FakeCtrlProxy } from "../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -55,6 +56,13 @@ describe("prototype show specPath", () => {
     expect(client.getPrototypeHistory()).toEqual([]);
     return payload.error ?? "";
   }
+
+  test("the specPath description names the byte cap the daemon reads (#19306)", () => {
+    const schema = ToolRegistry.getTool("prototype")!.schema;
+    expect(JSON.stringify(z.toJSONSchema(schema, { io: "input" }))).toContain(
+      `(up to ${MAX_PROTOTYPE_SPEC_BYTES} bytes)`,
+    );
+  });
 
   test("shows the spec read from the file and never sends the path to the device", async () => {
     const { response } = await call({ action: "show", specPath: "/work/spec.json" });

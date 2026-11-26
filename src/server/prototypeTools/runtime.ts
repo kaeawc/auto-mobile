@@ -177,12 +177,14 @@ function mutationCallOptions(
   scope: PrototypeScope,
   queue: PrototypePatchQueue,
   signal: AbortSignal | undefined,
+  authoredSpec: unknown,
 ) {
   return {
     scope,
     queue,
     signal: combineWithAmbientAbort(signal),
     mcpSessionId: callerMcpSessionId(),
+    authoredSpec,
   };
 }
 
@@ -803,6 +805,8 @@ export function createPrototypeToolRuntime(
     if ("error" in prepared) {
       return respond({ success: false, error: prepared.error });
     }
+    // Spec lints locate findings inside components, so they need the spec before expansion (#19367).
+    const authoredSpec = "args" in loaded ? loaded.args.spec : undefined;
     const args = prepared.args;
     const platformResult = savedPlatformDispatch(
       device,
@@ -834,6 +838,7 @@ export function createPrototypeToolRuntime(
       clock,
       targets,
       disposableAgent,
+      authoredSpec,
     });
   };
   const dispose = prototypeRegistrationDisposer(host);
@@ -860,6 +865,8 @@ interface PrototypeDeviceContext {
   clock: Pick<Timer, "now">;
   targets: ReturnType<typeof prototypeTargets>;
   disposableAgent: ReturnType<typeof lazyDisposableAppAttach>;
+  /** The spec as authored, before component expansion; the show lints read it (#19367). */
+  authoredSpec: unknown;
 }
 
 async function prototypeDeviceOutput(context: PrototypeDeviceContext) {
@@ -877,6 +884,7 @@ async function prototypeDeviceOutput(context: PrototypeDeviceContext) {
     clock,
     targets,
     disposableAgent,
+    authoredSpec,
   } = context;
   const { store, events, commits } = host;
   const { androidTarget, iosTarget, agentTarget } = targets;
@@ -965,7 +973,7 @@ async function prototypeDeviceOutput(context: PrototypeDeviceContext) {
         handlerDependencies,
         device,
         { ...args, action },
-        mutationCallOptions(scope, host.patchQueue, signal),
+        mutationCallOptions(scope, host.patchQueue, signal, authoredSpec),
       ),
   );
   return respond(attributeRevision(dispatched, action));

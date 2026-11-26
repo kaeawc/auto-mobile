@@ -31,6 +31,19 @@ describe("shared share resolver expectations", () => {
     });
   }
 });
+describe("fake share module summary (#19308)", () => {
+  test("simulated marks the summary and leaves the payload unchanged", () => {
+    const args = { text: { value: "Hi" } };
+    const real = resolvePrototypeShare(args, { assets: {}, outcome: "shared" });
+    const fake = resolvePrototypeShare(args, { assets: {}, outcome: "shared", simulated: true });
+    expect(real.ok && fake.ok).toBe(true);
+    if (real.ok && fake.ok) {
+      expect(fake.payload).toEqual(real.payload);
+      expect(fake.summary).toEqual({ ...real.summary, simulated: true });
+      expect(real.summary).not.toHaveProperty("simulated");
+    }
+  });
+});
 describe("share contract corpus", () => {
   for (const name of corpus.valid.filter((name) => name.startsWith("share-"))) {
     test(name, () => {

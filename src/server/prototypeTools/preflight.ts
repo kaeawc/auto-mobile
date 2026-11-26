@@ -37,6 +37,7 @@ import {
   PROTOTYPE_SHADERS_ANDROID_ONLY_ERROR,
 } from "../../features/prototype/prototypeShaders";
 import { prototypeRequiredCapabilities } from "../../features/prototype/prototypeCapabilityGates";
+import { prototypeSharePlatformModeRefusal } from "../../features/prototype/prototypeSharePlatformMode";
 import {
   prototypeLargeBudgetFields,
   prototypeLargeBudgetUnsupportedMessage,
@@ -203,6 +204,25 @@ export function appLayerGrant(
     // An abort that landed after the grant completed must still stop the mutation.
     signal?.throwIfAborted();
   };
+}
+
+/**
+ * A shown spec's platform mode, then its capabilities: a spec that uses share shows only with
+ * platformMode.share "fake" (#19308), refused before any capability lookup.
+ */
+async function showSpecRefusal(
+  target: SpecCapabilityTarget,
+  args: z.infer<typeof prototypeSchema>,
+  signal: AbortSignal | undefined,
+  options: { env?: NodeJS.ProcessEnv; platform: "android" | "ios" },
+): Promise<PrototypeResult | undefined> {
+  if (args.action !== "show" || args.spec === undefined) {
+    return undefined;
+  }
+  const refusal = prototypeSharePlatformModeRefusal(args.spec, args.platformMode);
+  return refusal
+    ? { success: false, error: new ActionableError(refusal).message }
+    : specCapabilityRefusal(target, args.spec, signal, options);
 }
 
 /** Custom shaders are Android-only and stay behind a host opt-in. */
@@ -592,12 +612,10 @@ export async function preflightMutation(
   }
   const failure =
     iosResetRefusal(target, args) ??
-    (args.action === "show" && args.spec !== undefined
-      ? await specCapabilityRefusal(target, args.spec, signal, {
-          env: dependencies.env,
-          platform: device.platform === "android" ? "android" : "ios",
-        })
-      : undefined) ??
+    (await showSpecRefusal(target, args, signal, {
+      env: dependencies.env,
+      platform: device.platform === "android" ? "android" : "ios",
+    })) ??
     (await appearanceRefusal(target, args, signal)) ??
     (await windowOptionsRefusal(target, args, signal));
   if (failure) {

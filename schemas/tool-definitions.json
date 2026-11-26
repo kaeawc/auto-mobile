@@ -33698,6 +33698,17 @@
           "type": "string",
           "enum": ["device", "light", "dark"]
         },
+        "platformMode": {
+          "description": "show only: run a platform module on the device's fake instead of the real platform. share: \"fake\" is required for a spec that declares share, since no runtime has a real share sheet yet; share.open then resolves {outcome:\"shared\", simulated:true}, or the outcome queued with simulate call \"share.open\". It needs share in requires.platform and a device advertising prototype_platform_share_v1. Each show states it afresh.",
+          "type": "object",
+          "properties": {
+            "share": {
+              "type": "string",
+              "enum": ["real", "fake"]
+            }
+          },
+          "additionalProperties": false
+        },
         "advanceTimeMs": {
           "description": "simulate only: advance the prototype clock without waiting",
           "type": "integer",

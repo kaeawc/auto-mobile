@@ -100,7 +100,7 @@ export function injectionError(status: GrpcStatusResult): EmulatorAudioError {
       return new EmulatorAudioError(
         "audio_injection_unsupported",
         `The emulator's gRPC audio injection is unavailable (${status.message || "no detail"}). ` +
-          "Use an emulator build with gRPC enabled and do not launch it with -no-audio.",
+          "Use a recent emulator build on this host, launched with gRPC enabled.",
         status,
       );
     default:

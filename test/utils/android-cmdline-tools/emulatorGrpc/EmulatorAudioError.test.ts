@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   EmulatorAudioError,
   hostMicrophoneUnavailable,
+  injectionError,
   repeatInjectionUnsafe,
 } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/EmulatorAudioError";
 import { GrpcStatus } from "../../../../src/utils/android-cmdline-tools/emulatorGrpc/grpcFraming";
@@ -26,5 +27,17 @@ test("both host safety errors have typed non-retryable fields and the same actio
     expect(error.remedy).toContain("host app that runs the emulator");
     expect(error.remedy).toContain("System Settings > Privacy and Security > Microphone");
     expect(error.remedy).toContain("restart the emulator");
+  }
+});
+
+test("audio_injection_unsupported names only causes that raise it, not -no-audio (#19311)", () => {
+  for (const code of [GrpcStatus.UNIMPLEMENTED, GrpcStatus.UNAVAILABLE]) {
+    const error = injectionError({ code, message: "connect ECONNREFUSED" });
+    expect(error.code).toBe("audio_injection_unsupported");
+    expect(error.message).toBe(
+      "[audio_injection_unsupported] The emulator's gRPC audio injection is unavailable " +
+        "(connect ECONNREFUSED). Use a recent emulator build on this host, launched with gRPC enabled.",
+    );
+    expect(error.message).not.toContain("-no-audio");
   }
 });

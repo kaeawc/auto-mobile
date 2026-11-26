@@ -46,12 +46,15 @@ export class FakePostureControl implements PostureControl {
   current: RequestedPosture | undefined = "opened";
   calls: RequestedPosture[] = [];
   unsupported?: string;
+  /** Called as each set starts, so a test can see what ran before the posture changed. */
+  onSet?: () => void;
 
   async read(): Promise<RequestedPosture | undefined> {
     return this.current;
   }
 
   async set(posture: RequestedPosture) {
+    this.onSet?.();
     this.calls.push(posture);
     if (this.unsupported) {
       return { status: "unsupported" as const, detail: this.unsupported };

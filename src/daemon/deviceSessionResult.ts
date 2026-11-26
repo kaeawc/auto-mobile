@@ -82,14 +82,18 @@ export function appendHeartbeatExpiryMessage(
   return `${message} No heartbeat for ${ageMs} ms (limit ${limitMs} ms; set AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS to change).`;
 }
 
-export function noActiveDeviceSessionPayload(error: { message: string; reason: string }) {
+export function noActiveDeviceSessionPayload(error: {
+  message: string;
+  reason: string;
+  platform?: Platform;
+}) {
   return {
     error: {
       code: "no_active_device_session",
       message: error.message,
       reason: error.reason,
       ...idleReleaseField(error.reason),
-      ...terminalSessionRefusalFields(),
+      ...terminalSessionRefusalFields(undefined, error.platform),
     },
   };
 }

@@ -2,7 +2,10 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { beforeAll, describe, expect, spyOn, test } from "bun:test";
 import { createProxyMcpServer } from "../../src/server/proxyServer";
-import { DaemonBoundSessionExpiredError } from "../../src/daemon/daemonMcpProxy";
+import {
+  DaemonBoundSessionExpiredError,
+  DaemonConnectionSessionReleasedError,
+} from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../src/daemon/client/client";
 import { DAEMON_VERSION } from "../../src/daemon/wire/constants";
 import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
@@ -33,6 +36,7 @@ async function lostSessionErrorData(
   platform: string,
   delegate: (typeof discovery)[number][1],
   request: (typeof discovery)[number][2],
+  lost: () => Error = () => new DaemonBoundSessionExpiredError("lost-session", "device-killed"),
 ): Promise<{ message: string; recovery: unknown }> {
   const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
   const fakeClient = new FakeDaemonClient({
@@ -60,9 +64,7 @@ async function lostSessionErrorData(
   });
   const [serverTransport, clientTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "lost-session-platform-client", version: "0.0.1" });
-  const forwarding = spyOn(proxy, delegate).mockRejectedValue(
-    new DaemonBoundSessionExpiredError("lost-session", "device-killed"),
-  );
+  const forwarding = spyOn(proxy, delegate).mockRejectedValue(lost());
   try {
     await server.connect(serverTransport);
     await client.connect(clientTransport);
@@ -73,7 +75,7 @@ async function lostSessionErrorData(
     );
     const data = (caught as { data?: { error?: { message: string; recovery: unknown } } }).data;
     if (!data?.error) {
-      throw new Error(`expected a session_ownership_lost error, got ${String(caught)}`);
+      throw new Error(`expected a terminal-session refusal, got ${String(caught)}`);
     }
     return data.error;
   } finally {
@@ -106,6 +108,23 @@ describe("discovery handlers name a lost session's platform (#19211)", () => {
       expect(error.recovery).toEqual({
         action: "acquire_replacement_session",
         tools: ["getAndroid", "getApple"],
+      });
+    },
+  );
+});
+
+describe("discovery handlers name a released session's platform on no_active_device_session (#19234)", () => {
+  const released = () => new DaemonConnectionSessionReleasedError("device-killed", "lost-session");
+
+  test.each(discovery)(
+    "%s tells a released watchOS session's connection to call startDevice",
+    async (_method, delegate, request) => {
+      const error = await lostSessionErrorData("watchos", delegate, request, released);
+      expect(error.message).toContain('Call startDevice with platform: "watchos"');
+      expect(error.recovery).toEqual({
+        action: "acquire_replacement_session",
+        tools: ["startDevice"],
+        platform: "watchos",
       });
     },
   );

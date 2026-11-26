@@ -5,7 +5,11 @@ import {
   deviceSessionRecoveryPrompt,
 } from "../../../src/daemon/deviceSessionResult";
 import { withLostSessionPlatform } from "../../../src/daemon/proxy/lostSessionPlatform";
-import { sessionOwnershipLostResult } from "../../../src/server/proxyServer";
+import { DaemonConnectionSessionReleasedError } from "../../../src/daemon/proxy/DaemonConnectionSessionReleasedError";
+import {
+  noActiveDeviceSessionResult,
+  sessionOwnershipLostResult,
+} from "../../../src/server/proxyServer";
 
 describe("lost-session recovery prose names a tool that can acquire the platform (#19186)", () => {
   test("Android, iOS and an unknown platform keep getAndroid or getApple", () => {
@@ -83,5 +87,48 @@ describe("the proxy names a lost Apple session's platform (#19186)", () => {
 
     const other = new Error("boom");
     expect(withLostSessionPlatform(other, platforms)).toBe(other);
+  });
+});
+
+describe("no_active_device_session names a released Apple session's platform (#19234)", () => {
+  const platforms = new Map([["watch-session", "watchos" as const]]);
+
+  function payload(error: DaemonConnectionSessionReleasedError) {
+    const [content] = noActiveDeviceSessionResult(error).content;
+    return JSON.parse((content as { text: string }).text).error;
+  }
+
+  test("a released watch session's connection is told to call startDevice", () => {
+    const error = new DaemonConnectionSessionReleasedError("device-killed", "watch-session");
+    expect(withLostSessionPlatform(error, platforms)).toBe(error);
+    expect(error.platform).toBe("watchos");
+
+    const refusal = payload(error);
+    expect(refusal.code).toBe("no_active_device_session");
+    expect(refusal.message).toBe(
+      "This MCP connection has no active device session (the previous session was released: " +
+        'device-killed). Call startDevice with platform: "watchos" to acquire a new watchOS device session.',
+    );
+    expect(refusal.recovery).toEqual({
+      action: "acquire_replacement_session",
+      tools: ["startDevice"],
+      platform: "watchos",
+    });
+  });
+
+  test("an Android or iOS session, or an unknown one, keeps getAndroid and getApple", () => {
+    for (const error of [
+      new DaemonConnectionSessionReleasedError("device-killed", "phone-session"),
+      new DaemonConnectionSessionReleasedError("device-killed"),
+    ]) {
+      expect(withLostSessionPlatform(error, platforms)).toBe(error);
+      expect(error.platform).toBeUndefined();
+      const refusal = payload(error);
+      expect(refusal.message).toContain("Call getAndroid or getApple");
+      expect(refusal.recovery).toEqual({
+        action: "acquire_replacement_session",
+        tools: ["getAndroid", "getApple"],
+      });
+    }
   });
 });

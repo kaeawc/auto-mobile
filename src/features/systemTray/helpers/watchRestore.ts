@@ -4,8 +4,9 @@ import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtil
 import type { SystemTrayOutcome } from "../SystemTray";
 import type { SystemTrayArgs } from "../systemTrayTypes";
 import { getSystemTrayDependencies } from "./dependencies";
-import { observeSystemTray, sleep } from "./runtime";
+import { sleep } from "./runtime";
 import { returnToWatchFace, watchAwaySurface } from "./watchFace";
+import { readWatchNow } from "./watchRead";
 import {
   isWearHierarchy,
   WEAR_SYSTEM_UI,
@@ -49,12 +50,7 @@ export interface WatchRestoreState {
 // Cleanup deliberately ignores request cancellation, as on the phone clear path: it runs on its
 // own signal, aborted only by its own deadline.
 function read(device: BootedDevice, signal: AbortSignal): Promise<ObserveResult> {
-  return observeSystemTray(
-    getSystemTrayDependencies().observeScreenFactory(device),
-    0,
-    signal,
-    true,
-  );
+  return readWatchNow(device, signal);
 }
 
 function back(device: BootedDevice, signal: AbortSignal): Promise<unknown> {

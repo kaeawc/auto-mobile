@@ -54,11 +54,12 @@ export class RecentApps extends BaseVisualChange {
     {
       wearOsDetector,
       tvDetector,
+      glassesDetector,
       ...collaborators
     }: DisplayFenceDependencies & RecentAppsFormFactorOptions = {},
   ) {
     super(device, { adb, timer, displayFence: collaborators });
-    this.formFactors = { wearOsDetector, tvDetector };
+    this.formFactors = { wearOsDetector, tvDetector, glassesDetector };
     this.pressButton = new PressButton(device, adb);
   }
 

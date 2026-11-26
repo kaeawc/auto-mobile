@@ -8,4 +8,6 @@ The result contains `success`, `message`, `gesture`, `axis`, `count`, `keyCodes`
 
 On a device that is not glasses (a phone, Wear OS watch or TV), the call fails without sending a key; check `formFactor` in `listDevices`. A `traits_unavailable` warning means the device traits could not be read, so glasses identity is unknown; input is still sent. Check `listDevices` and observe the effect. Command error output returns `success: false`; transport failures raise an actionable error. Check the Android connection before retrying, since earlier repetitions may already have taken effect. iOS is unsupported.
 
+`recentApps` fails at once on glasses: there is no recent apps overview, so nothing is pressed. `openLink` fails without starting anything when no app handles the URL. Use an app deep link or `launchApp`.
+
 For voice input, use `injectAudioInput`. Long press and two-finger gestures are not supported.

@@ -1,8 +1,7 @@
 # Android TV emulators
 
 AutoMobile can create, boot and drive an Android TV or Google TV emulator with the same device tools
-it uses for a phone, plus D-pad focus navigation. This guide covers creating one, the lifecycle calls,
-and what is out of scope.
+it uses for a phone, plus D-pad focus navigation.
 
 > Use the `android-tv` image for TV apps. Touch gestures need a device with a touchscreen;
 > otherwise, use D-pad navigation. AutoMobile treats every Android TV as having no touchscreen,
@@ -21,8 +20,7 @@ sdkmanager --list | grep -E "android-tv|google-tv"
 sdkmanager "system-images;android-36;android-tv;x86_64"
 ```
 
-On an Apple silicon or other ARM host use `arm64-v8a` in place of `x86_64`. Not every API level
-publishes every ABI; `sdkmanager --list` shows what exists.
+On an ARM host use `arm64-v8a` in place of `x86_64`.
 
 ## Create and start a TV emulator
 
@@ -260,6 +258,8 @@ Use `prototype` with `dismiss` to close the overlay.
 ### Tools a TV refuses
 
 `rotate`, `recentApps` and `glassesInput` fail at once on a TV and change nothing.
+
+`openLink` fails when only a placeholder stub handles the URL; use an app deep link.
 
 ## Out of scope
 

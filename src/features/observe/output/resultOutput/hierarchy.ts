@@ -1,5 +1,8 @@
 import { type WireHierarchyNodeSlot } from "../observeResultWire";
-import { isStatusBarDiffSubtree } from "../../../../utils/androidStatusBar";
+import {
+  isStatusBarDiffActionable,
+  isStatusBarDiffSubtree,
+} from "../../../../utils/androidStatusBar";
 import type { ObserveResult } from "../../../../models/ObserveResult";
 import type { ViewHierarchyNode } from "../../../../models/ViewHierarchyResult";
 import { nodeAttributes as hierarchyNodeAttributes } from "../../../../models/ViewHierarchyResult";
@@ -110,6 +113,17 @@ function isKeyboardNodeForDiff(
   );
 }
 
+/** Whether any kept ancestor takes input, so status-bar-shaped text under it still counts (#19155). */
+function hasActionableAncestor(parent: FlatObserveNode | undefined): boolean {
+  for (let node = parent; node; node = node.parent) {
+    const source: Record<string, unknown> = node.source;
+    if (isStatusBarDiffActionable(source)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Pre-order flatten of an observation's hierarchy into positionally-keyed nodes.
  * Each node's `pathKey` is its ancestor chain of local keys plus its own, so the
@@ -137,7 +151,7 @@ export function flattenForDiff(
     if (collapseKeyboard && isKeyboardNodeForDiff(node, rec, iosKeyboardVisible)) {
       return;
     }
-    if (skipStatusBar && isStatusBarDiffSubtree(rec)) {
+    if (skipStatusBar && isStatusBarDiffSubtree(rec, () => hasActionableAncestor(parent))) {
       return;
     }
     const localKey = nodeKey(rec, siblingIndex);

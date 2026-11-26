@@ -72,23 +72,39 @@ function subtreeHasAffordance(node: StatusBarDiffNode): boolean {
 }
 
 /**
- * Whether a node and its subtree are status-bar chrome that screen-change detection leaves out
- * (`flattenForDiff`'s `skipStatusBar`). A known status-bar root always is. An allowlisted
- * status-bar id or a cell-signal row found elsewhere (#19123) is only when nothing in its subtree
- * is clickable, long-clickable, checkable or scrollable: SystemUI dialogs reuse `wifi_*` and
- * `mobile_*` ids for toggle rows whose state change must still count (#19155).
+ * The SystemUI clock. In the expanded shade header (`split_shade_status_bar`) it is clickable, yet
+ * its text still rolls over every minute on its own, so it never counts as a screen change (#19155).
  */
-export function isStatusBarDiffSubtree(node: StatusBarDiffNode): boolean {
+const SYSTEMUI_CLOCK_ID = "com.android.systemui:id/clock";
+
+/** Whether a node itself is clickable, long-clickable, checkable or scrollable. */
+export function isStatusBarDiffActionable(node: StatusBarDiffNode): boolean {
+  return hasAffordance(node);
+}
+
+/**
+ * Whether a node and its subtree are status-bar chrome that screen-change detection leaves out
+ * (`flattenForDiff`'s `skipStatusBar`). A known status-bar root and the SystemUI clock always are.
+ * An allowlisted status-bar id or a cell-signal row found elsewhere (#19123) is only when nothing
+ * in its subtree is clickable, long-clickable, checkable or scrollable, and no ancestor is either
+ * (`insideActionable`, asked only for a matching id): SystemUI dialogs reuse `wifi_*` and
+ * `mobile_*` ids for toggle rows and their summary text, whose changes must still count (#19155).
+ */
+export function isStatusBarDiffSubtree(
+  node: StatusBarDiffNode,
+  insideActionable: () => boolean = () => false,
+): boolean {
   const resourceId = node["resource-id"];
   if (typeof resourceId !== "string") {
     return false;
   }
-  if (STATUS_BAR_ROOT_IDS.has(resourceId)) {
+  if (STATUS_BAR_ROOT_IDS.has(resourceId) || resourceId === SYSTEMUI_CLOCK_ID) {
     return true;
   }
   return (
     (SYSTEMUI_STATUS_BAR_ID_PATTERN.test(resourceId) ||
       SYSTEMUI_SIGNAL_ROW_ID_PATTERN.test(resourceId)) &&
-    !subtreeHasAffordance(node)
+    !subtreeHasAffordance(node) &&
+    !insideActionable()
   );
 }

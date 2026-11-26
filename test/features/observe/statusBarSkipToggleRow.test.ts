@@ -64,9 +64,14 @@ function internetToggleRow(checked: boolean): TestHierarchyNode {
   return row;
 }
 
-function shadeWithToggle(checked: boolean, updatedAt: number): ObserveResult {
+function shadeWithToggle(
+  checked: boolean,
+  updatedAt: number,
+  edit: (hierarchy: TestHierarchyNode) => void = () => {},
+): ObserveResult {
   const hierarchy = structuredClone(shade.hierarchy);
   hierarchy.node = [...childrenOf(hierarchy), internetToggleRow(checked)];
+  edit(hierarchy);
   return {
     updatedAt,
     screenSize: { width: 1080, height: 2400 },
@@ -116,5 +121,44 @@ describe("status-bar skip keeps SystemUI toggle rows (#19155)", () => {
     expect(diff.changed.map((change) => change.key)).toEqual([
       expect.stringContaining("mobile_toggle"),
     ]);
+  });
+});
+
+/** Sets the text of every node with `id`, so both the captured and the added row change. */
+function setTextById(node: TestHierarchyNode, id: string, text: string): void {
+  if (node["resource-id"] === id) {
+    node.text = text;
+  }
+  childrenOf(node).forEach((child) => setTextById(child, id, text));
+}
+
+describe("status-bar skip in the expanded shade (#19155 follow-ups)", () => {
+  test("the clickable shade-header clock rolling over a minute is not a screen change", () => {
+    // Settle's volatile-text masking would hide a tick after a few reads; the diff itself must not
+    // see it, or a stable wait spanning a minute costs an extra read.
+    const clock = (text: string) => (hierarchy: TestHierarchyNode) =>
+      setTextById(hierarchy, `${SYSTEMUI}clock`, text);
+    const diff = diffObserveResult(
+      shadeWithToggle(true, 10, clock("10:32")),
+      shadeWithToggle(true, 20, clock("10:33")),
+      { skipStatusBar: true },
+    );
+
+    expect([...diff.added, ...diff.removed, ...diff.changed]).toEqual([]);
+  });
+
+  test("summary text under a kept actionable row still counts as a change", () => {
+    const summary = (text: string) => (hierarchy: TestHierarchyNode) =>
+      setTextById(hierarchy, `${SYSTEMUI}mobile_carrier_text`, text);
+    const diff = diffObserveResult(
+      shadeWithToggle(true, 10, summary("Connecting…")),
+      shadeWithToggle(true, 20, summary("Connected")),
+      { skipStatusBar: true },
+    );
+
+    // Text is part of a node's diff key, so new text reads as a removed and an added node.
+    expect(diff.added.map((node) => node.key)).toContainEqual(
+      expect.stringContaining("mobile_carrier_text\u0000884,37,1027,88\u0000Connected"),
+    );
   });
 });

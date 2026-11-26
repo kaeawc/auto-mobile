@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import type { BootedDevice } from "../../../src/models";
 import {
   DefaultAndroidDeviceInventoryScanner,
@@ -166,5 +167,95 @@ describe("DefaultAndroidDeviceInventoryScanner physical devices", () => {
     expect(scan.devices.map((device) => device.deviceId)).toEqual(["R58M123ABC"]);
     expect(scan.devices[0].model).toBeUndefined();
     expect(adb.getInteractionLog()).toEqual([]);
+  });
+});
+
+describe("DefaultAndroidDeviceInventoryScanner runtime facts (#18988)", () => {
+  const fixture = (path: string): string =>
+    readFileSync(new URL(`../../fixtures/${path}.txt`, import.meta.url), "utf8");
+  let adb: FakeAdbClient;
+  let scanner: DefaultAndroidDeviceInventoryScanner;
+  const emulator = (): BootedDevice => ({
+    deviceId: "emulator-5554",
+    name: "emulator-5554",
+    platform: "android",
+  });
+
+  beforeEach(() => {
+    resetAndroidInventoryEnrichmentCache();
+    adb = new FakeAdbClient();
+    adb.setCommandResult("shell getprop ro.build.version.sdk", "24\n");
+    adb.setCommandResult("shell getprop ro.build.version.release", "7.0\n");
+    adb.setCommandResult("shell wm size", fixture("android-display-geometry/wm-size-physical"));
+    adb.setCommandResult(
+      "shell wm density",
+      fixture("android-display-config/density-physical-420"),
+    );
+    const timer = new FakeTimer();
+    scanner = new DefaultAndroidDeviceInventoryScanner({
+      timer: () => timer,
+      adbFactory: () => new FakeAdbClientFactory(adb),
+      observationSequence: () => ({ next: () => 1 }),
+      // No avdmanager / unreadable AVD config: nothing comes from the image.
+      avdConfigReader: () => ({ readConfig: async () => null }),
+      getRunningAvdName: async () => ({ name: "hive24" }),
+      isUnknownEmulatorName: (name, deviceId) => name === `Unknown (${deviceId})`,
+      unknownEmulatorName: (deviceId) => `Unknown (${deviceId})`,
+      throwIfAborted: () => {},
+    });
+  });
+
+  test("an emulator whose AVD cannot be resolved still reports its release and display", async () => {
+    const scan = await scanner.getBootedDevicesWithDiagnostics(false, {
+      devices: [emulator()],
+      timeoutMs: 5_000,
+    });
+
+    expect(scan.devices[0]).toMatchObject({
+      name: "hive24",
+      apiLevel: 24,
+      osVersion: "7.0",
+      screenWidth: 1080,
+      screenHeight: 2400,
+      screenDensity: 420,
+    });
+  });
+
+  test("a handset reports its release and display too", async () => {
+    const scan = await scanner.getBootedDevicesWithDiagnostics(false, {
+      devices: [physicalPhone()],
+      timeoutMs: 5_000,
+    });
+
+    expect(scan.devices[0]).toMatchObject({ apiLevel: 24, osVersion: "7.0", screenWidth: 1080 });
+  });
+
+  test("facts are read once per device, then served from the cache", async () => {
+    await scanner.getBootedDevicesWithDiagnostics(false, {
+      devices: [emulator()],
+      timeoutMs: 5_000,
+    });
+    const second = await scanner.getBootedDevicesWithDiagnostics(false, {
+      devices: [emulator()],
+      timeoutMs: 5_000,
+    });
+
+    expect(second.devices[0]).toMatchObject({ apiLevel: 24, screenDensity: 420 });
+    expect(adb.getInteractionLog().filter((entry) => entry.text === "shell wm size")).toHaveLength(
+      1,
+    );
+  });
+
+  test("readiness-only scans do not read runtime facts", async () => {
+    const scan = await scanner.getBootedDevicesWithDiagnostics(false, {
+      devices: [emulator()],
+      readinessOnly: true,
+      timeoutMs: 5_000,
+    });
+
+    expect(scan.devices[0].apiLevel).toBeUndefined();
+    expect(adb.getInteractionLog().map((entry) => entry.text)).not.toContain(
+      "shell getprop ro.build.version.sdk",
+    );
   });
 });

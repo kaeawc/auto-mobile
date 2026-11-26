@@ -4,6 +4,7 @@ import { PlistClient } from "../../../../utils/ios-cmdline-tools/PlistClient";
 import { SimulatorIosClearDataBackend } from "../../../../utils/ios-cmdline-tools/SimulatorIosClearDataBackend";
 import { getAbortSignal } from "../../../../utils/AbortContext";
 import { SimCtlClient } from "../../../../utils/ios-cmdline-tools/SimCtlClient";
+import { defaultSimulatorLocationAuthorizationReader } from "../../../../utils/ios-cmdline-tools/SimulatorLocationdClients";
 import { SimulatorTccSqliteClient } from "../../../../utils/ios-cmdline-tools/SimulatorTccSqliteClient";
 import {
   DefaultDataContainerWriter,
@@ -33,6 +34,7 @@ export function createIosDisposableAppSupport(): DisposableAppPlatformSupport {
       data: new DefaultDataContainerWriter(),
       files: new DefaultFileSystem(),
       tcc: new SimulatorTccSqliteClient(),
+      location: defaultSimulatorLocationAuthorizationReader(),
       clearStorage: (deviceId, appId) =>
         new SimulatorIosClearDataBackend(deviceId, { simctl }).clearAppData(
           appId,

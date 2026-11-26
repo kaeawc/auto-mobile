@@ -323,14 +323,15 @@ export class CtrlProxyInboundMessages {
     // Push update from server
     const now = this.host.timer.now();
     const previous = this.host.cachedHierarchy;
+    const sameCapture =
+      previous !== null && previous.hierarchy.updatedAt === message.data!.updatedAt;
     this.host.cachedHierarchy = {
       hierarchy: message.data!,
       receivedAt: now,
-      captureReceivedAt:
-        previous !== null && previous.hierarchy.updatedAt === message.data!.updatedAt
-          ? (previous.captureReceivedAt ?? previous.receivedAt)
-          : now,
-      fresh: true,
+      captureReceivedAt: sameCapture ? (previous.captureReceivedAt ?? previous.receivedAt) : now,
+      // Re-sending a capture an action already retired proves nothing about the screen since:
+      // after a prototype show it served the pre-show tree as fresh (#19175).
+      fresh: sameCapture ? previous.fresh : true,
       perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined,
       frameContext: message.frameContext,
     };

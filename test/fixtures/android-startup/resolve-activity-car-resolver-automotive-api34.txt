@@ -1,0 +1,2 @@
+priority=0 preferredOrder=0 match=0x0 specificIndex=-1 isDefault=false
+com.android.car.activityresolver/.CarResolverActivity

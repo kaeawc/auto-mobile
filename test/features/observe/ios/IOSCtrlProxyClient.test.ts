@@ -4645,6 +4645,43 @@ describe("IOSCtrlProxyClient", function () {
       }
     });
 
+    test("a push re-delivering an invalidated capture keeps it stale (#19175)", async function () {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, {
+        wsFactory: factory,
+        timer: testTimer,
+      });
+      const preShow: XCTestHierarchy = {
+        updatedAt: 1_795_562_311_805,
+        packageName: "dev.jasonpearson.automobile.Playground",
+        hierarchy: { text: "Discover" },
+      };
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: preShow }));
+        await flushPromises();
+        expect(testClient.testHooks.cachedHierarchy!.fresh).toBe(true);
+
+        // A prototype show retires the cache; the runner then re-sends the capture it already had.
+        testClient.invalidateCache();
+        socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: preShow }));
+        await flushPromises();
+        expect(testClient.testHooks.cachedHierarchy!.fresh).toBe(false);
+
+        // A new capture is fresh again.
+        const postShow = { ...preShow, updatedAt: preShow.updatedAt + 1_500 };
+        socket!.simulateMessage(JSON.stringify({ type: "hierarchy_update", data: postShow }));
+        await flushPromises();
+        expect(testClient.testHooks.cachedHierarchy!.fresh).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("invalidateCache should mark cache as not fresh", async function () {
       const testTimer = fakeTimer;
 

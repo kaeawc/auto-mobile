@@ -217,3 +217,27 @@ release_holder() {
   [[ "$status" -eq 0 && "$output" == *'warning: cannot create host slot pool'* ]]
   [[ "$output" == *'running uncapped'* && "$output" == *'slots=6'* ]]
 }
+
+@test "the pool directory resolves with HOME unset or empty, as Bun does (#19310)" {
+  local expected
+  expected="$(bash -c 'u=$(id -un); eval "printf %s ~$u"')/.auto-mobile"
+  run env -u HOME -u AUTOMOBILE_COORDINATION_DIR -u AUTO_MOBILE_COORDINATION_DIR \
+    bash -c 'set -u; source scripts/lib/host-slots.sh; host_slots_coordination_dir'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expected" ]
+  run env -u AUTOMOBILE_COORDINATION_DIR -u AUTO_MOBILE_COORDINATION_DIR HOME= \
+    bash -c 'set -u; source scripts/lib/host-slots.sh; host_slots_coordination_dir'
+  [ "$status" -eq 0 ]
+  [ "$output" = "$expected" ]
+}
+
+@test "an unresolvable home is a clear error, and an override needs no home (#19310)" {
+  run env -u HOME -u AUTOMOBILE_COORDINATION_DIR -u AUTO_MOBILE_COORDINATION_DIR \
+    bash -c 'set -u; source scripts/lib/host-slots.sh; id() { echo "not a name"; }; host_slots_acquire 1 4'
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"set HOME or AUTOMOBILE_COORDINATION_DIR"* ]]
+  run env -u HOME AUTOMOBILE_COORDINATION_DIR="$BATS_TEST_TMPDIR/pool" \
+    bash -c 'set -u; source scripts/lib/host-slots.sh; trap host_slots_release EXIT; host_slots_acquire 1 4 && echo "slots=$host_slots_acquired"'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"slots=1"* ]]
+}

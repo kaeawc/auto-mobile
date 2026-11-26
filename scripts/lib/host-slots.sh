@@ -58,6 +58,25 @@ host_slot_take() {
   host_slots_acquired=$((host_slots_acquired + 1))
 }
 
+# The shared pool's parent directory. Mirrors getSharedAutoMobileDir in src/utils/tempDir.ts,
+# including the legacy override; worktrees must use the same home/override to share the pool.
+# With HOME unset or empty, the account's home comes from the password database, as Bun's
+# os.userInfo().homedir does (#19310): bash expands ~user with getpwnam.
+host_slots_coordination_dir() {
+  local home="${HOME:-}" user
+  if [[ -z "$home" ]]; then
+    user="$(id -un 2>/dev/null || true)"
+    # The name is checked before eval, which only performs its tilde expansion.
+    if [[ "$user" =~ ^[A-Za-z0-9._][A-Za-z0-9._-]*$ ]]; then eval "home=~$user"; fi
+    if [[ "$home" == "~"* ]]; then home=""; fi
+  fi
+  if [[ -z "$home" && -z "${AUTOMOBILE_COORDINATION_DIR:-}${AUTO_MOBILE_COORDINATION_DIR:-}" ]]; then
+    echo 'HOME is unset and the account has no home directory; set HOME or AUTOMOBILE_COORDINATION_DIR' >&2
+    return 2
+  fi
+  printf '%s\n' "${AUTOMOBILE_COORDINATION_DIR:-${AUTO_MOBILE_COORDINATION_DIR:-${home}/.auto-mobile}}"
+}
+
 host_slots_acquire() {
   local demand="$1" cores="$2" capacity index coordination
   capacity="${AUTOMOBILE_HOST_TEST_SLOTS:-$(((cores + 1) / 2))}"
@@ -67,9 +86,7 @@ host_slots_acquire() {
     echo "AUTOMOBILE_HOST_TEST_SLOTS must be a positive integer below 1000000000 or off, got: $capacity" >&2
     return 2
   fi
-  # Mirror getSharedAutoMobileDir in src/utils/tempDir.ts, including the legacy
-  # override. Worktrees must use the same home/override to share the pool.
-  coordination="${AUTOMOBILE_COORDINATION_DIR:-${AUTO_MOBILE_COORDINATION_DIR:-${HOME}/.auto-mobile}}"
+  coordination="$(host_slots_coordination_dir)" || return 2
   if [[ "$coordination" != /* ]]; then
     echo 'AUTOMOBILE_COORDINATION_DIR must be an absolute path' >&2
     return 2

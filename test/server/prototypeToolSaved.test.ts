@@ -474,6 +474,12 @@ describe("prototype saved actions", () => {
       error: savedPrototypeErrorMessages.not_found,
     });
   });
+  test("delete not_found names the ProtoViewer library it does not cover (#19193)", async () => {
+    proxy.setDeleteResult({ success: false, errorCode: "not_found" });
+    const output = await call({ action: "deleteSaved", id: "2698bc08-library-id" });
+    expect(output.error).toContain("viewer.libraryId");
+    expect(output.error).toContain("delete it in the ProtoViewer app");
+  });
   const CURRENT_USER = "shell am get-current-user";
   const clearFor = (userId: number) =>
     `shell cmd shortcut clear-shortcuts --user ${userId} dev.jasonpearson.automobile.ctrlproxy`;

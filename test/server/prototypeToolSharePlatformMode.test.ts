@@ -35,7 +35,7 @@ const shareSpec = {
 const plainSpec = {
   id: "plain",
   window: { placement: { type: "fullscreen" as const } },
-  root: { type: "text" as const, text: "Hello" },
+  root: { type: "column", children: [{ type: "text", id: "label", text: "Hello" }] },
 };
 
 describe("prototype show platformMode share on the host (#19308)", () => {
@@ -126,5 +126,27 @@ describe("prototype show platformMode share on the host (#19308)", () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain("declares share in requires.platform");
     expect(sent(android)).toEqual([]);
+  });
+
+  // Patches cannot edit /requires, and declaring share needs fake mode at show, so a spec shown in
+  // real mode cannot gain share through a patch.
+  test.each([android, ios])("$platform refuses a patch that adds share, unsent", async (device) => {
+    client.setSupportedCommands([...SHARE_CAPABILITIES, "prototype_patch_v1"]);
+    agent.handshake.capabilities.push("prototype_patch_v1");
+    expect((await show(device, { spec: plainSpec })).success).toBe(true);
+    const handler = ToolRegistry.getTool("prototype")!.deviceAwareHandler!;
+    const patched = prototypeOutputSchema.parse(
+      toolStructured(
+        await handler(device, {
+          action: "patch",
+          id: plainSpec.id,
+          ops: [{ op: "replaceNode", id: "label", node: { ...shareSpec.root, id: "label" } }],
+        }),
+      ),
+    );
+    expect(patched.success).toBe(false);
+    expect(patched.error).toContain("Platform module share is not declared in requires.platform");
+    const patches = device.platform === "android" ? client.patchRequests : agent.patchRequests;
+    expect(patches).toEqual([]);
   });
 });

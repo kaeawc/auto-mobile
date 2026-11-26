@@ -444,3 +444,58 @@ final class CarPlayInputTests: XCTestCase {
         }
     }
 }
+
+final class SimulatorKitLocationTests: XCTestCase {
+    func testXcode27SharedFrameworksComeBeforeTheXcode26Path() {
+        let xcode = "/nonexistent-simkit/Xcode-27.2.0.app/Contents"
+        XCTAssertEqual(
+            SimulatorKitLocation.candidatePaths(developerDirectory: "\(xcode)/Developer"),
+            [
+                "\(xcode)/SharedFrameworks/SimulatorKit.framework/SimulatorKit",
+                "\(xcode)/Developer/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",
+            ]
+        )
+    }
+
+    func testATrailingSlashResolvesTheSamePaths() {
+        let xcode = "/nonexistent-simkit/Xcode.app/Contents"
+        XCTAssertEqual(
+            SimulatorKitLocation.candidatePaths(developerDirectory: "\(xcode)/Developer/"),
+            [
+                "\(xcode)/SharedFrameworks/SimulatorKit.framework/SimulatorKit",
+                "\(xcode)/Developer/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",
+            ]
+        )
+    }
+
+    func testAnAppBundlePathNormalizesToItsDeveloperDirectory() {
+        let app = "/nonexistent-simkit/Xcode.app"
+        let expected = [
+            "\(app)/Contents/SharedFrameworks/SimulatorKit.framework/SimulatorKit",
+            "\(app)/Contents/Developer/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",
+        ]
+        XCTAssertEqual(SimulatorKitLocation.candidatePaths(developerDirectory: app), expected)
+        XCTAssertEqual(SimulatorKitLocation.candidatePaths(developerDirectory: app + "/"), expected)
+    }
+
+    func testASymlinkedDeveloperDirectoryResolvesToTheRealParent() throws {
+        let fileManager = FileManager.default
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("simkit-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: root) }
+        let developer = root.appendingPathComponent("Xcode.app/Contents/Developer")
+        try fileManager.createDirectory(at: developer, withIntermediateDirectories: true)
+        let link = root.appendingPathComponent("link")
+        try fileManager.createSymbolicLink(at: link, withDestinationURL: developer)
+
+        let realDeveloper = (developer.path as NSString).resolvingSymlinksInPath
+        let contents = (realDeveloper as NSString).deletingLastPathComponent
+        XCTAssertEqual(
+            SimulatorKitLocation.candidatePaths(developerDirectory: link.path),
+            [
+                "\(contents)/SharedFrameworks/SimulatorKit.framework/SimulatorKit",
+                "\(realDeveloper)/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",
+            ]
+        )
+    }
+}

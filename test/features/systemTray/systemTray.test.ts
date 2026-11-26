@@ -3915,6 +3915,27 @@ describe("systemTray dismiss outcome verification (#10010)", () => {
     expect(result.timer.getSleepHistory()).toEqual([]);
     expect(result.observe.getExecuteCallCount()).toBe(2);
   });
+
+  test("fails when the swiped row is still shown outside a focused shade (heads-up re-post)", async () => {
+    // The swiped row, rendered while focus sits on the app below (#19195):
+    // isTrayOpen is false, but the capture still shows the notification.
+    const headsUp = createObservation({
+      ...createTrayWithExpandedNotifications([TITLE]),
+      windows: [
+        { id: 1, isFocused: true, packageName: "com.google.android.apps.nexuslauncher" },
+        { id: 2, isFocused: false, packageName: SYSTEM_TRAY_PACKAGE },
+      ],
+    });
+    const result = await runDismiss([
+      createObservation(createTrayWithExpandedNotifications([TITLE])),
+      headsUp,
+      headsUp,
+    ]);
+
+    expect(result.isError).toBe(true);
+    expect(result.payload.success).toBe(false);
+    expect(result.payload.message).toContain("still present");
+  });
 });
 
 // Dismiss verification against the real captured expanded group (Delta and

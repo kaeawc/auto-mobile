@@ -235,15 +235,23 @@ const classifyNotificationDismissal = (
   { appMatchTexts, candidate }: { appMatchTexts: string[]; candidate: ObserveResult },
 ): "dismissed" | "present" | "snapped-back" | "indeterminate" => {
   const hierarchy = candidate.viewHierarchy;
-  if (!hierarchy || !detector.isTrayOpen(hierarchy, candidate.deviceLock)) {
+  if (!hierarchy) {
     return "indeterminate";
+  }
+  const { rowSignature } = swiped;
+  if (!detector.isTrayOpen(hierarchy, candidate.deviceLock)) {
+    // A capture that is not a readable shade (focus on the app below, a
+    // heads-up re-post) cannot confirm dismissal while it still shows the
+    // swiped row (#19195).
+    return rowSignature !== null && countRowsWithSignature(hierarchy, rowSignature) > 0
+      ? "present"
+      : "indeterminate";
   }
   // The swiped row's own identity decides when it has one: a new matching
   // notification arriving mid-settle, or an unrelated matching row leaving,
   // must not flip the outcome. Only shade rows are counted then, so a
   // root-text fallback match (a status-bar icon, whole-screen text) cannot
   // inflate the post-swipe count once no rows are left.
-  const { rowSignature } = swiped;
   if (rowSignature === null) {
     const remaining = findNotificationMatches(hierarchy, criteria, appMatchTexts).length;
     return remaining < swiped.matchCountBefore ? "dismissed" : "present";

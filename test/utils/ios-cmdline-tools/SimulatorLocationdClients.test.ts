@@ -39,7 +39,9 @@ describe("SimulatorLocationdClientsReader", () => {
       },
     });
     expect(await reader.readLocationAuthorization("SIM-1", BUNDLE)).toBe(4);
-    expect(paths).toEqual(["/sims/SIM-1/data/Library/Caches/locationd/clients.plist"]);
+    expect(paths).toEqual([
+      path.join("/sims/SIM-1", "data/Library/Caches/locationd/clients.plist"),
+    ]);
   });
 
   test("a missing clients.plist reads null", async () => {

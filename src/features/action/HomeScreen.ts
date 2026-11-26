@@ -514,7 +514,7 @@ export class HomeScreen extends BaseVisualChange {
           signal,
         });
       } catch (error) {
-        if (outcome.unacknowledged) {
+        if (this.unacknowledgedPressEndsHome(outcome, isLastPress, deadline)) {
           throw error;
         }
         this.iosHomeRemainingMs(deadline);
@@ -535,6 +535,20 @@ export class HomeScreen extends BaseVisualChange {
         );
       }
     }
+  }
+
+  /**
+   * An unacknowledged press that left an app in front still gets the next allowed press: leaving
+   * the App Switcher on iOS 27.2 can return to the app first, and the runner's press can time out
+   * while SpringBoard animates (#19170). The last press, or no budget left, reports the failure.
+   */
+  private unacknowledgedPressEndsHome(
+    outcome: IosRunnerHomeOutcome,
+    isLastPress: boolean,
+    deadline: number | undefined,
+  ): boolean {
+    const budgetLeft = deadline === undefined || deadline - this.timer.now() > 0;
+    return outcome.unacknowledged === true && (isLastPress || !budgetLeft);
   }
 
   private iosHomePressVerificationPolicy(

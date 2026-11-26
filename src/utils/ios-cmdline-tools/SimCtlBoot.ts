@@ -431,7 +431,7 @@ export class SimCtlBoot {
       // This is far more reliable than polling `simctl list devices` for state.
       return await this.runCoordinatedBoot(udid, deadlineMs, getAbortSignal(), {
         operation: async () => {
-          const verified = await this.bootAndVerify(udid, deadlineMs);
+          const verified = await this.bootAndVerify(udid, deadlineMs, true);
           return this.resolveReadySimulator(
             udid,
             this.remainingBootTimeoutMs(udid, deadlineMs),
@@ -464,6 +464,22 @@ export class SimCtlBoot {
   }
 
   /**
+   * Attempt 1 changed nothing when the caller only waits on a running simulator or bootstatus said
+   * it was already Booted; a later attempt follows a shutdown, so it is a real boot.
+   */
+  private confirmBooted(
+    udid: string,
+    attempt: number,
+    readiness: boolean | undefined,
+    bootstatusReportedAlreadyBooted: boolean,
+  ): void {
+    const wasAlreadyBooted =
+      attempt === 1 && (readiness === true || bootstatusReportedAlreadyBooted);
+    this.context.invalidateDeviceListCache();
+    (this.context.bootHooks ?? simulatorBootHooks).notifyBooted(udid, { wasAlreadyBooted });
+  }
+
+  /**
    * Boot `udid` and prove it actually reached the `Booted` state, retrying a
    * bounded number of times.
    *
@@ -477,13 +493,11 @@ export class SimCtlBoot {
    *
    * On a failed verification the device is shut down, a bounded backoff is
    * awaited through the injected {@link Timer}, and the boot is retried.
+   *
+   * @param readiness the caller waits on a simulator it did not start (the already-running
+   *        path), so a first-attempt success is not reported as a boot.
    */
-  private confirmBooted(udid: string): void {
-    this.context.invalidateDeviceListCache();
-    (this.context.bootHooks ?? simulatorBootHooks).notifyBooted(udid);
-  }
-
-  async bootAndVerify(udid: string, deadlineMs: number): Promise<AppleDevice> {
+  async bootAndVerify(udid: string, deadlineMs: number, readiness?: boolean): Promise<AppleDevice> {
     const { maxAttempts, retryBackoffMs } = this.context.bootOptions;
     let lastFailure = "";
 
@@ -519,7 +533,7 @@ export class SimCtlBoot {
       if (target?.state === "Booted") {
         // A listing taken between the first invalidation and this confirmation may have cached
         // a Booting row; drop it too so the bind that follows reads the Booted state.
-        this.confirmBooted(udid);
+        this.confirmBooted(udid, attempt, readiness, bootstatusReportedAlreadyBooted);
         return target;
       }
 

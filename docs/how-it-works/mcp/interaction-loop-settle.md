@@ -7,18 +7,21 @@ names what kept changing.
 ## Android status bar
 
 The comparison leaves out the SystemUI status bar, because its clock, battery and signal rows
-change on their own. Two rules apply:
+change on their own. Three rules apply:
 
 - A known status-bar root (`status_bar_container`, `status_bar`,
   `status_bar_launch_animation_container`) is left out with its whole subtree.
-- A status-bar-shaped id found anywhere else is left out with its subtree only when nothing in
-  that subtree is clickable, long-clickable, checkable or scrollable. Such ids are the shared
-  status-bar allowlist (`clock`, `battery*`, `wifi_*`, `statusIcons`, …) and the cell-signal rows
+- The SystemUI `clock` is always left out, including the clickable clock in the expanded shade
+  header (`split_shade_status_bar`).
+- Any other status-bar-shaped id is left out with its subtree only when nothing in that subtree,
+  and no ancestor, is clickable, long-clickable, checkable or scrollable. Such ids are the shared
+  status-bar allowlist (`battery*`, `wifi_*`, `statusIcons`, …) and the cell-signal rows
   (`mobile_*`, `signal_cluster*`).
 
-The second rule keeps SystemUI rows that reuse those ids but take input. An example is a toggle
-row in the Internet dialog: its `checked` change keeps the screen unsettled and shows in the
-action diff. The patterns live in `src/utils/androidStatusBar.ts`.
+The third rule keeps SystemUI rows that reuse those ids but take input, and the text inside them.
+An example is a toggle row in the Internet dialog: its `checked` change, or its summary going from
+"Connecting…" to "Connected", keeps the screen unsettled and shows in the action diff. The
+patterns live in `src/utils/androidStatusBar.ts`.
 
 ## unsettledBy
 

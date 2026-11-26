@@ -1,10 +1,11 @@
+import { Mutex } from "async-mutex";
 import type { ExecResult } from "../../../models";
 import { ActionableError } from "../../../models/ActionableError";
 import { mergeDyldInsertLibraries } from "../../prototype/ios/prototypeAgentInjection";
-import { SingleFlight } from "../../../utils/cache/SingleFlight";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import { SimCtlClient } from "../../../utils/ios-cmdline-tools/SimCtlClient";
+import { parseSimctlDeviceList } from "../../../utils/ios-cmdline-tools/simctlDeviceList";
 import {
   iosCameraPosterDylibProvider,
   iosCameraPosterGateProvider,
@@ -75,7 +76,11 @@ export function withoutGate(value: string, gate?: string): string {
  * re-applies a poster the registry still holds.
  */
 export class IosCameraPosterDeviceWide {
-  private readonly deactivations = new SingleFlight<string, void>();
+  /**
+   * Activation and deactivation of one simulator never interleave and run in call order: each
+   * call queues for the lock synchronously (#19119). A second clear finds no record and returns.
+   */
+  private readonly locks = new Map<string, Mutex>();
 
   private readonly simctl: PosterSimctlRunner;
   private readonly posterProvider: IosCameraPosterDylibProvider;
@@ -93,7 +98,11 @@ export class IosCameraPosterDeviceWide {
     this.bootEnvironment = deps.bootEnvironment;
   }
 
-  async activate(udid: string, signal?: AbortSignal): Promise<void> {
+  activate(udid: string, signal?: AbortSignal): Promise<void> {
+    return this.exclusive(udid, () => this.runActivate(udid, signal));
+  }
+
+  private async runActivate(udid: string, signal?: AbortSignal): Promise<void> {
     const poster = await this.posterProvider.ensure();
     const gate = this.store.installGate(await this.gateProvider.ensure());
     // launchd_sim gives a variable it inherited at boot precedence over `launchctl setenv`, and
@@ -109,16 +118,10 @@ export class IosCameraPosterDeviceWide {
       );
     }
     const current = (await this.launchctl(udid, ["getenv", DYLD], signal)).stdout.trim();
-    const prior = this.store.read(udid);
-    // A prior record whose gate is gone from launchd belongs to an earlier boot.
-    const launchctlBefore =
-      prior && entries(current).some((entry) => isGate(entry, prior.gate))
-        ? prior.launchctlBefore
-        : withoutGate(current);
     await this.setenv(udid, POSTER_VARIABLES[0], poster, signal);
     await this.setenv(udid, POSTER_VARIABLES[1], this.config.path(udid), signal);
     // Recorded before the gate goes in, so an interrupted activation is still undone later.
-    this.store.write(udid, { gate: bootGate ?? gate, launchctlBefore });
+    this.store.write(udid, { gate: bootGate ?? gate });
     if (bootGate) {
       return;
     }
@@ -131,7 +134,7 @@ export class IosCameraPosterDeviceWide {
    * the poster variables. A simulator with no recorded activation is left alone.
    */
   deactivate(udid: string, signal?: AbortSignal): Promise<void> {
-    return this.deactivations.run(udid, () => this.runDeactivate(udid, signal));
+    return this.exclusive(udid, () => this.runDeactivate(udid, signal));
   }
 
   /** A boot reset the launchd environment: re-apply the poster the registry still holds. */
@@ -149,14 +152,42 @@ export class IosCameraPosterDeviceWide {
       try {
         await this.deactivate(udid);
       } catch (error) {
-        // A simulator that has shut down lost its launchd environment anyway.
         logger.warn(
           `Failed to undo the device-wide camera poster on ${udid}: ${errorMessage(error)}`,
         );
-      } finally {
-        this.store.remove(udid);
+        // A simulator that has shut down lost its launchd environment anyway. One still booted
+        // keeps the gate, so its record stays for the next clear or sweep to undo (#19119).
+        if (!(await this.isBooted(udid))) {
+          this.store.remove(udid);
+        }
       }
     }
+  }
+
+  /** Whether simctl lists the simulator as Booted; an unreadable list counts as booted. */
+  private async isBooted(udid: string): Promise<boolean> {
+    try {
+      const { devices } = parseSimctlDeviceList(
+        (await this.simctl.executeCommandArgs(["list", "devices", "--json"], LAUNCHCTL_TIMEOUT_MS))
+          .stdout,
+      );
+      return Object.values(devices).some((list) =>
+        list.some((device) => device.udid === udid && device.state === "Booted"),
+      );
+    } catch (error) {
+      logger.warn(`Could not read the simulator list for ${udid}: ${errorMessage(error)}`, error);
+      return true;
+    }
+  }
+
+  /** Queues `action` for the simulator's lock before returning, so the lock order is the call order. */
+  private exclusive(udid: string, action: () => Promise<void>): Promise<void> {
+    let lock = this.locks.get(udid);
+    if (!lock) {
+      lock = new Mutex();
+      this.locks.set(udid, lock);
+    }
+    return lock.runExclusive(action);
   }
 
   private async runDeactivate(udid: string, signal?: AbortSignal): Promise<void> {

@@ -2,6 +2,9 @@
 
 Captured verbatim from real `xcrun simctl` runs. Nothing here is hand-written.
 
+- `list-devices-booted-ios27-2.json` (#19119): `xcrun simctl list devices booted --json` on this
+  host with Xcode 27.2 (2026-11-26); two simulators were Booted, one on iOS 26.5 and one on iOS
+  27.2.
 - `defaults-delete-absent-key-ios27.txt` (#14786): the error message the daemon's
   simctl runner raised for `simctl spawn <udid> defaults delete .GlobalPreferences
   AppleCalendar` when the key was absent. iOS 27.0 (iPhone 18 Pro simulator),

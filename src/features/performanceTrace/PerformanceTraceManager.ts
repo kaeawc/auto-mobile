@@ -240,15 +240,41 @@ export class PerformanceTraceManager {
     await this.stopMatching((traceDevice) => traceDevice === deviceId);
   }
 
+  /** Stop the traces on a device that no session owns, for a session released off that device. */
+  async stopUnownedTracesOnDevice(deviceId: string): Promise<void> {
+    await this.stopMatching(
+      (traceDevice, owner) => owner === undefined && traceDevice === deviceId,
+    );
+  }
+
+  /** Whether a trace no session owns is recording, or still starting, on a device. */
+  hasUnownedTraceOnDevice(deviceId: string): boolean {
+    return this.hasTraceOnDevice(deviceId, undefined);
+  }
+
+  /** The devices a session has a trace recording, or still starting, on. */
+  sessionTraceDeviceIds(sessionUuid: string): string[] {
+    const starting = [...this.starting]
+      .filter(([, start]) => start.ownerSessionUuid === sessionUuid)
+      .map(([deviceId]) => deviceId);
+    const recording = [...this.active.values()]
+      .filter((trace) => trace.options.ownerSessionUuid === sessionUuid)
+      .map((trace) => trace.device.deviceId);
+    return [...new Set([...starting, ...recording])];
+  }
+
   /** Whether a session has a trace recording, or still starting, on a device. */
   hasSessionTraceOnDevice(sessionUuid: string, deviceId: string): boolean {
+    return this.hasTraceOnDevice(deviceId, sessionUuid);
+  }
+
+  private hasTraceOnDevice(deviceId: string, owner: string | undefined): boolean {
     const start = this.starting.get(deviceId);
-    if (start && start.ownerSessionUuid === sessionUuid) {
+    if (start && start.ownerSessionUuid === owner) {
       return true;
     }
     return [...this.active.values()].some(
-      (trace) =>
-        trace.options.ownerSessionUuid === sessionUuid && trace.device.deviceId === deviceId,
+      (trace) => trace.options.ownerSessionUuid === owner && trace.device.deviceId === deviceId,
     );
   }
 

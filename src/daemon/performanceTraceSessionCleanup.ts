@@ -16,7 +16,11 @@ import type { SessionManager, SessionReleaseOptions } from "./sessionManager";
 /** The slice of the trace manager the session cleanup drives. */
 export type PerformanceTraceSessionStopper = Pick<
   PerformanceTraceManager,
-  "hasSessionTraceOnDevice" | "stopSessionTracesOnDevice" | "forgetSessionTracesOnDevice"
+  | "hasSessionTraceOnDevice"
+  | "stopSessionTracesOnDevice"
+  | "forgetSessionTracesOnDevice"
+  | "hasUnownedTraceOnDevice"
+  | "stopUnownedTracesOnDevice"
 >;
 
 export interface PerformanceTraceSessionCleanupOptions {
@@ -63,7 +67,8 @@ async function removeLeftoverTraceFiles(
  * off that device (a rebind publishes an unbound with no release and no device removal). The stop
  * is registered as pending device cleanup, so the device's next owner waits until the recorder
  * is stopped, its file pulled and any device copy it could not delete removed; the summary is
- * not waited for. A start still in flight at release is awaited and its recorder stopped.
+ * not waited for. A start still in flight at release is awaited and its recorder stopped. A
+ * release also stops a sessionless trace left on the device the same way (#19316).
  */
 export function registerPerformanceTraceSessionCleanup(
   sessionManager: Pick<
@@ -79,12 +84,19 @@ export function registerPerformanceTraceSessionCleanup(
     sessionId: string,
     deviceId: string,
     releaseOptions?: Pick<SessionReleaseOptions, "deviceIdentityReplaced">,
+    released = false,
   ): void => {
     const manager = managerFor();
-    if (!manager.hasSessionTraceOnDevice(sessionId, deviceId)) {
+    const owned = manager.hasSessionTraceOnDevice(sessionId, deviceId);
+    const unowned = released && manager.hasUnownedTraceOnDevice(deviceId);
+    if (!owned && !unowned) {
       return;
     }
     if (releaseOptions?.deviceIdentityReplaced) {
+      if (!owned) {
+        // A sessionless recorder went with the old device; signalling its pid on the new one is unsafe.
+        return;
+      }
       // A different device now answers on this serial; signalling the old pid there is unsafe,
       // but the old entry must go so a trace can start on the replacement.
       const forgotten = manager.forgetSessionTracesOnDevice(sessionId, deviceId);
@@ -97,7 +109,10 @@ export function registerPerformanceTraceSessionCleanup(
     sessionManager.registerPendingDeviceCleanup(
       deviceId,
       runOutsideRequestContext(async () => {
-        await manager.stopSessionTracesOnDevice(sessionId, deviceId);
+        await Promise.all([
+          manager.stopSessionTracesOnDevice(sessionId, deviceId),
+          ...(unowned ? [manager.stopUnownedTracesOnDevice(deviceId)] : []),
+        ]);
         await removeLeftoverTraceFiles(sessionId, deviceId, registry, adbFor);
       }),
       {
@@ -109,8 +124,8 @@ export function registerPerformanceTraceSessionCleanup(
   // A terminal upgrade of a finished release must not touch the device's next owner (#10825).
   sessionManager.onSessionRelease((sessionId, deviceId, _reason, releaseOptions) => {
     if (!releaseOptions?.upgradeOnly) {
-      cleanup(sessionId, deviceId, releaseOptions);
+      cleanup(sessionId, deviceId, releaseOptions, true);
     }
   });
-  sessionManager.onSessionDeviceUnbound(cleanup);
+  sessionManager.onSessionDeviceUnbound((sessionId, deviceId) => cleanup(sessionId, deviceId));
 }

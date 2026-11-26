@@ -72,7 +72,11 @@ Each result has `passed`, its metrics and its violations; `failed` is set when `
 On Android, frame-time percentiles and jank counts both cover only the frames rendered during the check, not
 frames from app launch or earlier screens. When the app rendered no frames during the check (an idle screen), the frame-time percentiles
 `p50Ms`–`p99Ms` are null and `metrics.frameTimeUnmeasured` says why. AutoMobile then skips the
-frame-time check, so it does not fail the call. For raw captures use `performanceTrace` (its `categories` option records a custom Perfetto trace),
+frame-time check, so it does not fail the call.
+
+On Android builds whose gfxinfo prints no frame-time
+histogram, the percentiles are also null, and not checked, when they include frames from before the
+check, such as launch frames. For raw captures use `performanceTrace` (its `categories` option records a custom Perfetto trace),
 [`measureStartup`](#measurestartup) or [`heapDump`](#heapdump).
 
 ## Render overlays (iOS Simulator)

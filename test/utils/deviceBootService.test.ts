@@ -55,6 +55,8 @@ import type { Timer } from "../../src/utils/SystemTimer";
 import type { DiscoverySource } from "../../src/utils/discoverySource";
 import { stableStringify } from "../../src/utils/stableStringify";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { bootTeardownDeviceLeft } from "../../src/devices/bootTeardownDeviceLeft";
+import { errorMessage } from "../../src/utils/describeUnknownError";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import { FakeDisplayInventoryProvider } from "../fakes/FakeDisplayInventoryProvider";
 import { DeviceLostError } from "../../src/utils/deviceLossOutcome";
@@ -1956,6 +1958,27 @@ describe("DeviceBootService", () => {
     expect(devices.getWaitForDeviceReadyOptions()).toEqual({ freshProvision: true });
     // ...and the owned emulator process is torn down, leaving no dangling boot.
     expect(launched.killed).toBe(true);
+  });
+
+  it("records the teardown of the emulator it stopped after a boot-readiness timeout (#19368)", async () => {
+    const devices = new FakeDeviceUtils();
+    const matcher = new FakeDeviceMatcher();
+    devices.setDeviceImages("android", [image]);
+    const launched = new FakeChildProcess();
+    devices.setMockChildProcess(image.name, launched);
+    devices.setWaitForDeviceReadyError(
+      new ActionableError(
+        "Emulator 'Pixel_9_API_35' failed to become ready within 1584ms\ntarget=emulator-5554; state=offline",
+      ),
+    );
+
+    const rejection = await service(devices, matcher)
+      .boot({ platform: "android", deviceId: image.name })
+      .catch((error: unknown) => error);
+
+    expect(errorMessage(rejection)).toContain("failed to become ready");
+    expect(launched.killed).toBe(true);
+    expect(bootTeardownDeviceLeft(rejection)).toBe("shutdown");
   });
 
   it("cancels the owned process when a pending progress callback is externally aborted", async () => {

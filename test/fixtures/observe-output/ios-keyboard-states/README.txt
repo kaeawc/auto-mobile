@@ -33,3 +33,23 @@ Payloads are byte-for-byte copies (cmp-verified) of the file the daemon wrote fo
    two chords had no effect and left the keyboard up). An observe made more than ~1.5 s after the chord returns the keyboard at [0,590,402,816].
 
 `keyboard detect` output was identical in both states: {"success":true,"open":true,"message":"Keyboard is open"}.
+
+-- Issue #19362 captures (2026-11-26, kaeawc/auto-mobile main 0176201c26) --
+Xcode 27.2, iOS 27.2 (SimRuntime.iOS-27-2), simulators created for the capture and deleted after, booted headless.
+Runner: CtrlProxy iOS runner built from source at 0176201c26 (local-build mode). Daemon: private daemon from dist at 0176201c26, flag --debug.
+No embedded SDK, so `insets.available` is false in all three and the docked-margin rule measures from the screen bottom.
+Payloads are byte-for-byte copies of the daemon's artifact file for
+  observe {"platform":"ios","raw":true} (CLI with --session-uuid after setActiveDevice)
+Nothing was trimmed or edited.
+
+3) ios-keyboard-docked-iphone-se.raw.json
+   iPhone SE (3rd generation), 375x667 pt, home button. Settings > Search field focused, docked keyboard.
+   Keys [4,458,372,674], container 451-667, assistant bar [0,407,375,451].
+4) ios-keyboard-one-handed-iphone-se.raw.json
+   Same simulator after Settings > General > Keyboard > One-Handed Keyboard > Right. Settings > Search focused.
+   Keys [55,458,375,674] (85 percent of the width), container 451-667. The gray strip left of the keys (with the
+   chevron that restores the full keyboard) is keyboard chrome, so the keyboard still covers the full width.
+5) ios-keyboard-docked-landscape-iphone-17-pro.raw.json
+   iPhone 17 Pro, rotated to landscape (874x402 pt, rotation 1). Safari address field focused.
+   Keys [77,227,799,387] (83 percent of the width), container 222-399 (3 pt above the screen bottom).
+Not captured: a third-party keyboard (none installable on the simulator without a keyboard-extension app).

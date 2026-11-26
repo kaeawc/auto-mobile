@@ -211,8 +211,9 @@ function measuredImeOcclusionBounds(
  * Docked keyboards span the display, but their keys can be inset on a wide display: 83-874 of
  * the Duo inner screen's 951 pt (#18248). A keyboard container resting on the bottom edge
  * (within {@link IOS_DOCKED_BOTTOM_MARGIN} of the safe-area bottom, or of the screen bottom
- * without a safe area) with keys over 80 percent of the width is docked; floating and
- * one-handed ones are not.
+ * without a safe area) with keys over 80 percent of the width is docked; floating ones are not.
+ * An iPhone one-handed keyboard counts as docked: the strip beside its keys is keyboard chrome
+ * (#19362).
  */
 function isDockedIosKeyboard(
   occluder: ImeOccluder,

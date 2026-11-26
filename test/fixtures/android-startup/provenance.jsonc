@@ -1,7 +1,7 @@
 {
   "provenance": "captured",
   "summary": "am start -W, resolve-activity, logcat fully-drawn and SystemPerformanceHinter output for measureStartup",
-  "source": "README.md, PR #18746, PR #18917",
+  "source": "README.md, PR #18746, PR #18917, issue #19181",
   "capturedOn": [
     {
       "device": "API 35 google_apis arm64 emulator (Pixel 6 profile)",
@@ -12,6 +12,11 @@
       "device": "Pixel Tablet AVD (API 35 google_apis arm64, AE3A.240806.043)",
       "os": "Android API 35",
       "formFactor": "tablet",
+    },
+    {
+      "device": "Android Automotive emulator (android-34-ext9 android-automotive arm64, automotive_1080p_landscape), foreground user 10",
+      "os": "Android API 34",
+      "formFactor": "automotive",
     },
   ],
   "date": "2026-11-19",

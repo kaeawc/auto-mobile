@@ -50,6 +50,27 @@ export async function readWatchAppStates(
   return states;
 }
 
+/**
+ * System processes the runner reports as `runningForeground` whatever app is in front: every
+ * captured reply (test/fixtures/watchos-xcuitest/app-states-*) has both, with the runner or
+ * Settings in front as well.
+ */
+const ALWAYS_FOREGROUND_SYSTEM_BUNDLES: ReadonlySet<string> = new Set([
+  "com.apple.Carousel",
+  "com.apple.clockface",
+]);
+
+/**
+ * At most one app is in front. A foreground app outside the always-foreground system set wins;
+ * with none, a lone system bundle is the front one. Two or more candidates on either tier cannot
+ * be told apart, so none is marked.
+ */
+function frontApp(foreground: readonly string[]): ReadonlySet<string> {
+  const apps = foreground.filter((id) => !ALWAYS_FOREGROUND_SYSTEM_BUNDLES.has(id));
+  const candidates = apps.length > 0 ? apps : foreground;
+  return new Set(candidates.length === 1 ? candidates : []);
+}
+
 /** Which of the given watch apps are in front, read from a runner that is already connected. */
 export interface WatchForegroundProbe {
   foregroundBundleIds(
@@ -77,7 +98,7 @@ export class RunnerWatchForegroundProbe implements WatchForegroundProbe {
     }
     try {
       const states = await readWatchAppStates(client, bundleIds, signal);
-      return new Set(
+      return frontApp(
         [...states].filter(([, state]) => state === "runningForeground").map(([id]) => id),
       );
     } catch (error) {
@@ -94,4 +115,27 @@ export class RunnerWatchForegroundProbe implements WatchForegroundProbe {
       return new Set();
     }
   }
+}
+
+const defaultWatchForegroundProbe = new RunnerWatchForegroundProbe();
+
+/**
+ * Marks the listed watch apps the runner reports in front, read fresh on every call and never
+ * cached. Other platforms, and an empty listing, come back unchanged (#19359).
+ */
+export async function markWatchForeground<T extends { packageName: string; foreground: boolean }>(
+  device: { deviceId: string; platform?: string },
+  apps: T[],
+  probe: WatchForegroundProbe = defaultWatchForegroundProbe,
+  signal?: AbortSignal,
+): Promise<T[]> {
+  if (device.platform !== "watchos" || apps.length === 0) {
+    return apps;
+  }
+  const foreground = await probe.foregroundBundleIds(
+    device.deviceId,
+    apps.map((app) => app.packageName),
+    signal,
+  );
+  return apps.map((app) => (foreground.has(app.packageName) ? { ...app, foreground: true } : app));
 }

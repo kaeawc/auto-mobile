@@ -20,6 +20,8 @@ const RUNNER = "dev.jasonpearson.automobile.ctrlproxy.watch";
 const SETTINGS = "com.apple.NanoSettings";
 const CALCULATOR = "com.apple.NanoCalculator.watchkitapp";
 const LISTED = [RUNNER, SETTINGS, CALCULATOR];
+const CAROUSEL = "com.apple.Carousel";
+const CLOCK_FACE = "com.apple.clockface";
 
 /** Answers appStates with a captured reply's states, as the socket client resolves them. */
 class CapturedStatesRunner extends FakeWatchRunnerClient {
@@ -33,6 +35,14 @@ class CapturedStatesRunner extends FakeWatchRunnerClient {
   ): Promise<unknown> {
     await super.request(command, signal, options);
     return command.type === "appStates" ? this.reply.states : undefined;
+  }
+}
+
+/** A connected runner built before appStates: it stays usable and rejects the command. */
+class RunnerWithoutAppStates extends FakeWatchRunnerClient {
+  override async request(...args: Parameters<FakeWatchRunnerClient["request"]>): Promise<unknown> {
+    await super.request(...args);
+    throw new WatchRunnerError("unsupported", "unsupported_on_watchos");
   }
 }
 
@@ -65,9 +75,33 @@ describe("watch foreground apps", () => {
     closed.close();
     expect([...(await probeFor(closed).foregroundBundleIds("watch", LISTED))]).toEqual([]);
     expect(closed.commands).toEqual([]);
-    const old = new FakeWatchRunnerClient();
-    old.failure = new WatchRunnerError("unsupported", "unsupported_on_watchos");
+    const old = new RunnerWithoutAppStates();
+    expect(old.isUsable()).toBe(true);
     expect([...(await probeFor(old).foregroundBundleIds("watch", LISTED))]).toEqual([]);
+    expect(old.commands).toEqual([{ type: "appStates", bundleIds: LISTED }]);
+  });
+
+  test.each([
+    ["the runner app", runnerInFront, RUNNER],
+    ["Settings", settingsInFront, SETTINGS],
+  ] as const)(
+    "a listing with Carousel and clockface marks only %s, not the always-foreground system apps",
+    async (_name, reply, expected) => {
+      const listed = [...LISTED, CAROUSEL, CLOCK_FACE];
+      const foreground = await probeFor(new CapturedStatesRunner(reply)).foregroundBundleIds(
+        "watch",
+        listed,
+      );
+      expect([...foreground]).toEqual([expected]);
+    },
+  );
+
+  test("only system bundles in front: a lone one is marked, two cannot be told apart", async () => {
+    const probe = probeFor(new CapturedStatesRunner(settingsInFront));
+    expect([...(await probe.foregroundBundleIds("watch", [CLOCK_FACE, CALCULATOR]))]).toEqual([
+      CLOCK_FACE,
+    ]);
+    expect([...(await probe.foregroundBundleIds("watch", [CAROUSEL, CLOCK_FACE]))]).toEqual([]);
   });
 
   test("splits a large listing into runner-sized requests and drops unknown states", async () => {

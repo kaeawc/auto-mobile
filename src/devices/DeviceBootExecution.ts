@@ -11,6 +11,7 @@ import { errorMessage } from "../utils/describeUnknownError";
 import { logger } from "../utils/logger";
 import { runPhaseWithSettlement } from "../utils/runPhaseWithSettlement";
 import { DeviceBootTimeoutError } from "./DeviceBootTimeoutError";
+import { bootTeardownDeviceLeftFor, markBootTeardown } from "./bootTeardownDeviceLeft";
 import { enrichBootedDevice, findImageForBootedDevice } from "./bootedDeviceEnrichment";
 import {
   awaitTerminationWithinRequest,
@@ -227,7 +228,10 @@ export class DeviceBootExecution {
       };
     } catch (error) {
       const wait = await awaitCleanup();
-      throw annotateTerminationOutcome(error, wait, handle);
+      const failure = annotateTerminationOutcome(error, wait, handle);
+      // The emulator this boot launched was stopped here, before any boot result reached the
+      // acquisition, so the failure itself records that teardown (#19368).
+      throw handle ? markBootTeardown(failure, bootTeardownDeviceLeftFor(wait)) : failure;
     } finally {
       context.signal?.removeEventListener("abort", cancelOnAbort);
     }

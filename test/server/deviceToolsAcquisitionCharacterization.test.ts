@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { ActionableError, type DeviceInfo } from "../../src/models";
 import { createAcquisitionHandlers } from "../../src/server/deviceToolsAcquisition";
+import { DeviceBootService } from "../../src/devices/deviceBootService";
 import {
   getDeviceToolsDependencies,
   resetDeviceToolsDependencies,
@@ -569,3 +570,51 @@ for (const cleanupStatus of ["succeeded", "failed"] as const) {
     expect(rejected.message).not.toContain('avdName ("Pixel_A")');
   });
 }
+
+test("a boot-phase timeout that stopped the emulator it cold-booted reports deviceLeft (#19368)", async () => {
+  const timer = new FakeTimer();
+  setDeviceToolsDependencies({ timer });
+  const avd: DeviceInfo = { platform: "android", name: "Pixel_A", isRunning: false };
+  deviceUtils.setDeviceImages("android", [avd]);
+  matcher.setImageResult(avd);
+  const launched = new FakeChildProcess();
+  deviceUtils.setMockChildProcess(avd.name, launched);
+  deviceUtils.setWaitForDeviceReadyError(
+    new ActionableError(
+      "Emulator 'Pixel_A' failed to become ready within 1584ms\ntarget=emulator-5558; state=offline",
+    ),
+  );
+  const handlers = createAcquisitionHandlers({
+    // The boot service stops the emulator it launched and throws before any boot result exists.
+    bootAndPrepareDevice: async (args, _budgets, _deps, { options: context }) => {
+      context.state.boot = await new DeviceBootService({
+        deviceManager: deviceUtils,
+        deviceMatcher: matcher,
+        deviceCreationGate: { isCreationAllowed: () => false, describeSource: () => "test" },
+        deviceProvisioner: {
+          provision: async () => {
+            throw new Error("unexpected provision");
+          },
+        },
+        matchingStrategy: "LATEST",
+        timer,
+        invalidateAndroidDeviceList: () => {},
+      }).boot({ platform: "android", name: args.avdName });
+      throw new Error("unexpected boot success");
+    },
+  });
+  const rejected = await handlers
+    .getAndroidHandler({ avdName: "Pixel_A" })
+    .catch((error: unknown) => error);
+  expect(launched.killed).toBe(true);
+  expect(acquisitionFailureDeviceLeft(rejected)).toBe("shutdown");
+  expect(errorMessage(rejected)).toContain("failed to become ready within 1584ms");
+  expect(errorMessage(rejected)).toContain(
+    'Next step: retry getAndroid with the same avdName ("Pixel_A").',
+  );
+  const wire = shapeToolCallError(rejected, { toolName: "getAndroid", source: "MCP" });
+  expect(JSON.parse(wire.content[0].text)).toMatchObject({
+    success: false,
+    deviceLeft: "shutdown",
+  });
+});

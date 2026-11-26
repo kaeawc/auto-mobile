@@ -23,6 +23,7 @@ import { ProxyToolRouting } from "./mcpProxy/ProxyToolRouting";
 import type { DaemonMcpProxyTestInternals } from "./proxy/DaemonMcpProxyTestInternals";
 import { DEVICE_CLEANUP_WAIT_BUDGET_MS } from "./proxy/DeviceCleanupWait";
 import type { DaemonBoundSessionExpiredError } from "./proxy/DaemonBoundSessionExpiredError";
+import type { DaemonConnectionSessionReleasedError } from "./proxy/DaemonConnectionSessionReleasedError";
 import { withLostSessionPlatform } from "./proxy/lostSessionPlatform";
 import { type OtherHeldSession } from "./proxy/ProxySessionState";
 import { type LivenessHandover } from "./proxyLivenessRecovery";
@@ -358,11 +359,14 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Name a lost watchOS, tvOS or visionOS session's platform on its ownership-loss error, as
+   * Name a lost watchOS, tvOS or visionOS session's platform on its ownership-loss or
+   * no-active-session error (#19234), as
    * {@link callTool} does, for the `tools/list` and resource handlers (#19211). Android and
    * iOS losses are returned unchanged.
    */
-  withLostSessionPlatform(error: DaemonBoundSessionExpiredError): DaemonBoundSessionExpiredError {
+  withLostSessionPlatform<
+    E extends DaemonBoundSessionExpiredError | DaemonConnectionSessionReleasedError,
+  >(error: E): E {
     withLostSessionPlatform(error, this.runtime.sessionApplePlatforms);
     return error;
   }

@@ -26,7 +26,7 @@ host_heavy_cores() {
 # Whether another live process holds a slot in the pool (this process's own slots do not count).
 host_heavy_pool_shared() {
   local coordination path owner
-  coordination="${AUTOMOBILE_COORDINATION_DIR:-${AUTO_MOBILE_COORDINATION_DIR:-${HOME}/.auto-mobile}}"
+  coordination="$(host_slots_coordination_dir)" || return 1
   for path in "$coordination"/test-slots/*; do
     [[ -r "$path/owner.pid" ]] || continue
     owner=""

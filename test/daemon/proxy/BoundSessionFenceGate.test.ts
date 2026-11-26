@@ -73,6 +73,17 @@ describe("BoundSessionFenceGate", () => {
     };
     expect(() => h.gate.withBoundSessionUuid({})).toThrow(DaemonConnectionSessionReleasedError);
     expect(h.state.releaseSurfacedFor).toBe("released");
+    // The released session rides along so the proxy can name its platform (#19234).
+    h.state.releaseSurfacedFor = undefined;
+    const implicit = (() => {
+      try {
+        h.gate.withBoundSessionUuid({});
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    })();
+    expect(implicit).toMatchObject({ sessionUuid: "released", reason: "idle_timeout" });
     expect(() => h.gate.withBoundSessionUuid({ sessionUuid: "released" })).toThrow(
       DaemonBoundSessionExpiredError,
     );

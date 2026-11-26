@@ -2,7 +2,8 @@ import { ActionableError, type BootedDevice, type ObserveResult } from "../../..
 import { logger } from "../../../utils/logger";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../../utils/toolUtils";
 import { getSystemTrayDependencies } from "./dependencies";
-import { observeSystemTray, sleep } from "./runtime";
+import { sleep } from "./runtime";
+import { readWatchNow } from "./watchRead";
 import { isWatchAppList, isWearHierarchy, WEAR_SYSTEM_UI, watchStreamRoot } from "./watchHierarchy";
 
 const BACK = "shell input keyevent 4";
@@ -52,12 +53,7 @@ function isAppInFront({ viewHierarchy, activeWindow }: ObserveResult): boolean {
 }
 
 function readWatch(device: BootedDevice, signal?: AbortSignal): Promise<ObserveResult> {
-  return observeSystemTray(
-    getSystemTrayDependencies().observeScreenFactory(device),
-    0,
-    signal,
-    true,
-  );
+  return readWatchNow(device, signal);
 }
 
 /** Press one key, then wait for the screen to leave `from`. */

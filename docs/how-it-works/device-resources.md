@@ -60,9 +60,15 @@ guaranteed.
 A single images background fetch continues after the read deadline, bounded by
 `ANDROID_INVENTORY_BACKGROUND_CAP_MS` (30,000 ms). Its completed stage is retained for
 `ANDROID_INVENTORY_STAGE_TTL_MS` (2,500 ms), so a retry shortly after completion normally
-returns the full catalog without starting new children. A later read that outlasts its budget
-returns the last complete result while its refresh continues; AVD lifecycle invalidation drops it. Provenance callers wait at most
-2,000 ms while one shared fetch continues for at most `ANDROID_AVD_PROVENANCE_FETCH_CAP_MS`
+returns the full catalog without starting new children.
+
+A later read that outlasts its budget returns the last complete images while its refresh
+continues, and uses the refresh's catalog once the refresh has read it. Its configured-inventory
+observation reports `complete: false` with `code: "timeout"`, the retry hints and `ageMs` (time
+since that result completed), and the resource does not cache it. A refresh that fails or hits
+the cap drops the kept result, as does AVD lifecycle invalidation.
+
+Provenance callers wait at most 2,000 ms while one shared fetch continues for at most `ANDROID_AVD_PROVENANCE_FETCH_CAP_MS`
 (30,000 ms); success is retained until AVD lifecycle invalidation and failure cools down for
 `ANDROID_AVD_PROVENANCE_FAILURE_COOLDOWN_MS` (5,000 ms). Invalidation and daemon shutdown
 abort these shared children. A caller cancellation abandons only that caller's wait.

@@ -63,7 +63,8 @@ import { SingleFlight } from "../utils/cache/SingleFlight";
 export const ANDROID_PROVISIONING_CATALOG_BUDGET_MS = 9_000;
 export const ANDROID_INVENTORY_BACKGROUND_CAP_MS = 30_000;
 // The stage includes configured images, so it uses the same 2.5s freshness bound. A read that
-// misses it and outlasts its budget falls back to the last complete result instead (#19437).
+// misses it and outlasts its budget falls back to the last complete result, labelled stale with its
+// age, until a refresh fails, hits its cap or lifecycle invalidation drops it (#19437).
 export const ANDROID_INVENTORY_STAGE_TTL_MS = 2_500;
 
 const ANDROID_DEVICE_IMAGE_RESOURCE_CACHE_TTL_MS = 2_500; // Stay below adb's ~5s device-list cache.
@@ -77,8 +78,8 @@ interface AndroidBackgroundFetch {
 interface AndroidImageCacheState {
   background?: AndroidBackgroundFetch;
   stage?: TTLCache<string, PlatformResourceResult>;
-  /** The last complete background result, kept until lifecycle invalidation (#19437). */
-  lastComplete?: PlatformResourceResult;
+  /** The last complete background result, kept until a refresh fails or invalidation (#19437). */
+  lastComplete?: { result: PlatformResourceResult; completedAt: number };
   cache: TTLCache<string, PlatformResourceResult> | null;
   singleFlight: SingleFlight<string, PlatformResourceResult>;
   generation: number;
@@ -621,6 +622,10 @@ function startAndroidBackgroundFetch({
         }
         return result;
       } catch (error) {
+        if (generation === state.generation) {
+          // A capped or failed refresh must surface, not hide behind an ever-older result.
+          state.lastComplete = undefined;
+        }
         if (hardCapExpired) {
           logger.warn("Android inventory background fetch reached its 30000ms hard cap", error);
           return incompleteAndroidResource(
@@ -658,20 +663,49 @@ function startAndroidBackgroundFetch({
   return fetch;
 }
 
-/** Stage a complete background result; keep it as the last complete one when its inventory is. */
+/**
+ * Stage a complete background result. It becomes the last complete one when its inventory is;
+ * an incomplete inventory drops the previous one so readers see the failure.
+ */
 function stageAndroidResult(
   state: AndroidImageCacheState,
   timer: Timer,
   result: PlatformResourceResult,
 ): void {
+  state.lastComplete =
+    result.catalogObservation.catalogComplete && result.inventoryObservation.complete
+      ? { result, completedAt: timer.now() }
+      : undefined;
   if (!result.catalogObservation.catalogComplete) {
     return;
   }
   state.stage ??= new TTLCache(timer, { ttlMs: ANDROID_INVENTORY_STAGE_TTL_MS });
   state.stage.set("android", result);
-  if (result.inventoryObservation.complete) {
-    state.lastComplete = result;
-  }
+}
+
+/** The last complete inventory, labelled stale with its age; a fresher catalog wins. */
+function staleAndroidResource(
+  lastComplete: { result: PlatformResourceResult; completedAt: number },
+  ageMs: number,
+  budgetMs: number,
+  catalog: ProvisioningCatalog | undefined,
+): PlatformResourceResult {
+  return {
+    ...lastComplete.result,
+    provisioningCatalog: catalog ?? lastComplete.result.provisioningCatalog,
+    catalogObservation: { catalogComplete: true },
+    inventoryObservation: {
+      complete: false,
+      error: {
+        code: "timeout",
+        message: `Android configured-device inventory refresh exceeded the ${budgetMs}ms resource budget; returning the last complete inventory, observed ${ageMs}ms ago.`,
+        retryable: true,
+        retryAfterMs: ANDROID_INVENTORY_RETRY_AFTER_MS,
+        missing: ["configuredInventory"],
+        ageMs,
+      },
+    },
+  };
 }
 
 function supersededAndroidResource(
@@ -759,11 +793,12 @@ async function computeAndroidResource(options: {
     });
   } catch (error) {
     if (state.lastComplete) {
+      const ageMs = Math.max(0, timer.now() - state.lastComplete.completedAt);
       logger.warn(
-        `[DeviceImageResources] Android device-image resource generation exceeded ${budgetMs}ms; returning the last complete inventory while the refresh continues`,
+        `[DeviceImageResources] Android device-image resource generation exceeded ${budgetMs}ms; returning the ${ageMs}ms-old last complete inventory as stale while the refresh continues`,
         error,
       );
-      return state.lastComplete;
+      return staleAndroidResource(state.lastComplete, ageMs, budgetMs, background.catalog);
     }
     logger.warn(
       `[DeviceImageResources] Android device-image resource generation exceeded ${budgetMs}ms; returning retryable incomplete catalog`,

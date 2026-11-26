@@ -99,7 +99,7 @@ Prototype requests refuse `localhost` and loopback addresses as `blocked_destina
 transports, so call the fixture at `http://<host-lan-ip>:8787` throughout. It serves `GET /items` (two seed items),
 `POST /items` (`{"name"}` appends and returns the item), `GET /fail` (500 with a 400 KB body) and
 `GET /reset` (restore seeds). Its stdout logs every request, which is the ground truth for which
-transport reached the host.
+transport reached the host. It is bound to the LAN address, so stop it after the round.
 
 **Spec.** One screen, id `req-acceptance`, state `{"status":"idle","name":""}`, data `{"items":[]}`,
 `storage {"version":1,"keys":["state:name","data:/items"]}`:

@@ -32,7 +32,8 @@ if (!hostname || hostname.startsWith("--")) {
   console.error("--host needs an address, e.g. --host 0.0.0.0");
   process.exit(2);
 }
-const positional = args.filter((_, index) => index !== hostFlag && index !== hostFlag + 1);
+const positional =
+  hostFlag === -1 ? args : args.filter((_, index) => index !== hostFlag && index !== hostFlag + 1);
 const port = Number(positional[0] ?? 8787);
 let items: Item[] = SEED.map((item) => ({ ...item }));
 let nextId = SEED.length + 1;

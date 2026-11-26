@@ -466,8 +466,11 @@ static int datagram_out(int fd, const struct sockaddr *to) {
 /// Gate before I/O on a shaped (remote) stream: a live switch to offline also stops connections
 /// opened before it (#19120). Returns 1 with errno set while the socket's profile is offline.
 /// Loopback streams are never shaped, and the data stays queued, so I/O resumes once online.
+static int sock_fd(int fd);
 static int stream_offline(int fd) {
-    if (!shaped(fd) || !for_fd(fd).offline || is_dgram(fd)) return 0;
+    // The flag outlives a descriptor reused without our close (dup2, close$NOCANCEL): confirm it
+    // is still a socket, a check paid only on shaped descriptors while offline.
+    if (!shaped(fd) || !for_fd(fd).offline || is_dgram(fd) || !sock_fd(fd)) return 0;
     errno = ENETDOWN;
     return 1;
 }
@@ -515,15 +518,22 @@ static void pace(int fd, ssize_t bytes, int sending);
 
 /// The device-wide token bucket: "link busy until" times (CLOCK_MONOTONIC ns) per direction, in a
 /// file mapped by every shaped process, so concurrent senders in different processes (an app and
-/// WebKit's networking process) share one up and one down rate (#19120). `boot` resets the times a
-/// previous host boot left behind. Without the file the bucket is per process.
+/// WebKit's networking process) share one up and one down rate (#19120). The times are reset when
+/// the host boot (`boot`) or the profile file's modification time (`gen`) differs from the one that
+/// wrote them, and a time further ahead than one reservation could owe is treated as stale, so a
+/// process killed mid-sleep or a replaced profile never stalls the next one. Without the file the
+/// bucket is per process.
 typedef struct {
     _Atomic uint64_t boot;
     _Atomic int64_t free_ns[2]; // [0] down, [1] up
+    _Atomic int64_t gen;        // profile mtime (ns) the times were reserved under
 } bucket_t;
 static bucket_t g_local_bucket;
 static bucket_t *g_bucket;
 static pthread_once_t g_bucket_once = PTHREAD_ONCE_INIT;
+// Slack beyond MAX_BACKLOG reservations at the current rate before a busy-until time is stale.
+#define STALE_SLACK_NS 5000000000LL
+#define MAX_BACKLOG 4
 
 static uint64_t boot_id(void) {
     struct timeval tv = {0};
@@ -548,24 +558,45 @@ static void map_bucket(void) {
     if (mem == MAP_FAILED) return;
     bucket_t *b = mem;
     uint64_t boot = boot_id(), seen = atomic_load(&b->boot);
-    if (seen != boot && atomic_compare_exchange_strong(&b->boot, &seen, boot)) {
+    if (seen != boot) {
+        // Clear the previous boot's times before publishing the new boot, so no process reserves
+        // against them once it sees the current boot.
         atomic_store(&b->free_ns[0], 0);
         atomic_store(&b->free_ns[1], 0);
+        atomic_compare_exchange_strong(&b->boot, &seen, boot);
     }
     g_bucket = b;
+}
+
+/// The loaded profile's identity: its file's modification time in ns.
+static int64_t profile_gen(void) {
+    pthread_mutex_lock(&g_lock);
+    int64_t gen = (int64_t)g_mtime.tv_sec * 1000000000 + g_mtime.tv_nsec;
+    pthread_mutex_unlock(&g_lock);
+    return gen;
 }
 
 /// Reserves `bytes` at `rate` bytes per second; returns how long to wait for the link.
 static double reserve(int sending, ssize_t bytes, long rate) {
     pthread_once(&g_bucket_once, map_bucket);
+    int64_t gen = profile_gen(), seen = atomic_load(&g_bucket->gen);
+    if (gen > seen) {
+        // A newer profile: times reserved under the previous one no longer apply.
+        atomic_store(&g_bucket->free_ns[0], 0);
+        atomic_store(&g_bucket->free_ns[1], 0);
+        atomic_compare_exchange_strong(&g_bucket->gen, &seen, gen);
+    }
     _Atomic int64_t *slot = &g_bucket->free_ns[sending ? 1 : 0];
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     int64_t t = (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
     int64_t cost = (int64_t)((double)bytes * 1e9 / (double)rate);
+    int64_t stale = t + MAX_BACKLOG * cost + STALE_SLACK_NS;
     int64_t cur = atomic_load(slot), next;
     do {
-        next = (cur > t ? cur : t) + cost;
+        // A time further ahead than live senders could owe was left by a dead process or an
+        // earlier boot's clock: start from now.
+        next = (cur > t && cur <= stale ? cur : t) + cost;
     } while (!atomic_compare_exchange_weak(slot, &cur, next));
     return (double)(next - t) / 1e9;
 }
@@ -1005,5 +1036,4 @@ __attribute__((constructor)) static void netshape_init(void) {
             close(fd);
         }
     }
-    (void)sock_fd;
 }

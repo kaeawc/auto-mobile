@@ -58,7 +58,9 @@ loss_pct=2
 
 Latency applies to the handshake and to each request/response turnaround. Bandwidth is a token
 bucket per direction. Every shaped process maps the same bucket file beside the profile. A process
-that cannot open that file keeps its own bucket. While offline, the shaper refuses new connections.
+that cannot open that file keeps its own bucket. The bucket resets when the host reboots or the
+profile file changes. A reservation further ahead than four of the caller's own sends plus 5 s
+counts as stale and restarts from now, so a process killed mid-wait does not stall the next one. While offline, the shaper refuses new connections.
 Send and receive calls on open remote TCP streams then fail with `ENETDOWN` until the profile is
 back online. `loss_pct` times out that percent of new TCP connections and drops that percent of
 UDP datagrams.

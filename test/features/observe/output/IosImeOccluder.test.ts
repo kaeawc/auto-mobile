@@ -11,6 +11,9 @@ import { DefaultObserveElementCollector } from "../../../../src/features/observe
 import {
   iosKeyboardVisibleHierarchy,
   iosKeyboardMinimizedHierarchy,
+  iosKeyboardDockedSeHierarchy,
+  iosKeyboardOneHandedSeHierarchy,
+  iosKeyboardDockedLandscapeHierarchy,
 } from "../../../fixtures/observe/iosKeyboardStates";
 import { duoInnerKeyboardCapture } from "../../../fixtures/observe/iosKeyboardDuoInner";
 import type { ObservationInsets } from "../../../../src/models/ObservationInsets";
@@ -121,6 +124,33 @@ describe("real raw iOS keyboard captures", () => {
       expect<unknown>(getVisibleIosImeBounds(ime!, { width: 402, height: 874 })).toEqual(visible);
     },
   );
+});
+
+// #19362: no safe area in these captures, so the 28 pt margin is measured from the screen bottom.
+describe("docked keyboard captures across iPhone shapes", () => {
+  test.each([
+    ["home-button iPhone SE", iosKeyboardDockedSeHierarchy, [4, 458, 372, 674], [0, 407, 375, 667]],
+    // Keys span 85 percent; the gray strip beside them is keyboard chrome, so it covers the width.
+    [
+      "one-handed iPhone SE",
+      iosKeyboardOneHandedSeHierarchy,
+      [55, 458, 375, 674],
+      [0, 407, 375, 667],
+    ],
+    // Keys span 83 percent and the container ends 3 pt above the screen bottom.
+    [
+      "Face ID iPhone in landscape",
+      iosKeyboardDockedLandscapeHierarchy,
+      [77, 227, 799, 387],
+      [0, 222, 874, 402],
+    ],
+  ] as const)("%s covers the full width to the bottom edge", (_name, hierarchy, keys, cover) => {
+    const size = { width: hierarchy.screenWidth!, height: hierarchy.screenHeight! };
+    const elements = new DefaultObserveElementCollector().collect(hierarchy, "ios");
+    const ime = getImeOccluder(elements!);
+    expect<unknown>(ime!.bounds).toEqual(keys);
+    expect<unknown>(getIosImeOccluder(ime!, size).bounds).toEqual(cover);
+  });
 });
 
 // Synthetic geometry covers clipping and invalid shapes absent from the real captures.

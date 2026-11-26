@@ -48,10 +48,14 @@ export const IOS_PARITY_CASES = ANDROID_PARITY_CASES.filter(
 export const IOS_PARITY_FONT_CSS =
   '[data-chrome="screen"]{font-family:"DejaVu Sans",sans-serif!important}*{caret-color:transparent!important}';
 
-/** Keep the iOS skin and safe-area environment while removing the decorative frame. */
+/**
+ * Keep the iOS skin and safe-area environment while removing the decorative frame. The goldens'
+ * Viewer app ignores the safe area, so the window draws edge to edge.
+ */
 export function iosParityHtml(entry: AndroidParityCase): string {
   const still = renderPrototypeStill(contentOnly(androidParitySpec(entry)), {
     frame: "iphone-16",
+    edgeToEdge: true,
     mode: entry.mode ?? "light",
     glyphs: materialIconGlyphs(),
   });

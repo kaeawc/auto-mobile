@@ -64,8 +64,11 @@ export function withLaterMinStrut(
   const outer: Record<string, string> = {};
   const inner: Record<string, string> = {};
   for (const [key, value] of Object.entries(element.style)) {
-    (ROW_FACING.test(key) ? outer : inner)[key] = value;
+    (ROW_FACING.test(key) || key === GRID_AREA ? outer : inner)[key] = value;
   }
+  // `grid-area` (a box child's shared `cell`) moved outward above: the wrapper is the parent box's
+  // grid item, so it keeps that placement to overlap its siblings, while the node takes its own
+  // `1 / 1` inside the wrapper's grid (see `cell`).
   // A width here is a component default or a dp width the strut now holds: the node stretches
   // across the cell instead, as the folded minimum replaced that default before.
   delete inner.width;

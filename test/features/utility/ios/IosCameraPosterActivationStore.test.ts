@@ -67,16 +67,36 @@ test("the gate is copied atomically to one stable path outside the build cache",
 test("activations round-trip per simulator and list by udid", () => {
   const { store } = setup();
   expect(store.list()).toEqual([]);
-  store.write(udid, { gate: "/g.dylib", launchctlBefore: "/a.dylib" });
-  expect(store.read(udid)).toEqual({ gate: "/g.dylib", launchctlBefore: "/a.dylib" });
+  store.write(udid, { gate: "/g.dylib" });
+  expect(store.read(udid)).toEqual({ gate: "/g.dylib" });
   expect(store.list()).toEqual([udid]);
   store.remove(udid);
   expect(store.read(udid)).toBeUndefined();
   expect(store.list()).toEqual([]);
 });
 
-test("a malformed record reads as no activation", () => {
+test("a malformed record reads as no activation and is deleted", () => {
   const { fs, store } = setup();
-  fs.files.set(join(directory, "devices", `${udid}.json`), JSON.stringify({ gate: 1 }));
+  const record = join(directory, "devices", `${udid}.json`);
+  fs.files.set(record, JSON.stringify({ gate: 1 }));
   expect(store.read(udid)).toBeUndefined();
+  expect(fs.files.has(record)).toBe(false);
+});
+
+test("a corrupt record reads as no activation instead of throwing, and is deleted (#19119)", () => {
+  const { fs, store } = setup();
+  const record = join(directory, "devices", `${udid}.json`);
+  fs.files.set(record, '{"gate":"/g.dyl');
+  expect(store.read(udid)).toBeUndefined();
+  expect(fs.files.has(record)).toBe(false);
+  expect(store.list()).toEqual([]);
+});
+
+test("a record an older daemon wrote with launchctlBefore still reads its gate", () => {
+  const { fs, store } = setup();
+  fs.files.set(
+    join(directory, "devices", `${udid}.json`),
+    JSON.stringify({ gate: "/g.dylib", launchctlBefore: "" }),
+  );
+  expect(store.read(udid)).toEqual({ gate: "/g.dylib" });
 });

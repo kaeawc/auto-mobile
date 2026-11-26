@@ -48,14 +48,19 @@ of each app without another launchd change.
 ### Undo
 
 Each activation is recorded in `ios-camera-poster-active/devices/<udid>.json`
-(`IosCameraPosterActivationStore`): the gate path and the `DYLD_INSERT_LIBRARIES` value before
-activation. Every clear path (`setDeviceState` clear, `killDevice`, session release or rebind) goes
-through the registry, which then calls `deactivate`. It removes only the gate entry from
-`DYLD_INSERT_LIBRARIES`, keeping any other inserted library, or unsets the variable when nothing
-else is left. It then unsets both poster variables and drops the record. `setDeviceState` clear
-waits for this; the other paths finish it in the background. Daemon startup removes the
-`devices` config directory and undoes every recorded activation, because the previous daemon's
-posters died with its registry.
+(`IosCameraPosterActivationStore`): the gate path. A record that cannot be read counts as no
+activation and is deleted. Activation and deactivation of one simulator run one at a time, so a
+clear during an activation waits for it and then undoes it. Every clear path (`setDeviceState`
+clear, `killDevice`, session release or rebind) goes through the registry, which then calls
+`deactivate`. It removes only the gate entry from `DYLD_INSERT_LIBRARIES`, keeping any other
+inserted library, or unsets the variable when nothing else is left. It then unsets both poster
+variables and drops the record. `setDeviceState` clear waits for this; the other paths finish it in
+the background.
+
+Daemon startup removes the `devices` config directory and undoes every recorded activation, because
+the previous daemon's posters died with its registry. When an undo fails, the record is dropped only
+if simctl no longer lists the simulator as Booted; a booted simulator keeps it for the next clear or
+start.
 
 ### Boots
 

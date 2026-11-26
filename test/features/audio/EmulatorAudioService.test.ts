@@ -904,6 +904,22 @@ describe("EmulatorAudioService iOS Simulators over the host loopback", () => {
     expect(hostLoopbackDevices).toEqual([SIM_B]);
   });
 
+  test("a capture passes the session's warnings through (#19115)", async () => {
+    const { service } = setup(
+      {},
+      (session) => {
+        session.captureRoute = "process-tap";
+        session.captureWarnings = ["System Audio Recording is denied"];
+      },
+      [5554],
+      undefined,
+      true,
+    );
+    expect((await service.capture(SIM_B, { durationMs: 10 })).warnings).toEqual([
+      "System Audio Recording is denied",
+    ]);
+  });
+
   test("a failed host-loopback injection preserves its error without checking an emulator PID", async () => {
     const { service, sessions, lookups, guestCapture } = setup(
       {},

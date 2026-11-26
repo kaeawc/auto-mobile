@@ -46,5 +46,7 @@ export const captureAudioResultSchema = z
     route: captureRoute,
     path: z.string().optional(),
     sizeBytes: z.number().optional(),
+    /** Why the audio may not be what the device played, such as a missing capture permission. */
+    warnings: z.array(z.string()).optional(),
   })
   .passthrough();

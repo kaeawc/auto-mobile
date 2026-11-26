@@ -155,6 +155,8 @@ export interface CaptureResult {
   timedOut: boolean;
   /** How an iOS Simulator capture was taken, when it differs from the session's route. */
   route?: "process-tap" | "host-loopback";
+  /** Why the audio may not be what the device played, such as a missing capture permission. */
+  warnings?: string[];
 }
 
 /**

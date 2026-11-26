@@ -52,6 +52,21 @@ export interface HostLoopbackAudioSessionDeps {
 /** How a simulator capture was taken. */
 export type CaptureRoute = "process-tap" | "host-loopback";
 
+/**
+ * Without the System Audio Recording permission a process tap delivers silence, which reads the same
+ * as an app that played nothing (#19115).
+ */
+function capturePermissionWarning(helper: RunningLoopbackHelper): string | undefined {
+  const permission = helper.capturePermission();
+  if (permission === undefined || permission === "authorized") {
+    return undefined;
+  }
+  return (
+    `System Audio Recording is ${permission} for the audio-loopback helper, so the capture may be ` +
+    "silence. Allow it in System Settings > Privacy & Security > Screen & System Audio Recording."
+  );
+}
+
 type EarlyEnd = Exclude<InjectionResult["reason"], "completed">;
 
 /** How `feed` learns the injection ended and reports playback progress. */
@@ -228,10 +243,12 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.byteLength & ~1)),
     );
     const expected = Math.floor((options.durationMs * sampleRate) / 1000);
+    const warning = route === "process-tap" ? capturePermissionWarning(helper) : undefined;
     return {
       pcm: { sampleRate, channels: 1, samples },
       timedOut: timedOut || samples.length < expected,
       route,
+      ...(warning ? { warnings: [warning] } : {}),
     };
   }
 

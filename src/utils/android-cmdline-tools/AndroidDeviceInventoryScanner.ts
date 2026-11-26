@@ -213,6 +213,8 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
   private modelNameCache = new Map<string, string>();
   private architectureCache = new Map<string, string>();
   private runtimeFactsCache = new Map<string, AndroidRuntimeFacts>();
+  /** Per-serial eviction generation: a read that straddles an eviction must not cache. */
+  private evictionEpochs = new Map<string, number>();
 
   constructor(private readonly deps: AndroidDeviceInventoryDeps) {}
 
@@ -706,6 +708,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
     if (cached) {
       return cached;
     }
+    const epoch = this.beginRead(device.deviceId);
     const facts = await readAndroidRuntimeFacts(this.deps.adbFactory().create(device), {
       timeoutMs,
       signal,
@@ -717,10 +720,22 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       facts.screenWidth,
       facts.screenDensity,
     ].every((fact) => fact !== undefined);
-    if (cacheKey && complete) {
+    if (cacheKey && complete && this.readStillCurrent(device.deviceId, epoch)) {
       this.runtimeFactsCache.set(cacheKey, facts);
     }
     return facts;
+  }
+
+  /** Start tracking a read of this serial; pass the result to `readStillCurrent` on completion. */
+  private beginRead(deviceId: string): number {
+    const epoch = this.evictionEpochs.get(deviceId) ?? 0;
+    this.evictionEpochs.set(deviceId, epoch);
+    return epoch;
+  }
+
+  /** False when the serial was evicted (departed) after `beginRead`, so the result is stale. */
+  private readStillCurrent(deviceId: string, epoch: number): boolean {
+    return (this.evictionEpochs.get(deviceId) ?? 0) === epoch;
   }
 
   /** The AVD part of an emulator's info cache key; empty (never cached) while unresolved. */
@@ -750,6 +765,11 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
    */
   private evictDepartedDeviceInfo(devices: BootedDevice[]): void {
     const present = new Set(devices.map((device) => device.deviceId));
+    for (const serial of this.evictionEpochs.keys()) {
+      if (!present.has(serial)) {
+        this.evictionEpochs.set(serial, (this.evictionEpochs.get(serial) ?? 0) + 1);
+      }
+    }
     for (const cache of [this.modelNameCache, this.architectureCache, this.runtimeFactsCache]) {
       for (const key of [...cache.keys()]) {
         if (!present.has(key.split("\0", 1)[0]!)) {
@@ -779,6 +799,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       logger.debug(`Serial-only scan: not asking ${device.deviceId} for its model name`);
       return undefined;
     }
+    const epoch = this.beginRead(device.deviceId);
     try {
       const adbWithDevice = this.deps.adbFactory().create(device);
       const result = await adbWithDevice.executeCommand("shell getprop ro.product.model", {
@@ -791,7 +812,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         logger.debug(`No model name found for ${device.deviceId}`);
         return undefined;
       }
-      if (cacheKey) {
+      if (cacheKey && this.readStillCurrent(device.deviceId, epoch)) {
         this.modelNameCache.set(cacheKey, modelName);
       }
       logger.debug(`Got model name for ${device.deviceId}: "${modelName}"`);
@@ -987,6 +1008,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       // This scan explicitly forbids optional runtime metadata probes.
       return undefined;
     }
+    const epoch = this.beginRead(device.deviceId);
     try {
       const adbWithDevice = this.deps.adbFactory().create(device);
       const result = await adbWithDevice.executeCommand("shell getprop ro.product.cpu.abi", {
@@ -999,7 +1021,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         logger.debug(`No CPU architecture found for ${device.deviceId}`);
         return undefined;
       }
-      if (cacheKey) {
+      if (cacheKey && this.readStillCurrent(device.deviceId, epoch)) {
         this.architectureCache.set(cacheKey, architecture);
       }
       logger.debug(`Got CPU architecture for ${device.deviceId}: "${architecture}"`);

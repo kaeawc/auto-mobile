@@ -274,4 +274,59 @@ describe("DefaultAndroidDeviceInventoryScanner runtime facts (#18988)", () => {
       "shell getprop ro.build.version.sdk",
     );
   });
+  test("a read in flight when its serial is evicted does not refill the cache", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markReached: () => void = () => {};
+    const reached = new Promise<void>((resolve) => {
+      markReached = resolve;
+    });
+    class GatedAdb extends FakeAdbClient {
+      override async executeCommand(
+        ...args: Parameters<FakeAdbClient["executeCommand"]>
+      ): ReturnType<FakeAdbClient["executeCommand"]> {
+        if (args[0] === "shell wm size") {
+          markReached();
+          await gate;
+        }
+        return super.executeCommand(...args);
+      }
+    }
+    const gated = new GatedAdb();
+    gated.setCommandResult("shell getprop ro.build.version.sdk", "24\n");
+    gated.setCommandResult("shell getprop ro.build.version.release", "7.0\n");
+    gated.setCommandResult("shell wm size", fixture("android-display-geometry/wm-size-physical"));
+    gated.setCommandResult(
+      "shell wm density",
+      fixture("android-display-config/density-physical-420"),
+    );
+    const timer = new FakeTimer();
+    const gatedScanner = new DefaultAndroidDeviceInventoryScanner({
+      timer: () => timer,
+      adbFactory: () => new FakeAdbClientFactory(gated),
+      observationSequence: () => ({ next: () => 1 }),
+      avdConfigReader: () => ({ readConfig: async () => null }),
+      getRunningAvdName: async () => ({ name: "hive24" }),
+      isUnknownEmulatorName: (name, deviceId) => name === `Unknown (${deviceId})`,
+      unknownEmulatorName: (deviceId) => `Unknown (${deviceId})`,
+      throwIfAborted: () => {},
+    });
+
+    gated.setDevices([emulator()]);
+    const pending = gatedScanner.getBootedDevicesWithDiagnostics(false, { timeoutMs: 5_000 });
+    await reached;
+    // The device departs (a full listing omits it) while the read is still pending.
+    gated.setDevices([]);
+    await gatedScanner.getBootedDevicesWithDiagnostics(false, { timeoutMs: 5_000 });
+    release();
+    await pending;
+
+    gated.setDevices([emulator()]);
+    await gatedScanner.getBootedDevicesWithDiagnostics(false, { timeoutMs: 5_000 });
+
+    const sizeReads = gated.getInteractionLog().filter((entry) => entry.text === "shell wm size");
+    expect(sizeReads).toHaveLength(2);
+  });
 });

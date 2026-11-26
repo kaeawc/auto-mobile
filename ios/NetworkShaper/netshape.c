@@ -18,8 +18,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #include <sys/time.h>
 #include <sys/uio.h>
 #include <time.h>
@@ -72,7 +74,6 @@ static int g_nrules;
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct timespec g_mtime;
 static double g_next_check;
-static double g_down_free_at, g_up_free_at; // token-bucket "link busy until" times
 #define MAX_FD 8192
 static _Atomic unsigned char g_shaped[MAX_FD]; // 1 = shaped socket, 2 = shaped and last op was send
 static _Atomic signed char g_rule[MAX_FD];     // matching rule index + 1 for the socket's peer, 0 = none
@@ -314,6 +315,13 @@ static int is_remote(const struct sockaddr *sa) {
 
 static int shaped(int fd) { return fd >= 0 && fd < MAX_FD && atomic_load(&g_shaped[fd]); }
 
+static void unshape(int fd) {
+    if (fd < 0 || fd >= MAX_FD) return;
+    atomic_store(&g_shaped[fd], 0);
+    atomic_store(&g_rule[fd], 0);
+    atomic_store(&g_seen[fd], 0);
+}
+
 /// Binds an unbound socket to a free source port in the profile's range, so host packet filters
 /// (pf + dummynet) can shape exactly this app's traffic. Best effort: failures leave it unbound.
 static void bind_port(int fd, const struct sockaddr *dst, const profile_t *p) {
@@ -429,7 +437,7 @@ static int inspect_first(int fd, const void *buf, size_t n) {
     if (!tls_sni(buf, n, name, sizeof name) && !http_host(buf, n, name, sizeof name)) return 0;
     struct sockaddr_storage peer;
     socklen_t len = sizeof peer;
-    if (getpeername(fd, (struct sockaddr *)&peer, &len) != 0) return 0;
+    if (getpeername(fd, (struct sockaddr *)&peer, &len) != 0 || !is_remote((struct sockaddr *)&peer)) return 0;
     learn(name, (struct sockaddr *)&peer);
     int rule = match_rule((struct sockaddr *)&peer);
     int before = atomic_exchange(&g_rule[fd], (signed char)rule);
@@ -460,6 +468,28 @@ static int datagram_out(int fd, const struct sockaddr *to) {
     }
     if (p.loss_pct > 0 && arc4random_uniform(100) < (unsigned)p.loss_pct) return 1;
     return 0; // latency is charged on the receive side (see deliver_at)
+}
+
+/// Gate before I/O on a shaped (remote) stream: a live switch to offline also stops connections
+/// opened before it (#19120). Returns 1 with errno set while the socket's profile is offline.
+/// Loopback streams are never shaped, and the data stays queued, so I/O resumes once online.
+static int stream_offline(int fd) {
+    if (!shaped(fd) || !for_fd(fd).offline || is_dgram(fd)) return 0;
+    // The flag outlives a descriptor reused without our close (dup2, close$NOCANCEL): confirm the
+    // current peer is remote, a check paid only on shaped descriptors while offline. A loopback
+    // (or non-socket) descriptor drops the stale state.
+    struct sockaddr_storage peer;
+    socklen_t len = sizeof peer;
+    if (getpeername(fd, (struct sockaddr *)&peer, &len) != 0) {
+        if (errno == ENOTSOCK) unshape(fd);
+        return 0;
+    }
+    if (!is_remote((struct sockaddr *)&peer)) {
+        unshape(fd);
+        return 0;
+    }
+    errno = ENETDOWN;
+    return 1;
 }
 
 static double wall_s(void) {
@@ -502,6 +532,101 @@ static double cmsg_arrival(const struct msghdr *m) {
 }
 
 static void pace(int fd, ssize_t bytes, int sending);
+
+/// The device-wide token bucket: "link busy until" times (CLOCK_MONOTONIC ns) per direction, in a
+/// file mapped by every shaped process, so concurrent senders in different processes (an app and
+/// WebKit's networking process) share one up and one down rate (#19120). The times are reset when
+/// the host boot (`boot`) or the profile file's modification time (`gen`) differs from the one that
+/// wrote them, and a time further ahead than MAX_BACKLOG socket-buffer-sized reservations could owe
+/// is treated as stale, so a process killed mid-sleep or a replaced profile never stalls the next one. Without the file the
+/// bucket is per process.
+typedef struct {
+    _Atomic uint64_t boot;
+    _Atomic int64_t free_ns[2]; // [0] down, [1] up
+    _Atomic int64_t gen;        // profile mtime (ns) the times were reserved under
+} bucket_t;
+static bucket_t g_local_bucket;
+static bucket_t *g_bucket;
+static pthread_once_t g_bucket_once = PTHREAD_ONCE_INIT;
+// Slack beyond MAX_BACKLOG reservations at the current rate before a busy-until time is stale.
+#define STALE_SLACK_NS 5000000000LL
+#define MAX_BACKLOG 4
+// Largest single reservation: one read returns at most a socket buffer, capped by kern.ipc.maxsockbuf.
+static int64_t g_max_chunk = 8 << 20;
+
+/// Clears the times read as `old` before a new boot or profile generation was published. Only the
+/// process whose CAS published it calls this, and each slot is cleared only from its old value, so
+/// a reservation another process made under the new identity is never erased (an old time the CAS
+/// misses is bounded as stale).
+static void clear_times(bucket_t *b, int64_t old[2]) {
+    for (int i = 0; i < 2; i++) atomic_compare_exchange_strong(&b->free_ns[i], &old[i], 0);
+}
+
+static uint64_t boot_id(void) {
+    struct timeval tv = {0};
+    size_t len = sizeof tv;
+    if (sysctlbyname("kern.boottime", &tv, &len, NULL, 0) != 0) return 0;
+    return (uint64_t)tv.tv_sec * 1000000u + (uint64_t)tv.tv_usec;
+}
+
+static void map_bucket(void) {
+    g_bucket = &g_local_bucket;
+    int64_t maxbuf = 0;
+    size_t maxlen = sizeof maxbuf;
+    if (sysctlbyname("kern.ipc.maxsockbuf", &maxbuf, &maxlen, NULL, 0) == 0 && maxbuf > 0) g_max_chunk = maxbuf;
+    const char *profile = getenv("SIM_RS_NETSHAPE");
+    char path[1024];
+    if (!profile || snprintf(path, sizeof path, "%s.bucket", profile) >= (int)sizeof path) return;
+    int fd = open(path, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+    struct stat st;
+    void *mem = MAP_FAILED;
+    // Every process extends the file to the same size, which keeps the times already in it.
+    if (fstat(fd, &st) == 0 && (st.st_size >= (off_t)sizeof(bucket_t) || ftruncate(fd, sizeof(bucket_t)) == 0))
+        mem = mmap(NULL, sizeof(bucket_t), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    close(fd);
+    if (mem == MAP_FAILED) return;
+    bucket_t *b = mem;
+    uint64_t boot = boot_id(), seen = atomic_load(&b->boot);
+    int64_t old[2] = {atomic_load(&b->free_ns[0]), atomic_load(&b->free_ns[1])};
+    if (seen != boot && atomic_compare_exchange_strong(&b->boot, &seen, boot)) clear_times(b, old);
+    g_bucket = b;
+}
+
+/// The loaded profile's identity: its file's modification time in ns.
+static int64_t profile_gen(void) {
+    pthread_mutex_lock(&g_lock);
+    int64_t gen = (int64_t)g_mtime.tv_sec * 1000000000 + g_mtime.tv_nsec;
+    pthread_mutex_unlock(&g_lock);
+    return gen;
+}
+
+/// Reserves `bytes` at `rate` bytes per second; returns how long to wait for the link.
+static double reserve(int sending, ssize_t bytes, long rate) {
+    pthread_once(&g_bucket_once, map_bucket);
+    int64_t gen = profile_gen(), seen = atomic_load(&g_bucket->gen);
+    // A newer profile: times reserved under the previous one no longer apply.
+    if (gen > seen) {
+        int64_t old[2] = {atomic_load(&g_bucket->free_ns[0]), atomic_load(&g_bucket->free_ns[1])};
+        if (atomic_compare_exchange_strong(&g_bucket->gen, &seen, gen)) clear_times(g_bucket, old);
+    }
+    _Atomic int64_t *slot = &g_bucket->free_ns[sending ? 1 : 0];
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    int64_t t = (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+    int64_t cost = (int64_t)((double)bytes * 1e9 / (double)rate);
+    // Bound by the largest reservation any sharer can make, not this caller's, so a small read
+    // never wipes a live sender's backlog; a blocking write larger than that extends it.
+    int64_t chunk = bytes > g_max_chunk ? bytes : g_max_chunk;
+    int64_t stale = t + MAX_BACKLOG * (int64_t)((double)chunk * 1e9 / (double)rate) + STALE_SLACK_NS;
+    int64_t cur = atomic_load(slot), next;
+    do {
+        // A time further ahead than live senders could owe was left by a dead process or an
+        // earlier boot's clock: start from now.
+        next = (cur > t && cur <= stale ? cur : t) + cost;
+    } while (!atomic_compare_exchange_weak(slot, &cur, next));
+    return (double)(next - t) / 1e9;
+}
 
 /// recv/recvfrom on a delayed UDP socket, through recvmsg so the arrival timestamp is visible.
 static ssize_t udp_recv(int fd, void *b, size_t n, int fl, struct sockaddr *from, socklen_t *fromlen, const profile_t *p) {
@@ -546,19 +671,7 @@ static void pace(int fd, ssize_t bytes, int sending) {
     if (!dgram) atomic_store(&g_shaped[fd], sending ? 2 : 1);
     long rate = sending ? p.up_bps : p.down_bps;
     if (rate <= 0) return;
-    pthread_mutex_lock(&g_lock);
-    double *free_at = sending ? &g_up_free_at : &g_down_free_at;
-    double t = now_s();
-    double start = *free_at > t ? *free_at : t;
-    *free_at = start + (double)bytes / (double)rate;
-    double wait = *free_at - t;
-    pthread_mutex_unlock(&g_lock);
-    sleep_s(wait);
-}
-
-static int sock_fd(int fd) {
-    struct stat st;
-    return fd >= 0 && fstat(fd, &st) == 0 && S_ISSOCK(st.st_mode);
+    sleep_s(reserve(sending, bytes, rate));
 }
 
 static int my_connect(int fd, const struct sockaddr *sa, socklen_t len) {
@@ -583,6 +696,7 @@ static ssize_t my_send(int fd, const void *b, size_t n, int fl) {
         if (gate < 0) return -1;
         if (gate > 0) return (ssize_t)n;
         if (!is_dgram(fd) && inspect_first(fd, b, n) < 0) return -1;
+        if (stream_offline(fd)) return -1;
     }
     if (OUTER(send(fd, b, n, fl))) pace(fd, _r, 1);
     return _r;
@@ -596,6 +710,7 @@ static ssize_t my_sendto(int fd, const void *b, size_t n, int fl, const struct s
         if (gate < 0) return -1;
         if (gate > 0) return (ssize_t)n;
         if (!is_dgram(fd) && inspect_first(fd, b, n) < 0) return -1;
+        if (stream_offline(fd)) return -1;
     }
     if (OUTER(sendto(fd, b, n, fl, to, tl))) pace(fd, _r, 1);
     return _r;
@@ -615,6 +730,7 @@ static ssize_t my_sendmsg(int fd, const struct msghdr *m, int fl) {
         if (gate < 0) return -1;
         if (gate > 0) return m ? iov_total(m->msg_iov, m->msg_iovlen) : 0;
         if (m && m->msg_iovlen > 0 && !is_dgram(fd) && inspect_first(fd, m->msg_iov[0].iov_base, m->msg_iov[0].iov_len) < 0) return -1;
+        if (stream_offline(fd)) return -1;
     }
     if (OUTER(sendmsg(fd, m, fl))) pace(fd, _r, 1);
     return _r;
@@ -624,6 +740,7 @@ DYLD_INTERPOSE(my_sendmsg, sendmsg)
 static ssize_t my_recv(int fd, void *b, size_t n, int fl) {
     ssize_t _r;
     profile_t up;
+    if (g_depth == 0 && stream_offline(fd)) return -1;
     if (g_depth == 0 && udp_delayed(fd, &up)) return udp_recv(fd, b, n, fl, NULL, NULL, &up);
     if (OUTER(recv(fd, b, n, fl))) pace(fd, _r, 0);
     return _r;
@@ -633,6 +750,7 @@ DYLD_INTERPOSE(my_recv, recv)
 static ssize_t my_recvfrom(int fd, void *b, size_t n, int fl, struct sockaddr *from, socklen_t *fl2) {
     ssize_t _r;
     profile_t up;
+    if (g_depth == 0 && stream_offline(fd)) return -1;
     if (g_depth == 0 && udp_delayed(fd, &up)) return udp_recv(fd, b, n, fl, from, fl2, &up);
     if (OUTER(recvfrom(fd, b, n, fl, from, fl2))) pace(fd, _r, 0);
     return _r;
@@ -642,6 +760,7 @@ DYLD_INTERPOSE(my_recvfrom, recvfrom)
 static ssize_t my_recvmsg(int fd, struct msghdr *m, int fl) {
     ssize_t _r;
     profile_t up;
+    if (g_depth == 0 && stream_offline(fd)) return -1;
     int delayed = g_depth == 0 && udp_delayed(fd, &up);
     if (OUTER(recvmsg(fd, m, fl))) {
         if (delayed && _r >= 0 && !(fl & MSG_PEEK)) deliver_at(cmsg_arrival(m), &up);
@@ -714,7 +833,7 @@ DYLD_INTERPOSE(my_recvmsg_x, recvmsg_x)
 
 static ssize_t my_write(int fd, const void *b, size_t n) {
     ssize_t _r;
-    if (g_depth == 0 && shaped(fd) && !is_dgram(fd) && inspect_first(fd, b, n) < 0) return -1;
+    if (g_depth == 0 && ((shaped(fd) && !is_dgram(fd) && inspect_first(fd, b, n) < 0) || stream_offline(fd))) return -1;
     if (OUTER(write(fd, b, n)) && shaped(fd)) pace(fd, _r, 1);
     return _r;
 }
@@ -722,6 +841,7 @@ DYLD_INTERPOSE(my_write, write)
 
 static ssize_t my_read(int fd, void *b, size_t n) {
     ssize_t _r;
+    if (g_depth == 0 && stream_offline(fd)) return -1;
     if (OUTER(read(fd, b, n)) && shaped(fd)) pace(fd, _r, 0);
     return _r;
 }
@@ -729,7 +849,7 @@ DYLD_INTERPOSE(my_read, read)
 
 static ssize_t my_writev(int fd, const struct iovec *v, int c) {
     ssize_t _r;
-    if (g_depth == 0 && shaped(fd) && c > 0 && !is_dgram(fd) && inspect_first(fd, v[0].iov_base, v[0].iov_len) < 0) return -1;
+    if (g_depth == 0 && ((shaped(fd) && c > 0 && !is_dgram(fd) && inspect_first(fd, v[0].iov_base, v[0].iov_len) < 0) || stream_offline(fd))) return -1;
     if (OUTER(writev(fd, v, c)) && shaped(fd)) pace(fd, _r, 1);
     return _r;
 }
@@ -737,13 +857,14 @@ DYLD_INTERPOSE(my_writev, writev)
 
 static ssize_t my_readv(int fd, const struct iovec *v, int c) {
     ssize_t _r;
+    if (g_depth == 0 && stream_offline(fd)) return -1;
     if (OUTER(readv(fd, v, c)) && shaped(fd)) pace(fd, _r, 0);
     return _r;
 }
 DYLD_INTERPOSE(my_readv, readv)
 
 static int my_close(int fd) {
-    if (fd >= 0 && fd < MAX_FD) { atomic_store(&g_shaped[fd], 0); atomic_store(&g_rule[fd], 0); atomic_store(&g_seen[fd], 0); }
+    unshape(fd);
     return close(fd);
 }
 DYLD_INTERPOSE(my_close, close)
@@ -785,11 +906,69 @@ DYLD_INTERPOSE(my_getaddrinfo, getaddrinfo)
 typedef void *DNSServiceRef;
 typedef void (*DNSServiceGetAddrInfoReply)(DNSServiceRef, uint32_t, uint32_t, int32_t, const char *, const struct sockaddr *, uint32_t, void *);
 extern int32_t DNSServiceGetAddrInfo(DNSServiceRef *, uint32_t, uint32_t, uint32_t, const char *, DNSServiceGetAddrInfoReply, void *);
-typedef struct {
+extern void DNSServiceRefDeallocate(DNSServiceRef);
+#define kDNSServiceFlagsShareConnection 0x4000
+// A wrapped query's context lives until the client deallocates its DNSServiceRef, or the shared
+// connection it runs on (which deallocates every query on that connection) (#19120).
+typedef struct dns_ctx {
     DNSServiceGetAddrInfoReply reply;
     void *context;
     double delay; // seconds to hold the first answer (one round trip)
+    DNSServiceRef ref, connection; // the query's ref; the shared connection's ref, or NULL
+    struct dns_ctx *next;
 } dns_ctx_t;
+static dns_ctx_t *g_dns_ctxs;
+static pthread_mutex_t g_dns_lock = PTHREAD_MUTEX_INITIALIZER;
+
+static dns_ctx_t *dns_ctx_new(DNSServiceGetAddrInfoReply reply, void *context, double delay, uint32_t flags, DNSServiceRef *ref) {
+    dns_ctx_t *c = calloc(1, sizeof *c);
+    if (!c) return NULL;
+    c->reply = reply;
+    c->context = context;
+    c->delay = delay;
+    // With kDNSServiceFlagsShareConnection, *ref names the shared connection on input.
+    if ((flags & kDNSServiceFlagsShareConnection) && ref) c->connection = *ref;
+    return c;
+}
+
+/// Records a started query's context (`ok`) under its ref, or frees it: a query that failed to
+/// start never calls back. A started query with no ref to tie it to keeps its context.
+static void dns_ctx_started(dns_ctx_t *c, int ok, DNSServiceRef *ref) {
+    if (!ok) {
+        free(c);
+        return;
+    }
+    if (!ref || !*ref) return;
+    c->ref = *ref;
+    pthread_mutex_lock(&g_dns_lock);
+    c->next = g_dns_ctxs;
+    g_dns_ctxs = c;
+    pthread_mutex_unlock(&g_dns_lock);
+}
+
+static void my_DNSServiceRefDeallocate(DNSServiceRef ref) {
+    DNSServiceRefDeallocate(ref); // no callback runs after this returns
+    if (!ref) return;
+    dns_ctx_t *dead = NULL;
+    pthread_mutex_lock(&g_dns_lock);
+    for (dns_ctx_t **p = &g_dns_ctxs; *p;) {
+        dns_ctx_t *c = *p;
+        if (c->ref == ref || c->connection == ref) {
+            *p = c->next;
+            c->next = dead;
+            dead = c;
+        } else {
+            p = &c->next;
+        }
+    }
+    pthread_mutex_unlock(&g_dns_lock);
+    while (dead) {
+        dns_ctx_t *next = dead->next;
+        free(dead);
+        dead = next;
+    }
+}
+DYLD_INTERPOSE(my_DNSServiceRefDeallocate, DNSServiceRefDeallocate)
 static void dns_reply(DNSServiceRef ref, uint32_t flags, uint32_t ifi, int32_t err, const char *host, const struct sockaddr *addr, uint32_t ttl, void *ctx) {
     dns_ctx_t *c = ctx;
     if (c->delay > 0) {
@@ -814,13 +993,10 @@ static int32_t my_DNSServiceGetAddrInfo(DNSServiceRef *ref, uint32_t flags, uint
     double delay = 0;
     if (host && dns_blocked(host, &delay)) return kDNSServiceErr_NoSuchName;
     if (!reply) return DNSServiceGetAddrInfo(ref, flags, ifi, proto, host, reply, ctx);
-    dns_ctx_t *c = malloc(sizeof *c); // lives as long as the query; small and rare
+    dns_ctx_t *c = dns_ctx_new(reply, ctx, delay, flags, ref);
     if (!c) return DNSServiceGetAddrInfo(ref, flags, ifi, proto, host, reply, ctx);
-    c->reply = reply;
-    c->context = ctx;
-    c->delay = delay;
     int32_t err = DNSServiceGetAddrInfo(ref, flags, ifi, proto, host, dns_reply, c);
-    if (err != 0) free(c); // a query that failed to start never calls back
+    dns_ctx_started(c, err == 0, ref);
     return err;
 }
 DYLD_INTERPOSE(my_DNSServiceGetAddrInfo, DNSServiceGetAddrInfo)
@@ -831,13 +1007,10 @@ static int32_t my_DNSServiceGetAddrInfoEx(DNSServiceRef *ref, uint32_t flags, ui
     double delay = 0;
     if (host && dns_blocked(host, &delay)) return kDNSServiceErr_NoSuchName;
     if (!reply) return DNSServiceGetAddrInfoEx(ref, flags, ifi, proto, host, attr, reply, ctx);
-    dns_ctx_t *c = malloc(sizeof *c);
+    dns_ctx_t *c = dns_ctx_new(reply, ctx, delay, flags, ref);
     if (!c) return DNSServiceGetAddrInfoEx(ref, flags, ifi, proto, host, attr, reply, ctx);
-    c->reply = reply;
-    c->context = ctx;
-    c->delay = delay;
     int32_t err = DNSServiceGetAddrInfoEx(ref, flags, ifi, proto, host, attr, dns_reply, c);
-    if (err != 0) free(c); // a query that failed to start never calls back
+    dns_ctx_started(c, err == 0, ref);
     return err;
 }
 DYLD_INTERPOSE(my_DNSServiceGetAddrInfoEx, DNSServiceGetAddrInfoEx)
@@ -885,5 +1058,4 @@ __attribute__((constructor)) static void netshape_init(void) {
             close(fd);
         }
     }
-    (void)sock_fd;
 }

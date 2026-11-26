@@ -321,6 +321,7 @@ nav:
       - "Prototyping":
           - "Embedding prototypes in an app": using/prototype-embedding.md
           - "Prototype web preview": using/prototype-web-preview.md
+          - "Embedding a prototype on a web page": using/prototype-web-embed.md
           - "Prototype icons": using/prototype-icons.md
           - "Headless prototypes": using/prototype-headless.md
           - "Installing ProtoViewer (Android)": using/protoviewer-install.md

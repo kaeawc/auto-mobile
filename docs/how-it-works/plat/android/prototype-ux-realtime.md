@@ -193,9 +193,20 @@ broadcasts).
   triggering request's placeholders.
 - Actor limits: the backend logs and skips a failing step. A backend holds at most 256 scheduled
   steps; a trigger past that is dropped and logged. Redefining, clearing or ending the session
-  cancels every pending step. Definition refuses `advance` and `notify` until mock polylines and
-  simulated push exist. Actors follow the daemon's timer, not the device
-  clock that `prototype simulate` advances.
+  cancels every pending step. Definition refuses `notify` until simulated push exists. Actors keep
+  a virtual clock that follows the daemon's timer. `prototype simulate advanceTimeMs` also moves it
+  ahead, applies the steps that fall due in order, and reports `actorSteps`. The actors move before
+  the device clock, so a call whose device timer fails still reports `actorSteps`; check it before
+  retrying, since a retry moves the actors again.
+- **Paths** `{name: [{lat, lng}, …]}` (at most 16, each with 2–1000 points) are polylines for the
+  actor step `advance {path, metersPerTick, update, id}` or `advance {path, metersPerTick, room}`.
+  Each run moves the step's own meter cursor `metersPerTick` (at most 100 km) further along the
+  path. It merges `{lat, lng, heading}` into item `id` of collection `update` as a `PATCH` (a
+  broadcast fires only when its `on` lists `PATCH`), or publishes it to `room`. The cursor stops at
+  the end: once it reaches the last point, the step does nothing until a new backend resets it. The
+  cursor moves before the write, so a failed last write (a 404 for a missing item) is not retried. Distances are haversine great-circle
+  lengths, a position is the great-circle intermediate point, and `heading` is the segment's
+  initial bearing in degrees from true north. Lat and lng round to 6 decimals and heading to 0.1°.
 
 The `prototype` tool drives it with host-local actions that make no device request:
 

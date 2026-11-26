@@ -444,3 +444,27 @@ final class CarPlayInputTests: XCTestCase {
         }
     }
 }
+
+final class SimulatorKitLocationTests: XCTestCase {
+    func testXcode27SharedFrameworksComeBeforeTheXcode26Path() {
+        let xcode = "/Applications/Xcode-27.2.0.app/Contents"
+        XCTAssertEqual(
+            SimulatorKitLocation.candidatePaths(developerDirectory: "\(xcode)/Developer"),
+            [
+                "\(xcode)/SharedFrameworks/SimulatorKit.framework/SimulatorKit",
+                "\(xcode)/Developer/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",
+            ]
+        )
+    }
+
+    func testATrailingSlashResolvesTheSamePaths() {
+        let xcode = "/Applications/Xcode.app/Contents"
+        XCTAssertEqual(
+            SimulatorKitLocation.candidatePaths(developerDirectory: "\(xcode)/Developer/"),
+            [
+                "\(xcode)/SharedFrameworks/SimulatorKit.framework/SimulatorKit",
+                "\(xcode)/Developer/Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit",
+            ]
+        )
+    }
+}

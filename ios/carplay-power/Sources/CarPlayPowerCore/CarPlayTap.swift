@@ -124,3 +124,15 @@ public struct CarPlayTapController {
         ))
     }
 }
+
+/// Where SimulatorKit lives for a developer directory, in lookup order. Xcode 27 moved it to
+/// `Contents/SharedFrameworks`; Xcode 26 keeps it under the developer directory (#19117).
+public enum SimulatorKitLocation {
+    public static func candidatePaths(developerDirectory: String) -> [String] {
+        let developer = developerDirectory as NSString
+        return [
+            developer.deletingLastPathComponent + "/SharedFrameworks/SimulatorKit.framework/SimulatorKit",
+            developer.appendingPathComponent("Library/PrivateFrameworks/SimulatorKit.framework/SimulatorKit"),
+        ]
+    }
+}

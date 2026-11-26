@@ -44,12 +44,12 @@ describe("display profiles (#14052)", () => {
     );
     expect(result.status).toBe("applied");
     expect(result.steps.map((step) => [step.step, step.status])).toEqual([
+      ["posture", "applied"],
       ["screenSize", "applied"],
       ["display", "applied"],
       ["cutout", "applied"],
       ["navigationMode", "applied"],
       ["forceDark", "applied"],
-      ["posture", "applied"],
     ]);
     expect(writes()).toEqual([
       "shell wm size 900x2000",
@@ -59,6 +59,20 @@ describe("display profiles (#14052)", () => {
     ]);
     expect(ports.displayConfig.calls).toEqual([{ fontScale: 1.3, density: 480, theme: "dark" }]);
     expect(ports.posture.calls).toEqual(["half_opened"]);
+  });
+
+  test("the posture changes before the size, so the size lands on the panel shown after (#19240)", async () => {
+    const writesBeforePosture: string[][] = [];
+    ports.posture.onSet = () => writesBeforePosture.push(writes());
+    await applyDisplayProfile(emulator, { posture: "closed", screenSize: "900x2000" }, deps());
+    expect(writesBeforePosture).toEqual([[]]);
+    expect(writes()).toEqual(["shell wm size 900x2000"]);
+
+    ports.shell.clearHistory();
+    const reset = await resetDisplayProfile(emulator, deps());
+    // The override is reset on the panel it was applied to, then the posture goes back.
+    expect(reset.steps.map((step) => step.step)).toEqual(["screenSize", "posture"]);
+    expect(ports.posture.current).toBe("opened");
   });
 
   test("reset restores every changed setting, latest first, and a second reset changes nothing", async () => {
@@ -79,12 +93,12 @@ describe("display profiles (#14052)", () => {
 
     const reset = await resetDisplayProfile(emulator, deps());
     expect(reset.steps.map((step) => step.step)).toEqual([
-      "posture",
       "forceDark",
       "navigationMode",
       "cutout",
       "display",
       "screenSize",
+      "posture",
     ]);
     expect(ports.posture.current).toBe("opened");
     expect(ports.displayConfig.calls).toEqual([{ fontScale: "default", theme: "light" }]);

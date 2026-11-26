@@ -11,13 +11,13 @@ import {
 import { basename, dirname, join } from "node:path";
 import { defaultIdGenerator, type IdGenerator } from "../../../utils/IdGenerator";
 import { getTempDir } from "../../../utils/tempDir";
+import { logger } from "../../../utils/logger";
+import { errorMessage } from "../../../utils/describeUnknownError";
 
 /** What a device-wide activation changed in one simulator's launchd environment (#19047). */
 export interface IosCameraPosterActivation {
   /** The gate library path inserted into `DYLD_INSERT_LIBRARIES`. */
   gate: string;
-  /** `launchctl getenv DYLD_INSERT_LIBRARIES` before activation; "" when it was unset. */
-  launchctlBefore: string;
 }
 
 /**
@@ -63,7 +63,7 @@ function isActivation(value: unknown): value is IosCameraPosterActivation {
     return false;
   }
   const record = value as Record<string, unknown>;
-  return typeof record.gate === "string" && typeof record.launchctlBefore === "string";
+  return typeof record.gate === "string";
 }
 
 /**
@@ -82,8 +82,21 @@ export class FileIosCameraPosterActivationStore implements IosCameraPosterActiva
     if (!this.fs.existsSync(path)) {
       return undefined;
     }
-    const parsed: unknown = JSON.parse(this.fs.readFileSync(path, "utf8"));
-    return isActivation(parsed) ? parsed : undefined;
+    try {
+      const parsed: unknown = JSON.parse(this.fs.readFileSync(path, "utf8"));
+      if (isActivation(parsed)) {
+        return { gate: parsed.gate };
+      }
+      logger.warn(`Dropping a malformed camera poster activation record for ${udid}`);
+    } catch (error) {
+      logger.warn(
+        `Dropping an unreadable camera poster activation record for ${udid}: ${errorMessage(error)}`,
+        error,
+      );
+    }
+    // A record that cannot be read describes no activation; keeping it would fail every read.
+    this.remove(udid);
+    return undefined;
   }
 
   write(udid: string, activation: IosCameraPosterActivation): void {

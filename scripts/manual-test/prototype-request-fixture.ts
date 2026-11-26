@@ -2,9 +2,13 @@
  * Local HTTP fixture for the prototype "Data, storage and network" acceptance scenario
  * (skills/manual-test/prototype-acceptance.md, #12531).
  *
- *   bun scripts/manual-test/prototype-request-fixture.ts [port]   (default 8787)
+ *   bun scripts/manual-test/prototype-request-fixture.ts [port] [--host <address>]
  *
- * Routes (JSON, loopback only):
+ * The port defaults to 8787 and the host to 127.0.0.1. Prototype requests refuse loopback
+ * destinations for both transports (#18903), so bind the host's LAN address (or 0.0.0.0) and call
+ * the fixture at that address.
+ *
+ * Routes (JSON):
  *   GET  /items  -> 200 {"items":[{"id","name"}...]}
  *   POST /items  -> 201 the stored item; body {"name": string} is required (400 otherwise)
  *   GET  /fail   -> 500 with a large body, to prove a non-2xx body is never read or capped
@@ -21,7 +25,15 @@ const SEED: readonly Item[] = [
   { id: 2, name: "beta" },
 ];
 
-const port = Number(process.argv[2] ?? 8787);
+const args = process.argv.slice(2);
+const hostFlag = args.indexOf("--host");
+const hostname = hostFlag === -1 ? "127.0.0.1" : args[hostFlag + 1];
+if (!hostname || hostname.startsWith("--")) {
+  console.error("--host needs an address, e.g. --host 0.0.0.0");
+  process.exit(2);
+}
+const positional = args.filter((_, index) => index !== hostFlag && index !== hostFlag + 1);
+const port = Number(positional[0] ?? 8787);
 let items: Item[] = SEED.map((item) => ({ ...item }));
 let nextId = SEED.length + 1;
 
@@ -57,7 +69,7 @@ async function handle(request: Request): Promise<Response> {
 }
 
 const server = Bun.serve({
-  hostname: "127.0.0.1",
+  hostname,
   port,
   async fetch(request) {
     const response = await handle(request);
@@ -68,6 +80,6 @@ const server = Bun.serve({
   },
 });
 
-console.log(`prototype request fixture listening on http://127.0.0.1:${server.port}`);
+console.log(`prototype request fixture listening on http://${hostname}:${server.port}`);
 
 export {};

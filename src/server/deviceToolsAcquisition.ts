@@ -13,6 +13,7 @@ import type { DeviceMatcher } from "../utils/deviceMatcher";
 import type { PlatformDeviceManager } from "../devices/deviceUtils";
 import type { Timer } from "../utils/SystemTimer";
 import type { DeviceBootResult } from "../devices/deviceBootService";
+import { bootTeardownDeviceLeft } from "../devices/bootTeardownDeviceLeft";
 import { BootedDeviceDiscoveryIncompleteError } from "../models/BootedDeviceDiscoveryIncompleteError";
 import { NoMatchingDeviceError } from "../devices/NoMatchingDeviceError";
 import {
@@ -520,8 +521,12 @@ function cancelUnownedBootAfterFailure(
   error: unknown,
   signal: AbortSignal | undefined,
 ): AcquisitionDeviceLeft | undefined {
-  if (!state.boot && state.createdDeviceRollback) {
-    return createdDeviceRollbackDeviceLeft(state.createdDeviceRollback);
+  if (!state.boot) {
+    // No boot result arrived: a createIfMissing rollback reports its outcome, and a boot that
+    // stopped the emulator it launched reports that teardown (#19368).
+    return state.createdDeviceRollback
+      ? createdDeviceRollbackDeviceLeft(state.createdDeviceRollback)
+      : bootTeardownDeviceLeft(error);
   }
   const settlement = cancelUnownedColdBootUnlessRetryable(state.boot, error, signal);
   if (settlement) {

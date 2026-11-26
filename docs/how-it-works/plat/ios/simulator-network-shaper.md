@@ -57,8 +57,11 @@ loss_pct=2
 ```
 
 Latency applies to the handshake and to each request/response turnaround. Bandwidth is a token
-bucket per direction. `loss_pct` times out that percent of new TCP connections and drops that
-percent of UDP datagrams.
+bucket per direction. Every shaped process maps the same bucket file beside the profile. A process
+that cannot open that file keeps its own bucket. While offline, the shaper refuses new connections.
+Send and receive calls on open remote TCP streams then fail with `ENETDOWN` until the profile is
+back online. `loss_pct` times out that percent of new TCP connections and drops that percent of
+UDP datagrams.
 
 ## Lifecycle
 

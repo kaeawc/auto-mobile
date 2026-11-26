@@ -22,6 +22,9 @@ final class PrototypeWebViewNavigation {
     private var ready = false
     private var loading = false
     private var blockedURL: String?
+    /// The navigation state last published, and the title written with it.
+    private var status: String?
+    private var publishedTitle = ""
 
     init(node: PrototypeNode, page: any PrototypeWebPage, publish: @escaping (Update) -> Void) {
         self.node = node
@@ -79,10 +82,22 @@ final class PrototypeWebViewNavigation {
         update("error")
     }
 
+    /// WebKit can set a page's title after the navigation finished, so a loaded page's title is
+    /// written again whenever it changes (#19097). Nothing is written before the page has loaded.
+    func titleChanged() {
+        guard status == "loaded", let key = node.titleKey else { return }
+        let title = Self.boundedTitle(page?.title ?? "")
+        guard title != publishedTitle else { return }
+        publishedTitle = title
+        publish(.init(writes: [(key, .string(title))], actions: []))
+    }
+
     private func update(_ status: String, url: String = "", handlers: [JSONValue] = []) {
+        self.status = status
+        publishedTitle = status == "loaded" ? Self.boundedTitle(page?.title ?? "") : ""
         let writes: [(String, JSONValue)] = [
             node.navigationStateKey.map { ($0, .string(status)) },
-            node.titleKey.map { ($0, .string(status == "loaded" ? Self.boundedTitle(page?.title ?? "") : "")) },
+            node.titleKey.map { ($0, .string(publishedTitle)) },
             node.canGoBackKey.map { ($0, .bool(page?.canGoBack ?? false)) },
         ].compactMap { $0 }
         let actions: [PrototypeAction]

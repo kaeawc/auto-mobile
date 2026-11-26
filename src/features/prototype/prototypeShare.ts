@@ -18,6 +18,8 @@ export interface PrototypeShareInputs {
   assets: Readonly<Record<string, { bytes: number }>>;
   outcome?: "shared" | "unknown";
   target?: string;
+  /** Set by a fake share module (#19308): the summary then carries `simulated: true`. */
+  simulated?: true;
 }
 export type PrototypeShareResolution =
   | { ok: true; payload: Raw; summary: Raw }
@@ -123,7 +125,8 @@ function vCard(contact: Raw): string {
   );
 }
 
-/** Pure contract reference, no system sheet, I/O, capability advertisement or simulation. */
+/** Pure contract reference, no system sheet, I/O or capability advertisement. A fake share module
+ * passes `outcome` and `simulated` (#19308). */
 export function resolvePrototypeShare(
   args: Raw,
   inputs: PrototypeShareInputs,
@@ -250,6 +253,7 @@ function shareResult(resolved: Raw, inputs: PrototypeShareInputs): PrototypeShar
     summary: {
       outcome: inputs.outcome ?? "unknown",
       ...(inputs.target === undefined ? {} : { target: inputs.target }),
+      ...(inputs.simulated ? { simulated: true } : {}),
       items,
     },
   };

@@ -646,8 +646,7 @@ before anything is shown, and \`clearStorage\` before anything is sent, on a dev
 export const GUIDE_REQUEST = `### Sharing
 
 \`{type:"platform", call:"share.open", args:{text:{value:"Hi {name}"}}}\` requires
-\`requires.platform:["share"]\` and \`prototype_platform_share_v1\`. Current runtimes do not
-advertise it; the host refuses the spec before show. Arguments are value bindings: at least one
+\`requires.platform:["share"]\` and \`prototype_platform_share_v1\`. With no real sheet yet, the host shows it only with \`platformMode:{share:"fake"}\`, which itself needs \`share\` declared. Arguments are value bindings: at least one
 of \`text|url|images|files|contact\`, plus optional \`subject\`. URLs use literal http(s) schemes; prototype deep links are unavailable. Images accept up to 10 uploaded IDs
 (or \`{asset:id}\` / \`{data:"/pointer"}\` holding an uploaded ID), files up to 4
 \`{asset,name,mimeType}\` entries. File names have no leading dot, separators or controls and
@@ -655,8 +654,8 @@ fit 128 UTF-8 bytes; MIME types are type/subtype tokens. Contact fields are \`na
 \`phone,email,org,url,note\`, serialized as vCard 3.0. Strings take ordinary placeholders and
 fit 65536 UTF-8 bytes. \`into\` receives \`{outcome:"shared"|"unknown",target?,items}\`;
 its text summary keeps 2048 Unicode scalars. \`statusKey,onSuccess,onError\` use platform-call
-semantics. Real system sheets, cancellation callbacks and queued fake outcomes are owed;
-\`platformMode\` and simulated sharing call outcomes are not accepted yet.
+semantics. Fake mode answers \`{outcome:"shared",simulated:true,items}\` without a sheet; with \`prototype_platform_outcomes_v1\`,
+\`simulate\` \`call:"share.open"\` queues \`outcome:{result:{outcome:"unknown",target:"Mail"}}\` (target 1-256 chars; the runtime adds \`items\` and \`simulated\`) or \`{error:{code:"cancelled"}}\`. Real sheets are owed.
 
 ### Requests
 

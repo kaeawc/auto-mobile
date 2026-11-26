@@ -32,9 +32,18 @@ export interface StatusBarApplyOutcome {
   unsupported: StatusBarField[];
 }
 
+export interface StatusBarClearOptions {
+  /**
+   * Settles before the clear touches the device's battery state (Android's post-exit battery
+   * refresh, #19189), so a power restore the same session release started cannot interleave
+   * with it. It must not reject.
+   */
+  beforeBatteryRefresh?: () => Promise<void>;
+}
+
 export interface StatusBarController {
   override(overrides: StatusBarOverrides, signal?: AbortSignal): Promise<StatusBarApplyOutcome>;
-  clear(signal?: AbortSignal): Promise<void>;
+  clear(signal?: AbortSignal, options?: StatusBarClearOptions): Promise<void>;
   /** The platform's own readback of the override, when it has one. */
   read(signal?: AbortSignal): Promise<string | null>;
 }

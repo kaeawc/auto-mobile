@@ -46,3 +46,7 @@ trace, choose one of these:
 
 The check applies to simulators only. If AutoMobile cannot read the Xcode version or the simulator
 runtime, it records as usual.
+
+With Xcode 27 or later, `start` also refuses the `hitches` template on any simulator, because
+`xctrace` reports that Hitches is not supported there. Record hitches on a physical device, or use
+`timeProfiler` or `hangs` on the simulator.

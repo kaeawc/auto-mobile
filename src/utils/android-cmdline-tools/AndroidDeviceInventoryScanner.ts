@@ -10,6 +10,11 @@ import {
 } from "./AndroidDisplayInventory";
 import { getAbortSignal, runWithAbortSignal } from "../AbortContext";
 import { parseAndroidSystemImageRuntime } from "./AndroidSystemImageRuntime";
+import {
+  readAndroidRuntimeFacts,
+  withRuntimeFacts,
+  type AndroidRuntimeFacts,
+} from "./androidRuntimeFacts";
 import { TTLCache } from "../cache/Cache";
 import { SingleFlight } from "../cache/SingleFlight";
 import { transportIdFor } from "../androidSerial";
@@ -207,6 +212,9 @@ export interface AndroidDeviceInventoryScanner {
 export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInventoryScanner {
   private modelNameCache = new Map<string, string>();
   private architectureCache = new Map<string, string>();
+  private runtimeFactsCache = new Map<string, AndroidRuntimeFacts>();
+  /** Per-serial eviction generation: a read that straddles an eviction must not cache. */
+  private evictionEpochs = new Map<string, number>();
 
   constructor(private readonly deps: AndroidDeviceInventoryDeps) {}
 
@@ -335,34 +343,49 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         })),
       );
       if (this.includesFullMetadata(options)) {
-        await Promise.all(
-          runningDevices.map(async (device) => {
-            if (device.foreignOwned || remainingScanMs() <= 0) {
-              return;
-            }
-            const snapshotDevice = devices.find(
-              (snapshot) => snapshot.deviceId === device.deviceId,
-            );
-            const displays = await runWithTargetDeviceExecutionBinding(
-              device.deviceId,
-              options.targetDeviceId,
-              () =>
-                this.inventoryDisplays(
-                  { ...device, observedAt: snapshotDevice?.observedAt },
-                  options,
-                  signal,
-                ),
-            );
-            if (displays) {
-              device.displays = displays;
-            }
-          }),
-        );
+        await this.enrichFullMetadata(runningDevices, devices, options, {
+          remainingScanMs,
+          signal,
+        });
       }
       perf.endOperation("avdNameResolution");
 
       return { devices: runningDevices, diagnostics };
     }
+  }
+
+  /** Display inventory and self-reported runtime facts for a full (non-readiness) scan. */
+  private async enrichFullMetadata(
+    runningDevices: BootedDevice[],
+    devices: BootedDevice[],
+    options: BootedDeviceScanOptions,
+    { remainingScanMs, signal }: { remainingScanMs: () => number; signal?: AbortSignal },
+  ): Promise<void> {
+    await Promise.all(
+      runningDevices.map(async (device) => {
+        if (device.foreignOwned || remainingScanMs() <= 0) {
+          return;
+        }
+        const snapshotDevice = devices.find((snapshot) => snapshot.deviceId === device.deviceId);
+        const [displays, facts] = await runWithTargetDeviceExecutionBinding(
+          device.deviceId,
+          options.targetDeviceId,
+          () =>
+            Promise.all([
+              this.inventoryDisplays(
+                { ...device, observedAt: snapshotDevice?.observedAt },
+                options,
+                signal,
+              ),
+              this.inventoryRuntimeFacts(device, remainingScanMs(), signal),
+            ]),
+        );
+        if (displays) {
+          device.displays = displays;
+        }
+        Object.assign(device, withRuntimeFacts(device, facts));
+      }),
+    );
   }
 
   private foreignScanSerials(
@@ -671,6 +694,59 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
   }
 
   /**
+   * API level, release and physical display read from the device itself, so a booted device is
+   * described without resolving its AVD image (#18988). Cached like the model: these facts do not
+   * change while the same device holds the serial.
+   */
+  private async inventoryRuntimeFacts(
+    device: BootedDevice,
+    timeoutMs: number,
+    signal?: AbortSignal,
+  ): Promise<AndroidRuntimeFacts> {
+    const cacheKey = this.deviceInfoCacheKey(device.deviceId, this.runtimeFactsAvdName(device));
+    const cached = cacheKey ? this.runtimeFactsCache.get(cacheKey) : undefined;
+    if (cached) {
+      return cached;
+    }
+    const epoch = this.beginRead(device.deviceId);
+    const facts = await readAndroidRuntimeFacts(this.deps.adbFactory().create(device), {
+      timeoutMs,
+      signal,
+    });
+    // Cache only a complete read, so a transient wm failure is retried on the next scan.
+    const complete = [
+      facts.apiLevel,
+      facts.osVersion,
+      facts.screenWidth,
+      facts.screenDensity,
+    ].every((fact) => fact !== undefined);
+    if (cacheKey && complete && this.readStillCurrent(device.deviceId, epoch)) {
+      this.runtimeFactsCache.set(cacheKey, facts);
+    }
+    return facts;
+  }
+
+  /** Start tracking a read of this serial; pass the result to `readStillCurrent` on completion. */
+  private beginRead(deviceId: string): number {
+    const epoch = this.evictionEpochs.get(deviceId) ?? 0;
+    this.evictionEpochs.set(deviceId, epoch);
+    return epoch;
+  }
+
+  /** False when the serial was evicted (departed) after `beginRead`, so the result is stale. */
+  private readStillCurrent(deviceId: string, epoch: number): boolean {
+    return (this.evictionEpochs.get(deviceId) ?? 0) === epoch;
+  }
+
+  /** The AVD part of an emulator's info cache key; empty (never cached) while unresolved. */
+  private runtimeFactsAvdName(device: BootedDevice): string | undefined {
+    if (!device.deviceId.startsWith("emulator-")) {
+      return undefined;
+    }
+    return this.deps.isUnknownEmulatorName(device.name, device.deviceId) ? "" : device.name;
+  }
+
+  /**
    * Model/ABI cache key. Physical devices key by serial; emulators also require
    * the resolved AVD name because a new AVD may reuse the same emulator serial
    * (an empty name is unresolved and never cached).
@@ -689,7 +765,12 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
    */
   private evictDepartedDeviceInfo(devices: BootedDevice[]): void {
     const present = new Set(devices.map((device) => device.deviceId));
-    for (const cache of [this.modelNameCache, this.architectureCache]) {
+    for (const serial of this.evictionEpochs.keys()) {
+      if (!present.has(serial)) {
+        this.evictionEpochs.set(serial, (this.evictionEpochs.get(serial) ?? 0) + 1);
+      }
+    }
+    for (const cache of [this.modelNameCache, this.architectureCache, this.runtimeFactsCache]) {
       for (const key of [...cache.keys()]) {
         if (!present.has(key.split("\0", 1)[0]!)) {
           cache.delete(key);
@@ -718,6 +799,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       logger.debug(`Serial-only scan: not asking ${device.deviceId} for its model name`);
       return undefined;
     }
+    const epoch = this.beginRead(device.deviceId);
     try {
       const adbWithDevice = this.deps.adbFactory().create(device);
       const result = await adbWithDevice.executeCommand("shell getprop ro.product.model", {
@@ -730,7 +812,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         logger.debug(`No model name found for ${device.deviceId}`);
         return undefined;
       }
-      if (cacheKey) {
+      if (cacheKey && this.readStillCurrent(device.deviceId, epoch)) {
         this.modelNameCache.set(cacheKey, modelName);
       }
       logger.debug(`Got model name for ${device.deviceId}: "${modelName}"`);
@@ -926,6 +1008,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
       // This scan explicitly forbids optional runtime metadata probes.
       return undefined;
     }
+    const epoch = this.beginRead(device.deviceId);
     try {
       const adbWithDevice = this.deps.adbFactory().create(device);
       const result = await adbWithDevice.executeCommand("shell getprop ro.product.cpu.abi", {
@@ -938,7 +1021,7 @@ export class DefaultAndroidDeviceInventoryScanner implements AndroidDeviceInvent
         logger.debug(`No CPU architecture found for ${device.deviceId}`);
         return undefined;
       }
-      if (cacheKey) {
+      if (cacheKey && this.readStillCurrent(device.deviceId, epoch)) {
         this.architectureCache.set(cacheKey, architecture);
       }
       logger.debug(`Got CPU architecture for ${device.deviceId}: "${architecture}"`);

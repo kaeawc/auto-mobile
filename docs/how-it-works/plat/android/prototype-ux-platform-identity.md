@@ -59,7 +59,11 @@ with `cancelled`. The other codes are:
 - `platform_error`: detail `media_limit` or `io`.
 - `too_many_in_flight`: one system-UI call per prototype at a time.
 
-No production runtime advertises either module yet.
+No production runtime advertises either module yet. A `prototype simulate` call outcome for
+`mediaLibrary.pick` or `camera.capture` is checked on the host before it is queued. An `{error}`
+outcome such as `cancelled` passes unchanged. A `{result: {files}}` outcome must name 1-64 (pick) or
+exactly one (capture) absolute `.png`, `.jpg`, `.jpeg`, `.webp`, `.mp4` or `.webm` paths. A
+well-formed file result is still refused until device media injection (#14192) exists.
 
 **Photo library (#14195, calls only).** Three more `mediaLibrary` calls read and write the library
 itself. `query` and `manageLimitedSelection` share `prototype_platform_mediaLibrary_query_v1`;

@@ -34,7 +34,9 @@ Its events are `media.statusChanged`, `media.ended` and `media.error`. State is 
 `buffering`, `status` (`idle`, `loading`, `ready`, `ended`, `error`) and `error`
 (`source_not_found`, `decode`, `network`, `unsupported_format`, `blocked_egress`). A read must name
 a declared player and one of those keys. The asset transport and the renderers are separate
-slices; no production runtime advertises the module yet.
+slices. Debug CtrlProxy builds carry a fake `media` module that advertises
+`prototype_platform_media_v1`: each player runs on the fake engine, loads paused with a 60 s
+duration, and has no queue. Release builds advertise nothing.
 
 The `videoPlayer` node renders exactly one of a declared `player` or an inline `source` (the same
 one-key union), which is a node-scoped player released when the node leaves composition:
@@ -124,8 +126,8 @@ or `error`), `media.ended` (`{player}`) or `media.error` (`{player, code}`). `co
 state's error codes and is required exactly when the status is `error`. An optional `advanceMs`
 (1-3600000) advances the fake engine's clock first. The host validates `data` before it asks the
 device (`invalid_args`). It refuses `advanceMs` on a native engine (`unsupported`) and reports the
-engine as `mediaEngine`. No runtime exposes its media module to simulate yet, so every device
-answers `unavailable`. Selecting the fake engine (`platformMode`) and the `Media3` adapter belong to
+engine as `mediaEngine`. An Android device that advertises `prototype_platform_media_v1` (the debug fake module) runs these
+events on the fake engine; every other device answers `unavailable`. Selecting the fake engine (`platformMode`) and the `Media3` adapter belong to
 the platform simulation runtime (#14300).
 
 The fake engine proves spec logic, not playback. Real playback is confirmed separately. On Android

@@ -22,8 +22,8 @@
 
 On Android, a foreground app takes only the `RUNNING_*` levels.
 
-On an iOS simulator, `memoryWarning` reaches only the app in the foreground. Bring the app to the
-front with `launchApp` first, then call
+On an iOS simulator, `memoryWarning` is only sure to reach the app in front: a backgrounded app may
+be suspended and miss it. Bring the app to the front with `launchApp` first, then call
 `{ "appId": "com.example.app", "action": "trimMemory", "level": "memoryWarning" }`.
 The result has `mechanism: "simulator-memory-warning-file"`. The simulator must be booted.
 The app keeps running; read its logs with `getLogs` to see how it reacted.

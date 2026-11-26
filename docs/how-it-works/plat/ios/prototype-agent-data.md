@@ -126,9 +126,10 @@ Uninstall does not remove its Keychain items, and the app's clear endpoint is go
 
 iOS advertises `prototype_remote_image_v1` on iOS 17+. Device-routed image URLs resolve bindings
 before validation. Image loads dial checked public IP addresses and verify the connected address
-before sending; app-supplied device hooks receive image loads instead. Image requests drop
-authorization, cookie and referer headers, and every redirect hop is revalidated against the image
-policy, with at most five hops. Public HTTPS destinations are allowed; literal loopback HTTP requires
+before sending. Loads the framework performs drop authorization, cookie and referer headers, and
+revalidate every redirect hop against the image policy, with at most five hops. With an embedded
+`deviceClient`, image loads go to the app's client after the first URL check, and that client owns
+headers and redirects. Public HTTPS destinations are allowed; literal loopback HTTP requires
 a DEBUG or ProtoViewer development build plus an explicit cleartext configuration. Images refuse
 private addresses, and refuse daemon ports on loopback and private addresses (a public host may use them). ProtoViewer shares its request consent gate with image loads.
 
@@ -136,9 +137,12 @@ Downloads stop at 8 MiB and have a 30 s ceiling. PNG, JPEG and WebP signatures m
 ImageIO. The header must fit 64 MiB at four bytes per pixel, or eight for sources deeper than 8 bits
 per component or without depth metadata. Decoding applies EXIF orientation and downsamples to 2048
 pixels on the longest edge.
-Decoded images use a 64 MiB memory cache; the app-private URL-hashed disk LRU holds 128 MiB.
+
+Decoded images use a 64 MiB memory cache; the app-private URL-hashed disk LRU holds 128 MiB. Images
+loaded through an embedded `deviceClient` use a private memory cache and no disk cache.
 At most six loads run across renderer configurations. Placeholder and error assets or colors render
-in the image slot. `crossfade: true` fades in over 200 ms unless Reduce Motion is enabled.
+in the image slot. `crossfade: true` fades in over 200 ms unless Reduce Motion is on, the spec sets
+`motion: "none"`, or the app is in recording mode.
 Accessibility reports `loading`, `loaded` or `error`, without the URL. Host-routed URLs do not start
 device loads; an uploaded asset uses the existing asset renderer. Inspect has no image-count field.
 See the [remote-image contract](../android/prototype-ux-icons.md#icons-and-images) and

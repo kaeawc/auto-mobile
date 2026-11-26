@@ -329,6 +329,27 @@ describe("Wear notification stream capture", () => {
     expect(adb.getExecutedCommands().some((command) => command.includes("statusbar"))).toBe(false);
   });
 
+  test("every fresh watch read asks for a capture newer than the device clock (#19312)", async () => {
+    const { tray, adb, observer } = setup((commands) =>
+      commands.includes("shell input keyevent 4") ? closed : stream,
+    );
+    // The fake device clock: a floor of 0 would let a pre-action cached tree answer.
+    adb.setDeviceTimestampMs(5_000);
+    await tray.execute({
+      action: "list",
+      notification: { appId: "com.android.shell" },
+      awaitTimeout: 500,
+    });
+    await tray
+      .execute({ action: "tap", notification: { title: "Wear" }, awaitTimeout: 500 })
+      .catch(() => undefined);
+    const freshReads = observer
+      .getExecuteOptions()
+      .filter((options) => options.requireFreshExtraction === true);
+    expect(freshReads.length).toBeGreaterThan(0);
+    expect(freshReads.filter((options) => !(Number(options.minTimestamp) > 0))).toEqual([]);
+  });
+
   test("taps the card centre to expand and refuses to invent an expanded target", async () => {
     const { tray, adb } = setup();
     await expect(

@@ -327,7 +327,12 @@ function overlayValue(cutout: CutoutEmulation): string | undefined {
   return cutout === "none" ? undefined : cutout;
 }
 
-/** The steps a profile asks for, in apply order. */
+/**
+ * The steps a profile asks for, in apply order. Posture goes first: on a foldable, `wm size` and
+ * the other per-display settings land on the panel that is active when they run, so they must run
+ * on the panel the call ends on (#19240). Reset restores latest first, so they are undone on that
+ * panel before the posture goes back.
+ */
 function stepRunners(
   context: Context,
   input: DisplayProfileInput,
@@ -335,6 +340,9 @@ function stepRunners(
   const runners: [DisplayProfileFacet, StepRunner][] = [];
   const { screenSize, cutout, navigationMode, forceDark, posture } = input;
   const display = displayInput(input);
+  if (posture !== undefined) {
+    runners.push(["posture", () => applyPosture(context, posture)]);
+  }
   if (screenSize !== undefined) {
     runners.push(["screenSize", () => applyScreenSize(context, screenSize)]);
   }
@@ -356,9 +364,6 @@ function stepRunners(
   }
   if (forceDark !== undefined) {
     runners.push(["forceDark", () => applyForceDark(context, forceDark)]);
-  }
-  if (posture !== undefined) {
-    runners.push(["posture", () => applyPosture(context, posture)]);
   }
   return runners;
 }

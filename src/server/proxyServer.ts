@@ -667,7 +667,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
         throw sessionOwnershipLostError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
+        throw noActiveDeviceSessionError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -691,7 +691,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
         throw sessionOwnershipLostError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
+        throw noActiveDeviceSessionError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -736,7 +736,7 @@ function registerProxyResourceHandlers(server: McpServer, proxy: DaemonMcpProxy)
         throw sessionOwnershipLostError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
+        throw noActiveDeviceSessionError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);
@@ -954,7 +954,7 @@ export function createProxyMcpServer(options: ProxyMcpServerOptions = {}): {
         throw sessionOwnershipLostError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof DaemonConnectionSessionReleasedError) {
-        throw noActiveDeviceSessionError(error);
+        throw noActiveDeviceSessionError(proxy.withLostSessionPlatform(error));
       }
       if (error instanceof McpOverloadError) {
         throw mcpOverloadError(error);

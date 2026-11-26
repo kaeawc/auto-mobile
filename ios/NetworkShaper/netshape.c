@@ -520,8 +520,8 @@ static void pace(int fd, ssize_t bytes, int sending);
 /// file mapped by every shaped process, so concurrent senders in different processes (an app and
 /// WebKit's networking process) share one up and one down rate (#19120). The times are reset when
 /// the host boot (`boot`) or the profile file's modification time (`gen`) differs from the one that
-/// wrote them, and a time further ahead than one reservation could owe is treated as stale, so a
-/// process killed mid-sleep or a replaced profile never stalls the next one. Without the file the
+/// wrote them, and a time further ahead than MAX_BACKLOG socket-buffer-sized reservations could owe
+/// is treated as stale, so a process killed mid-sleep or a replaced profile never stalls the next one. Without the file the
 /// bucket is per process.
 typedef struct {
     _Atomic uint64_t boot;
@@ -534,6 +534,8 @@ static pthread_once_t g_bucket_once = PTHREAD_ONCE_INIT;
 // Slack beyond MAX_BACKLOG reservations at the current rate before a busy-until time is stale.
 #define STALE_SLACK_NS 5000000000LL
 #define MAX_BACKLOG 4
+// Largest single reservation: one read returns at most a socket buffer, capped by kern.ipc.maxsockbuf.
+static int64_t g_max_chunk = 8 << 20;
 
 static uint64_t boot_id(void) {
     struct timeval tv = {0};
@@ -544,6 +546,9 @@ static uint64_t boot_id(void) {
 
 static void map_bucket(void) {
     g_bucket = &g_local_bucket;
+    int64_t maxbuf = 0;
+    size_t maxlen = sizeof maxbuf;
+    if (sysctlbyname("kern.ipc.maxsockbuf", &maxbuf, &maxlen, NULL, 0) == 0 && maxbuf > 0) g_max_chunk = maxbuf;
     const char *profile = getenv("SIM_RS_NETSHAPE");
     char path[1024];
     if (!profile || snprintf(path, sizeof path, "%s.bucket", profile) >= (int)sizeof path) return;
@@ -591,7 +596,10 @@ static double reserve(int sending, ssize_t bytes, long rate) {
     clock_gettime(CLOCK_MONOTONIC, &ts);
     int64_t t = (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
     int64_t cost = (int64_t)((double)bytes * 1e9 / (double)rate);
-    int64_t stale = t + MAX_BACKLOG * cost + STALE_SLACK_NS;
+    // Bound by the largest reservation any sharer can make, not this caller's, so a small read
+    // never wipes a live sender's backlog; a blocking write larger than that extends it.
+    int64_t chunk = bytes > g_max_chunk ? bytes : g_max_chunk;
+    int64_t stale = t + MAX_BACKLOG * (int64_t)((double)chunk * 1e9 / (double)rate) + STALE_SLACK_NS;
     int64_t cur = atomic_load(slot), next;
     do {
         // A time further ahead than live senders could owe was left by a dead process or an

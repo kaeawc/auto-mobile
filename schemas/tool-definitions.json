@@ -2034,6 +2034,12 @@
         },
         "sizeBytes": {
           "type": "number"
+        },
+        "warnings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

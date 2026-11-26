@@ -404,6 +404,36 @@ describe("HostLoopbackAudioSession process-tap capture", () => {
     expect(result.pcm.samples.length).toBe(480);
   });
 
+  test("a tap without System Audio Recording permission warns that the capture may be silence (#19115)", async () => {
+    const { session } = setup(
+      (helper) => {
+        helper.ready("process tap of launchd_sim 4242 (2 clients, System Audio Recording denied)");
+        helper.stdout.write(tenMsOfPcm);
+        helper.exit(0);
+      },
+      undefined,
+      async () => 4242,
+    );
+    const result = await session.captureAudio({ durationMs: 10 });
+    expect(result.warnings).toEqual([expect.stringContaining("System Audio Recording is denied")]);
+  });
+
+  test("an authorized tap carries no warning", async () => {
+    const { session } = setup(
+      (helper) => {
+        helper.ready(
+          "process tap of launchd_sim 4242 (2 clients, System Audio Recording authorized)",
+        );
+        helper.stdout.write(tenMsOfPcm);
+        helper.exit(0);
+      },
+      undefined,
+      async () => 4242,
+    );
+    const result = await session.captureAudio({ durationMs: 10 });
+    expect(result.warnings).toBeUndefined();
+  });
+
   test("an open-ended capture taps the simulator too", async () => {
     const { session, helpers } = setup(undefined, undefined, async () => 4242);
     const stream = await session.streamCapture(() => {});

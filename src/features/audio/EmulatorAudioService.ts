@@ -90,6 +90,8 @@ export interface CapturedAudio extends AudioLevels {
   /** True when the guest produced less audio than requested before the deadline. */
   timedOut: boolean;
   route: AudioRoute;
+  /** Why the audio may not be what the device played (#19115). */
+  warnings?: string[];
 }
 
 /** Largest source file read into memory: about 4.5 minutes of 48 kHz stereo 16-bit audio. */
@@ -313,9 +315,15 @@ export class EmulatorAudioService {
         durationMs: request.durationMs,
         sampleRate: request.sampleRate,
       });
-      const { pcm, timedOut } = captured;
+      const { pcm, timedOut, warnings } = captured;
       const levels = analyzeLevels(pcm, { silenceThresholdDbfs: request.silenceThresholdDbfs });
-      return { ...levels, pcm, timedOut, route: captured.route ?? route.route };
+      return {
+        ...levels,
+        pcm,
+        timedOut,
+        route: captured.route ?? route.route,
+        ...(warnings?.length ? { warnings } : {}),
+      };
     } finally {
       await session.close();
     }

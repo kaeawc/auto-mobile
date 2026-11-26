@@ -1069,6 +1069,38 @@ describe("HomeScreen", () => {
         },
       );
 
+      test("presses again after an unacknowledged press leaves the app the switcher returned to (#19170)", async () => {
+        const { action, client } = createIosHomeScreen({
+          simulator: true,
+          simctl: { executeCommandArgs: async () => createExecResult("", "") },
+        });
+        // iOS 27.2: leaving the switcher returned to the app, and the runner's first Home press
+        // timed out after dispatch while the app stayed in front.
+        client.setPressHomeResult({
+          success: false,
+          dispatched: true,
+          acknowledged: false,
+          totalTimeMs: 5000,
+          error: "Press home timed out after 5000ms",
+        });
+        const before = createObserveResult();
+        before.viewHierarchy = convertToViewHierarchyResult(iosSwitcherHierarchy());
+        const after = createObserveResult();
+        after.viewHierarchy = convertToViewHierarchyResult(iosHierarchy("com.apple.springboard"));
+        fakeObserveScreen.setObserveSequence([before, after]);
+        spyOn(client, "requestHierarchySync").mockImplementation(async () => ({
+          hierarchy: iosHierarchy(
+            client.getPressHomeRequestCount() < 2
+              ? "dev.jasonpearson.automobile.Playground"
+              : "com.apple.springboard",
+          ),
+        }));
+
+        const result = await action.execute();
+        expect(result.success).toBe(true);
+        expect(client.getPressHomeRequestCount()).toBe(2);
+      });
+
       test.each([false, true])(
         "treats the runner's not-foreground error with recorded query failures as unverified (simulator %s, #17201)",
         async (simulator) => {

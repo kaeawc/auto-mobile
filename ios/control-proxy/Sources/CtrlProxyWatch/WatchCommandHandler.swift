@@ -20,6 +20,17 @@ protocol WatchGesturePerformer {
     func rotateCrown(delta: Double, velocity: Double) throws
 }
 
+/// Reads `XCUIApplication.state` for bundle IDs (#19359): simctl has no foreground signal.
+@MainActor
+protocol WatchAppStateReader {
+    func state(of bundleId: String) -> WatchAppState
+}
+
+/// `XCUIApplication.State`, by its case name on the wire.
+enum WatchAppState: String, Codable {
+    case unknown, notRunning, runningBackgroundSuspended, runningBackground, runningForeground
+}
+
 enum WatchSwipeDirection: String, Decodable {
     case up, down, left, right
 }
@@ -73,18 +84,29 @@ struct WatchResponse: Codable {
     var text: String?
     var error: String?
     var errorCode: String?
+    /// `appStates` replies: each requested bundle ID's state.
+    var states: [String: WatchAppState]?
 }
 
 @MainActor
 final class WatchCommandHandler {
-    nonisolated static let supportedCommands = ["hierarchy", "tap", "swipe", "home", "crown", "type", "face"]
+    nonisolated static let supportedCommands = [
+        "hierarchy", "tap", "swipe", "home", "crown", "type", "face", "appStates",
+    ]
+    /// Each queried bundle costs an XCTest round trip; a listing larger than this is refused.
+    nonisolated static let maxAppStateBundles = 128
 
     private let snapshotSource: any WatchSnapshotSource
     private let gestures: any WatchGesturePerformer
+    private let appStates: (any WatchAppStateReader)?
 
-    init(snapshotSource: any WatchSnapshotSource, gestures: any WatchGesturePerformer) {
+    init(
+        snapshotSource: any WatchSnapshotSource, gestures: any WatchGesturePerformer,
+        appStates: (any WatchAppStateReader)? = nil
+    ) {
         self.snapshotSource = snapshotSource
         self.gestures = gestures
+        self.appStates = appStates
     }
 
     func handle(_ data: Data) -> WatchResponse {
@@ -98,6 +120,8 @@ final class WatchCommandHandler {
             switch header.type {
             case "face":
                 return try handleFace(data, requestId: requestId)
+            case "appStates":
+                return try handleAppStates(data, requestId: requestId)
             case "hierarchy":
                 return try WatchResponse(
                     type: "hierarchy_update", requestId: requestId, success: true, data: snapshotSource.snapshot()
@@ -173,6 +197,26 @@ final class WatchCommandHandler {
         return WatchResponse(type: "face_result", requestId: requestId, success: true, text: text)
     }
 
+    private func handleAppStates(_ data: Data, requestId: String?) throws -> WatchResponse {
+        guard let reader = appStates else {
+            throw WatchCommandError.unsupported("appStates")
+        }
+        let request = try JSONDecoder().decode(AppStates.self, from: data)
+        guard let bundleIds = request.bundleIds, !bundleIds.isEmpty,
+              bundleIds.count <= Self.maxAppStateBundles,
+              bundleIds.allSatisfy({ !$0.isEmpty })
+        else {
+            throw WatchCommandError.invalidRequest(
+                "appStates requires 1 to \(Self.maxAppStateBundles) non-empty bundleIds"
+            )
+        }
+        var states: [String: WatchAppState] = [:]
+        for bundleId in bundleIds where states[bundleId] == nil {
+            states[bundleId] = reader.state(of: bundleId)
+        }
+        return WatchResponse(type: "appStates_result", requestId: requestId, success: true, states: states)
+    }
+
     private func faceCoordinate(_ value: Double?) throws -> Double {
         guard let value, value.isFinite, (0 ... 1).contains(value) else {
             throw WatchCommandError.invalidRequest("face coordinates must be finite values in [0, 1]")
@@ -189,6 +233,10 @@ final class WatchCommandHandler {
         let toX: Double?
         let toY: Double?
         let direction: WatchSwipeDirection?
+    }
+
+    private struct AppStates: Decodable {
+        let bundleIds: [String]?
     }
 
     private struct Header: Decodable {

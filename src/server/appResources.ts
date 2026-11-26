@@ -21,11 +21,16 @@ import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { SingleFlight } from "../utils/cache/SingleFlight";
 import { isIosPhysicalUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import {
+  RunnerWatchForegroundProbe,
+  type WatchForegroundProbe,
+} from "../features/watch/WatchForegroundApps";
+import {
   findBootedDeviceForResource,
   listBootedDevicesForResource,
 } from "./resourceDeviceResolver";
 import type {
   AppsCacheEntry,
+  AppsQueryAppInfo,
   AppsQueryDeviceContent,
   AppsQueryOptions,
   AppsQueryResourceContent,
@@ -184,7 +189,32 @@ const defaultListInstalledAppsFactory: NonNullable<
 > = (device) => new ListInstalledApps(device);
 
 export interface AppResourceDependencies
-  extends LifecycleAppResourceDependencies, traitsProbe.Dependencies {}
+  extends LifecycleAppResourceDependencies, traitsProbe.Dependencies {
+  /** Which listed watch apps are in front; read per query, never cached (#19359). */
+  watchForegroundProbe?: WatchForegroundProbe;
+}
+
+const defaultWatchForegroundProbe = new RunnerWatchForegroundProbe();
+
+/** simctl reports no foreground app; on a watch, the connected runner does. */
+async function withWatchForeground(
+  device: BootedDevice,
+  apps: AppsQueryAppInfo[],
+  deps: AppResourceDependencies,
+  signal?: AbortSignal,
+): Promise<AppsQueryAppInfo[]> {
+  if (device.platform !== "watchos" || apps.length === 0) {
+    return apps;
+  }
+  const foreground = await (
+    deps.watchForegroundProbe ?? defaultWatchForegroundProbe
+  ).foregroundBundleIds(
+    device.deviceId,
+    apps.map((app) => app.packageName),
+    signal,
+  );
+  return apps.map((app) => (foreground.has(app.packageName) ? { ...app, foreground: true } : app));
+}
 
 async function fetchAppsForDevice(
   device: BootedDevice,
@@ -447,7 +477,12 @@ export async function queryInstalledApps(
   const effectiveType = resolveEffectiveAppsQueryType(options.type, cacheEntry, options.profile);
   const effectiveOptions: AppsQueryOptions = { ...options, type: effectiveType };
 
-  const apps = filterAppsByQuery(cacheEntry.queryApps, effectiveOptions);
+  const apps = await withWatchForeground(
+    device,
+    filterAppsByQuery(cacheEntry.queryApps, effectiveOptions),
+    deps,
+    signal,
+  );
   const unknownApps = launchabilityUnknownApps(cacheEntry.queryApps, effectiveOptions);
   const deviceEntries: AppsQueryDeviceContent[] = [
     {

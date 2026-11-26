@@ -59,7 +59,10 @@ class PrototypeInspectPlatformControllerTest {
 
     val (redacted, withLocation) = reports.map { it.single().platform }
     assertEquals(PrototypeInspectPlatformRedaction.redact(state, includeLocation = false), redacted)
-    assertEquals(PrototypeInspectPlatformRedaction.redact(state, includeLocation = true), withLocation)
+    assertEquals(
+      PrototypeInspectPlatformRedaction.redact(state, includeLocation = true),
+      withLocation,
+    )
     assertEquals(data, redacted!!["test"])
   }
 }

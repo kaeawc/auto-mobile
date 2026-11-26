@@ -13,9 +13,9 @@ import kotlinx.serialization.json.doubleOrNull
 /**
  * The `/platform` state an `inspect` reports (#16463), the Kotlin twin of TypeScript's
  * `redactPrototypeInspectPlatform` (`prototypeLocationPrivacy.ts`). Only keys in a module's
- * contract `state` table are kept (the placeholder `test` module has no table and keeps every
- * key). `location.current` becomes its accuracy summary with `redacted: true` (null stays null)
- * unless `includeLocation`, and any other `sensitive` key is omitted. Both replay
+ * contract `state` table are kept (the placeholder `test` module has no table and keeps every key).
+ * `location.current` becomes its accuracy summary with `redacted: true` (null stays null) unless
+ * `includeLocation`, and any other `sensitive` key is omitted. Both replay
  * `test/fixtures/prototype-location/inspect-redaction.json`.
  */
 object PrototypeInspectPlatformRedaction {

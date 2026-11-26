@@ -12,7 +12,9 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.TestFactory
 
-/** The inspect `/platform` redaction (#16463) replays the fixture the TypeScript reference replays. */
+/**
+ * The inspect `/platform` redaction (#16463) replays the fixture the TypeScript reference replays.
+ */
 class PrototypeInspectPlatformRedactionTest {
   private val fixture: JsonObject =
     Json.parseToJsonElement(

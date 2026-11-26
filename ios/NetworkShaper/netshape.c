@@ -444,8 +444,10 @@ static int inspect_first(int fd, const void *buf, size_t n) {
 }
 
 /// Gate for one outgoing datagram on a shaped socket (or to remote `to`). Returns 1 to drop it
-/// silently (loss), -1 with errno for offline, 0 to send.
+/// silently (loss), -1 with errno for offline, 0 to send. A destination named by this call decides
+/// for this datagram: a loopback `to` is never shaped, even on a socket that sent remotely (#19120).
 static int datagram_out(int fd, const struct sockaddr *to) {
+    if (to && !is_remote(to) && is_dgram(fd)) return 0;
     if (to && is_remote(to) && fd >= 0 && fd < MAX_FD) {
         atomic_store(&g_shaped[fd], 1);
         atomic_store(&g_rule[fd], (signed char)match_rule(to));
@@ -657,17 +659,32 @@ static ssize_t datalen(const struct msghdr_x *m, ssize_t count) {
 
 static ssize_t my_sendmsg_x(int fd, const struct msghdr_x *m, unsigned int cnt, int fl) {
     ssize_t _r;
+    int dropped = 0; // m[cnt] (after truncation) rolled loss: report it sent so it is never resent
     if (g_depth == 0 && cnt > 0) {
         int gate = datagram_out(fd, (const struct sockaddr *)m[0].msg_name);
         if (gate < 0) return -1;
-        if (gate > 0) return (ssize_t)cnt; // the whole batch is lost
+        if (gate > 0) return 1; // the first datagram is lost; the caller resends the rest
         if (m[0].msg_iovlen > 0 && !is_dgram(fd) && inspect_first(fd, m[0].msg_iov[0].iov_base, m[0].msg_iov[0].iov_len) < 0) return -1;
+        // Each datagram has its own destination and loss roll (#19120): send the run that passes.
+        // A lost datagram counts as sent, so its one loss roll stands; an unreachable one ends the
+        // batch, so the caller's next call starts at it and gets ENETUNREACH.
+        if (is_dgram(fd)) {
+            for (unsigned int i = 1; i < cnt; i++) {
+                int g = datagram_out(fd, (const struct sockaddr *)m[i].msg_name);
+                if (g != 0) {
+                    dropped = g > 0;
+                    cnt = i;
+                    break;
+                }
+            }
+        }
     }
     if (OUTER(sendmsg_x(fd, m, cnt, fl)) && _r > 0 && shaped(fd)) {
         ssize_t total = 0;
         for (ssize_t i = 0; i < _r; i++) total += iov_total(m[i].msg_iov, m[i].msg_iovlen);
         pace(fd, total, 1);
     }
+    if (dropped && _r == (ssize_t)cnt) return _r + 1; // a partial native send keeps its own count
     return _r;
 }
 DYLD_INTERPOSE(my_sendmsg_x, sendmsg_x)

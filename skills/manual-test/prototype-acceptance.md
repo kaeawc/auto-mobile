@@ -93,11 +93,13 @@ Run on an Android emulator (Playground) and on an iOS simulator (an app launched
 `launchApp prototype: true`); record PASS/FAIL per platform. Design: the "Data, storage and network"
 sections of `docs/how-it-works/plat/android/prototype-ux.md` and `docs/how-it-works/plat/ios/prototype-agent.md`.
 
-**Fixture.** Start the local server on the host and keep it running:
-`bun scripts/manual-test/prototype-request-fixture.ts 8787`. It serves `GET /items` (two seed items),
+**Fixture.** Start the local server on the host, bound to its LAN address, and keep it running:
+`bun scripts/manual-test/prototype-request-fixture.ts 8787 --host <host-lan-ip>` (or `--host 0.0.0.0`).
+Prototype requests refuse `localhost` and loopback addresses as `blocked_destination` for both
+transports, so call the fixture at `http://<host-lan-ip>:8787` throughout. It serves `GET /items` (two seed items),
 `POST /items` (`{"name"}` appends and returns the item), `GET /fail` (500 with a 400 KB body) and
 `GET /reset` (restore seeds). Its stdout logs every request, which is the ground truth for which
-transport reached the host.
+transport reached the host. It is bound to the LAN address, so stop it after the round.
 
 **Spec.** One screen, id `req-acceptance`, state `{"status":"idle","name":""}`, data `{"items":[]}`,
 `storage {"version":1,"keys":["state:name","data:/items"]}`:
@@ -106,14 +108,13 @@ transport reached the host.
 - a `column` with `repeat {items:{path:"/items/items"}, as:"row"}` of `text` `{row.name}` plus a
   `button` "Remove {row.name}" with `onTap [removeData /data/items/items/{index}]`;
 - `text` `{status}` and `text` `{data:/items__meta/error/message}`;
-- buttons: **Load** `[request GET http://localhost:8787/items, into /data/items, statusKey status]`;
-  **Add** `[request POST http://localhost:8787/items, body {state:name}-wrapped as {"name": ...},
+- buttons: **Load** `[request GET http://<host-lan-ip>:8787/items, into /data/items, statusKey status]`;
+  **Add** `[request POST http://<host-lan-ip>:8787/items, body {state:name}-wrapped as {"name": ...},
   into /data/added, statusKey status, onSuccess [appendData /data/items/items {data:/added}]]`;
-  **Fail** `[request GET http://localhost:8787/fail, into /data/failed, statusKey status]`.
+  **Fail** `[request GET http://<host-lan-ip>:8787/fail, into /data/failed, statusKey status]`.
 
 Run the whole table once with `via: "host"` (the default) and once with `via: "device"` on every
-request. For Android `via: "device"`, bind the fixture to a non-loopback interface and use the host's
-LAN address (`http://<host-lan-ip>:8787/...`): the device refuses `localhost` as `blocked_destination`.
+request. Both transports use the same LAN address.
 
 | #   | Do                                                                                                                            | Expect (ground truth)                                                                                                                                                                 |
 | --- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -127,13 +128,14 @@ LAN address (`http://<host-lan-ip>:8787/...`): the device refuses `localhost` as
 | 8   | `show` the same id again (no `reset`)                                                                                         | Rows and the `name` field are restored from storage (`gamma`, `alpha`), not the spec's empty values; `inspect` `storage.keys` lists `state:name` and `data:/items`                    |
 | 9   | Force-stop and relaunch the app (Android: re-show over Playground; iOS: `launchApp prototype:true` again), `show` the same id | Same restored values as step 8 (persisted across processes)                                                                                                                           |
 | 10  | Change the spec to `storage.version: 2` and `show`; then `clearStorage {id}` and `show`                                       | Version change discards stored values (spec's empty rows); after `clearStorage` the result reports the removed key count and the next show starts from the spec                       |
-| 11  | `GET http://127.0.0.1:8787/reset`; `dismiss` the prototype                                                                    | Window gone; nothing to clean up on either platform                                                                                                                                   |
+| 11  | `GET http://<host-lan-ip>:8787/reset`; `dismiss` the prototype                                                                | Window gone; nothing to clean up on either platform                                                                                                                                   |
 
 Platform notes to record:
 
-- **localhost.** `via:"host"` reaches the fixture on the host machine from both platforms. For
-  `via:"device"`, both refuse `localhost` with `blocked_destination` (no `adb reverse` is made); the
-  device reaches the fixture only at the host's LAN address. Confirm by the fixture log.
+- **localhost.** Load against `http://localhost:8787/items` fails with `blocked_destination` for
+  `via:"host"` and `via:"device"` on both platforms, the fixture logs no request, and no
+  `adb reverse` is made. Both transports reach the fixture at the host's LAN address. Confirm by
+  the fixture log.
 - **Cleartext / ATS.** Android `via:"device"` permits cleartext, so `http://<host-lan-ip>:8787` works
   there. Repeat Load against `http://<mac-lan-ip>:8787/items` on iOS
   with `via:"device"`: if the app's ATS blocks it, expect a `network` error whose message points to

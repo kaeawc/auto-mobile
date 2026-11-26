@@ -529,6 +529,17 @@ function prototypeRegistrationDisposer(host: PrototypeHost): () => void {
   return dispose;
 }
 
+/**
+ * Dispose the installed registration and the shared daemon host, so the next registration builds
+ * the shared host from its own dependencies. The shared host keeps the dependencies of whichever
+ * registration created it, so tests that inject collaborators into it start from none (#19237).
+ */
+export function disposeDaemonPrototypeHostForTesting(): void {
+  activeRegistration?.dispose();
+  daemonPrototypeHost?.dispose();
+  daemonPrototypeHost = undefined;
+}
+
 /** Parses the caller's arguments after the daemon's internal routing fields are removed. */
 function parsePrototypeInput(input: unknown) {
   const external: Record<string, unknown> =

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { z } from "zod/v4";
 import type { Plan } from "../../src/models/Plan";
+import { DeviceReadiness } from "../../src/daemon/readiness/DeviceReadiness";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { createDefaultPlanExecutor } from "../../src/server/planExecutorFactory";
 import {
@@ -11,6 +12,9 @@ import {
   boundStepToolResult,
 } from "../../src/utils/plan/stepToolResults";
 import { createStructuredToolResponse } from "../../src/utils/toolUtils";
+import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
+import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { unregisterTemporaryTools } from "../helpers/withTemporaryTool";
 
@@ -31,8 +35,26 @@ const markDevice = (name: string) => {
   (ToolRegistry.getTool(name) as { requiresDevice: boolean }).requiresDevice = true;
 };
 
+/**
+ * Device steps read the registry's process-wide readiness; a real one left by another file would
+ * discover simulators through xcrun (#19237). Install a fake-backed one and restore the previous.
+ */
+function useFakeDeviceReadiness(): void {
+  let previous: DeviceReadiness | undefined;
+  beforeEach(() => {
+    previous = ToolRegistry.hasDeviceReadiness() ? ToolRegistry.getDeviceReadiness() : undefined;
+    ToolRegistry.setCollaboratorsForTesting({
+      deviceReadiness: DeviceReadiness.createInstance(
+        new FakeDeviceClientProvider(new FakeAdbExecutor(), new FakeDeviceUtils()),
+      ),
+    });
+  });
+  afterEach(() => ToolRegistry.setCollaboratorsForTesting({ deviceReadiness: previous }));
+}
+
 describe("PlanExecutor toolResults (#10090)", () => {
   let executor: ReturnType<typeof createDefaultPlanExecutor>;
+  useFakeDeviceReadiness();
 
   beforeEach(() => {
     executor = createDefaultPlanExecutor(new FakeTimer());
@@ -242,6 +264,7 @@ describe("PlanExecutor toolResults edge shapes (#10090)", () => {
   const bareTool = "toolResultsBare";
   const trackTool = "toolResultsTrack";
   let executor: ReturnType<typeof createDefaultPlanExecutor>;
+  useFakeDeviceReadiness();
 
   beforeEach(() => {
     executor = createDefaultPlanExecutor(new FakeTimer());

@@ -457,6 +457,41 @@ describe("AndroidStartupMeasurement", () => {
     );
   });
 
+  test("measures the first launcher activity when resolve-activity answers with the car chooser (#19181)", async () => {
+    const auto = "dev.jasonpearson.automobile.automotivefixture";
+    adb.setCommandResponse(
+      "resolve-activity",
+      createExecResult(fixture("resolve-activity-car-resolver-automotive-api34.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "query-activities",
+      createExecResult(fixture("query-activities-two-launchers-automotive-api34.txt"), ""),
+    );
+    adb.setCommandResponse(
+      "am start -W",
+      createExecResult(fixture("am-start-W-cold-api35.txt"), ""),
+    );
+
+    const result = await measurement.measure({ appId: auto, mode: "cold", iterations: 1 });
+
+    expect(commandsMatching("query-activities")).toEqual([
+      `shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category.LAUNCHER '${auto}'`,
+    ]);
+    expect(commandsMatching("am start -W")[0]).toContain(`-n '${auto}/.DrivingSafeActivity'`);
+    expect(result.iterations).toBe(1);
+  });
+
+  test("does not query the package's activities when resolve-activity names one", async () => {
+    adb.setCommandResponse(
+      "am start -W",
+      createExecResult(fixture("am-start-W-cold-api35.txt"), ""),
+    );
+
+    await measurement.measure({ appId: APP, mode: "cold", iterations: 1 });
+
+    expect(commandsMatching("query-activities")).toEqual([]);
+  });
+
   test("defaults to five iterations", async () => {
     adb.setCommandResponse(
       "am start -W",

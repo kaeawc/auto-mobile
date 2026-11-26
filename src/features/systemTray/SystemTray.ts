@@ -12,6 +12,7 @@ import { raceWithDeadline } from "../../utils/raceWithDeadline";
 import { awaitWhileRequestIsLive, throwIfAborted } from "../../utils/toolUtils";
 import { createNotificationUIDetector } from "./createNotificationUIDetector";
 import { WatchSystemTray } from "./WatchSystemTray";
+import { followIosNotificationTap } from "./helpers/iosTapFollowThrough";
 import {
   getSystemTrayDependencies,
   notificationNotFoundError,
@@ -563,10 +564,19 @@ export class SystemTray {
     }
 
     await tapElement(device, tapMatch.element, signal);
-    const { observation: nextObservation, settled } = await observeSystemTrayAfterTap(
+    const afterTap = await observeSystemTrayAfterTap(device, baseline, signal);
+    const {
+      observation: nextObservation,
+      settled,
+      openedThroughAction,
+    } = await followIosNotificationTap(
       device,
-      baseline,
-      signal,
+      { notification, appMatchTexts },
+      { row: tapMatch.element.bounds, ...afterTap },
+      {
+        tap: (element) => tapElement(device, element, signal),
+        observeAfter: (previous) => observeSystemTrayAfterTap(device, previous, signal),
+      },
     );
     await captureSystemTrayTerminalEvidence(device, nextObservation, signal);
 
@@ -574,7 +584,9 @@ export class SystemTray {
       message:
         (notification.tapActionLabel
           ? `Tapped notification action "${notification.tapActionLabel}"`
-          : "Tapped notification") +
+          : openedThroughAction
+            ? "Tapped notification and its revealed Open action"
+            : "Tapped notification") +
         (settled ? "" : "; effect not yet settled — re-observe before continuing"),
       settled,
       match: match.match.matches,

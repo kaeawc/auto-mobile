@@ -1,9 +1,10 @@
 {
   "provenance": "captured",
-  "summary": "systemTray observe hierarchies on iOS 26.5 and Android API 35, plus dumpsys notification --noredact",
-  "source": "PR #16387, PR #17396, PR #18419",
+  "summary": "systemTray observe hierarchies on iOS 26.5, iOS 27.2 and Android API 35, plus dumpsys notification --noredact",
+  "source": "PR #16387, PR #17396, PR #18419, issue #19174",
   "capturedOn": [
     { "device": "iPhone 17 simulator", "os": "iOS 26.5", "formFactor": "phone" },
+    { "device": "iPhone 17 Pro simulator (Xcode 27.2)", "os": "iOS 27.2", "formFactor": "phone" },
     { "device": "Android emulator", "os": "Android API 35", "formFactor": "phone" }
   ],
   "date": "2026-11-02",

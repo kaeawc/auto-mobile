@@ -99,3 +99,61 @@ public enum SilenceFill {
         max(0, (elapsedMs - lagMs) * sampleRate / 1000 - framesWritten)
     }
 }
+
+/// The running process tap and the audio clients it covers (#19115). A running tap's process list
+/// cannot change, so a new client set means a new tap. The new tap is built before the old one is torn
+/// down, so the clients that keep playing never drop audio. A failed build keeps the old tap and leaves
+/// a retry pending instead of ending the capture: a client can exit between enumeration and tap
+/// creation (terminateApp mid-recording).
+public struct TapSwap<Client: Hashable, Tap> {
+    public enum Outcome {
+        case unchanged
+        case rebuilt
+        case failed(any Error)
+    }
+
+    public private(set) var tap: Tap?
+    public private(set) var clients: [Client: Int32] = [:]
+    /// The last build failed; the caller retries on its next tick.
+    public private(set) var retryPending = false
+
+    public init() {}
+
+    /// Moves to `clients`, building their tap with `build` (not called for no clients) and only then
+    /// tearing down the previous tap with `destroy`.
+    public mutating func update(
+        to clients: [Client: Int32],
+        build: ([Client: Int32]) throws -> Tap,
+        destroy: (Tap) -> Void
+    ) -> Outcome {
+        guard clients != self.clients else {
+            retryPending = false
+            return .unchanged
+        }
+        let next: Tap?
+        do {
+            next = clients.isEmpty ? nil : try build(clients)
+        } catch {
+            retryPending = true
+            return .failed(error)
+        }
+        let previous = tap
+        tap = next
+        self.clients = clients
+        retryPending = false
+        if let previous {
+            destroy(previous)
+        }
+        return .rebuilt
+    }
+
+    /// Tears down the running tap, if any.
+    public mutating func tearDown(destroy: (Tap) -> Void) {
+        if let previous = tap {
+            destroy(previous)
+        }
+        tap = nil
+        clients = [:]
+        retryPending = false
+    }
+}

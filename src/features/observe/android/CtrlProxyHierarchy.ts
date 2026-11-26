@@ -1,4 +1,3 @@
-import { DUMPSYS_MAX_BUFFER } from "../../../utils/android-cmdline-tools/dumpsysLimits";
 import { rethrowRealCtrlProxyWebSocketInTestError } from "../DeviceServiceClient";
 import type { HierarchyReadOptions } from "../interfaces/ViewHierarchy";
 import { AccessibilityHierarchyConverter } from "./AccessibilityHierarchyConverter";
@@ -24,7 +23,7 @@ import { satisfiesMinTimestamp } from "./hierarchyFreshness";
 import { AndroidCtrlProxyManager } from "../../../ctrlProxy/CtrlProxyManager";
 import type { ViewHierarchyResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
-import { isAndroidPackageRunning } from "../../../utils/android-cmdline-tools/androidProcessState";
+import { CachedPackageLiveness } from "./CachedPackageLiveness";
 import { errorMessage } from "../../../utils/describeUnknownError";
 import { logger } from "../../../utils/logger";
 import type { PerformanceTracker, TimingEntry } from "../../../utils/PerformanceTracker";
@@ -111,6 +110,11 @@ export class CtrlProxyHierarchy {
   private readonly syncRunner: AndroidHierarchySyncRunner;
   private readonly pendingHierarchyRejectors = new Map<string, PendingHierarchyReply>();
   private readonly waiter: AndroidHierarchyWaiter;
+  /**
+   * A cached hierarchy whose package no longer has a process cannot be recovered by waiting for
+   * a WebSocket push; it is dropped before any cache-hit or stale-fallback path.
+   */
+  private readonly packageLiveness: CachedPackageLiveness;
 
   // Track the last known foreground app to detect stale cache from a different app
   private lastKnownPackageName: string | null = null;
@@ -130,6 +134,7 @@ export class CtrlProxyHierarchy {
     this.converter = new AccessibilityHierarchyConverter(context);
     this.sender = new AndroidHierarchyRequestSender(context);
     this.waiter = new AndroidHierarchyWaiter(context, this.sender, this.pendingHierarchyRejectors);
+    this.packageLiveness = new CachedPackageLiveness(() => context.adb, context.timer);
     this.syncRunner = new AndroidHierarchySyncRunner(context, {
       sendHierarchyRequest: (options) => this.sendHierarchyRequest(options),
       waitForFreshData: (...args) => this.waitForFreshData(...args),
@@ -243,7 +248,7 @@ export class CtrlProxyHierarchy {
       const livenessTimeoutMs = Math.max(0, timeout - (this.context.timer.now() - startTime));
       const cachedPackageRunning =
         cachedHierarchy &&
-        (await this.isCachedPackageRunning(cachedHierarchy, livenessTimeoutMs, signal));
+        (await this.packageLiveness.isRunning(cachedHierarchy, livenessTimeoutMs, signal));
       throwIfAborted(signal);
       const reconcileCache = (): void => {
         const currentCachedHierarchy = this.context.getCachedHierarchy();
@@ -500,42 +505,6 @@ export class CtrlProxyHierarchy {
       };
     }
     return null;
-  }
-
-  /**
-   * A cached hierarchy whose package no longer has a process cannot be
-   * recovered by waiting for a WebSocket push. Drop it before any cache-hit or
-   * stale-fallback path so the next request resolves the device window again.
-   */
-  private async isCachedPackageRunning(
-    cachedHierarchy: CachedHierarchy,
-    timeoutMs: number,
-    signal?: AbortSignal,
-  ): Promise<boolean> {
-    const packageName = cachedHierarchy.hierarchy.packageName;
-    if (!packageName || !/^[A-Za-z0-9._]+$/.test(packageName)) {
-      return true;
-    }
-
-    try {
-      const result = await this.context.adb.executeCommand("shell dumpsys activity processes", {
-        timeoutMs,
-        maxBuffer: DUMPSYS_MAX_BUFFER,
-        noRetry: true,
-        signal,
-      });
-      return isAndroidPackageRunning(result.stdout, packageName, cachedHierarchy.hierarchy.userId);
-    } catch (error) {
-      if (signal?.aborted) {
-        throw error;
-      }
-      // Liveness is best-effort; an ADB error must not destroy otherwise usable
-      // cache state when process presence could not be determined.
-      logger.debug(
-        `[CTRL_PROXY] Could not verify cached package ${packageName} is running: ${error}`,
-      );
-      return true;
-    }
   }
 
   /**

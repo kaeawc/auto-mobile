@@ -25,6 +25,7 @@ import {
   RUNNER_FOCUS_QUERY_FAILED_FALLBACK_MESSAGE,
 } from "../observe/ios/runnerErrorCodes";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
+import { HomeScreen } from "./HomeScreen";
 import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { ANDROID_KEYCOMBINATION_MIN_API_LEVEL } from "../../utils/android-cmdline-tools/asciiKeyEvents";
 import {
@@ -214,6 +215,15 @@ export interface InputKeyIosClient {
 
 export type InputKeyIosClientFactory = (device: BootedDevice) => InputKeyIosClient;
 
+/** Verified Home navigation, the same route `pressButton home` takes on an iOS Simulator. */
+export type IosHomeNavigator = (signal?: AbortSignal) => Promise<void>;
+
+/** What the runner reports when a simulator's SpringBoard ignores Cmd+H (iPhone Duo, #19062). */
+const HOME_CHORD_IGNORED = "the home screen did not appear after Cmd+H";
+
+const HOME_CHORD_FALLBACK_WARNING =
+  "Cmd+H did not reach the home screen on this simulator (seen on iPhone Duo), so the Home button was pressed instead";
+
 const defaultInputKeyIosClientFactory: InputKeyIosClientFactory = (device) =>
   IOSCtrlProxyClient.getInstance(device);
 
@@ -254,6 +264,7 @@ export class InputKey {
   private readonly timer: Timer;
   private readonly iosClientFactory: InputKeyIosClientFactory;
   private readonly iosRawInput?: IosSimulatorRawInput;
+  private readonly iosHome: IosHomeNavigator;
 
   constructor(
     device: BootedDevice,
@@ -263,6 +274,7 @@ export class InputKey {
       timer = defaultTimer,
       iosClientFactory = defaultInputKeyIosClientFactory,
       iosRawInput,
+      iosHome,
     }: {
       adbFactory?: AdbClientFactory;
       frameContextValidator?: FrameContextValidator;
@@ -270,6 +282,8 @@ export class InputKey {
       iosClientFactory?: InputKeyIosClientFactory;
       /** The iOS Simulator HID route (#19118); `null` disables it. */
       iosRawInput?: IosSimulatorRawInput | null;
+      /** Home navigation for a Cmd+H the simulator ignored; defaults to HomeScreen's. */
+      iosHome?: IosHomeNavigator;
     } = {},
   ) {
     this.adbFactory = adbFactory;
@@ -278,6 +292,13 @@ export class InputKey {
     this.iosClientFactory = iosClientFactory;
     this.device = device;
     this.iosRawInput = resolveIosRawInput(device, iosRawInput);
+    this.iosHome =
+      iosHome ??
+      ((signal) =>
+        new HomeScreen(device, {
+          timer,
+          collaborators: { iosRawInput: this.iosRawInput ?? null },
+        }).executeIosHomeNavigation({ signal }));
     this.adb = adbFactory.create(device);
   }
 
@@ -463,7 +484,11 @@ export class InputKey {
     // The runner verifies meta+h reached the home screen; the HID helper cannot.
     const input = key === "h" && uniqueModifiers.includes("meta") ? undefined : this.iosRawInput;
     if (!input) {
-      return this.pressIosRunner({ key, modifiers: uniqueModifiers, timeoutMs }, routing);
+      const result = await this.pressIosRunner(
+        { key, modifiers: uniqueModifiers, timeoutMs },
+        routing,
+      );
+      return this.homeChordFallback(result, routing.signal);
     }
     let dispatched = false;
     let unreachable = false;
@@ -528,6 +553,32 @@ export class InputKey {
       throw InputKey.indeterminateError(result.error ?? "unknown error");
     }
     return iosInputKeyResult(key, result);
+  }
+
+  /**
+   * The iPhone Duo simulator's SpringBoard accepts Cmd+H without going home (#19062). Cmd+H means
+   * Home, so take the verified Home route `pressButton home` uses and say so in a warning.
+   */
+  private async homeChordFallback(
+    result: InputKeyResult,
+    signal?: AbortSignal,
+  ): Promise<InputKeyResult> {
+    if (result.success || !result.error?.includes(HOME_CHORD_IGNORED)) {
+      return result;
+    }
+    try {
+      await this.iosHome(signal);
+    } catch (error) {
+      throwIfAborted(signal);
+      logger.warn(`Home fallback after an ignored Cmd+H failed: ${errorMessage(error)}`, error);
+      return result;
+    }
+    return {
+      success: true,
+      key: result.key,
+      keyCode: result.keyCode,
+      warning: HOME_CHORD_FALLBACK_WARNING,
+    };
   }
 
   /** A key through the iOS Simulator HID helper, or undefined when it sent nothing. */

@@ -61,7 +61,11 @@ private object UnavailableWebPage : PrototypeWebPage {
 }
 
 @Suppress("DEPRECATION", "UnusedParameter") // The same policy applies to both authored JS settings.
-internal fun configurePrototypeWebView(view: WebView, node: PrototypeWebViewNode) {
+internal fun configurePrototypeWebView(
+  view: WebView,
+  node: PrototypeWebViewNode,
+  onTitle: () -> Unit = {},
+) {
   with(view.settings) {
     javaScriptEnabled = false
     domStorageEnabled = false
@@ -81,6 +85,8 @@ internal fun configurePrototypeWebView(view: WebView, node: PrototypeWebViewNode
   view.webChromeClient =
     object : WebChromeClient() {
       override fun onPermissionRequest(request: PermissionRequest) = request.deny()
+
+      override fun onReceivedTitle(view: WebView, title: String?) = onTitle()
 
       override fun onGeolocationPermissionsShowPrompt(
         origin: String,
@@ -122,7 +128,7 @@ private class PrototypePageView(
   private val client = PrototypeWebViewClient(node, module, page, interact)
 
   init {
-    configurePrototypeWebView(this, node)
+    configurePrototypeWebView(this, node, client::titleChanged)
     webViewClient = client
   }
 

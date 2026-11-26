@@ -683,3 +683,9 @@ describe("capability handshake before a save (#14156)", () => {
     expect(device.imports).toHaveLength(0);
   });
 });
+
+describe("ProtoViewer save warning (#19193)", () => {
+  test("says listSaved and deleteSaved do not cover the library entry", () => {
+    expect(PROTOVIEWER_IMPORTED_WARNING).toContain("listSaved and deleteSaved do not cover it");
+  });
+});

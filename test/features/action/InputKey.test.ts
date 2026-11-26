@@ -667,4 +667,67 @@ describe("InputKey", () => {
     });
     expect(fakeAdb.getExecutedCommands()).toEqual([]);
   });
+
+  describe("meta+h a simulator ignored (#19062)", () => {
+    // The runner's reply when an iPhone Duo's SpringBoard accepts Cmd+H without going home.
+    const ignored = {
+      success: false,
+      error:
+        "Key 'h' with meta was not delivered: the home screen did not appear after Cmd+H. This simulator accepts the chord without acting on it (seen on iPhone Duo); use pressButton home or homeScreen instead",
+    };
+
+    test("falls back to the verified Home route and warns", async () => {
+      const requestPressKey = mock(async () => ignored);
+      const iosHome = mock(async () => {});
+      const inputKey = new InputKey(iosDevice, {
+        adbFactory: createAdbFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        iosClientFactory: () => ({ requestPressKey }),
+        iosHome,
+      });
+
+      const result = await inputKey.press("h", 500, undefined, { modifiers: ["meta"] });
+
+      expect(iosHome).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        success: true,
+        key: "h",
+        keyCode: "h",
+        warning: expect.stringContaining("Home button was pressed instead"),
+      });
+    });
+
+    test("keeps the not-delivered failure when the Home route fails too", async () => {
+      const iosHome = mock(async () => {
+        throw new ActionableError("Home press did not bring SpringBoard to the foreground");
+      });
+      const inputKey = new InputKey(iosDevice, {
+        adbFactory: createAdbFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        iosClientFactory: () => ({ requestPressKey: mock(async () => ignored) }),
+        iosHome,
+      });
+
+      const result = await inputKey.press("h", 500, undefined, { modifiers: ["meta"] });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("was not delivered");
+    });
+
+    test("other failures do not press Home", async () => {
+      const iosHome = mock(async () => {});
+      const inputKey = new InputKey(iosDevice, {
+        adbFactory: createAdbFactory(new FakeAdbExecutor()),
+        timer: new FakeTimer(),
+        iosClientFactory: () => ({
+          requestPressKey: mock(async () => ({ success: false, error: "runner busy" })),
+        }),
+        iosHome,
+      });
+
+      await inputKey.press("h", 500, undefined, { modifiers: ["meta"] });
+
+      expect(iosHome).not.toHaveBeenCalled();
+    });
+  });
 });

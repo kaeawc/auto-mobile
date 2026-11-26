@@ -27,6 +27,7 @@ portable test/features/utility/WatchNotificationDeliveryLog.test.ts     # pure w
 
 portable test/ctrlProxy/IosCtrlProxyBuilder.localBuildOverwrite.test.ts  # fake downloader and directory lock over temp dirs only
 portable test/features/audit/IosOnDemandAuditEngines.test.ts              # fake observer, clock and process commands over a captured launchctl listing
+portable test/features/systemTray/iosTapFollowThrough.test.ts         # fake tap/observe steps over a captured cover-sheet hierarchy
 portable test/features/utility/ios/*.test.ts  # registry, env construction and injected compiler/filesystem only
 portable test/features/action/iosRotateFloatingWindow.test.ts           # pure rotate verification over captured iPad values
 portable test/daemon/iosCameraPosterSessionCleanup.test.ts  # fake session manager and in-memory registry only
@@ -130,6 +131,7 @@ portable test/utils/ios-cmdline-tools/iosDeviceType.property.test.ts     # Andro
 portable test/ctrlProxy/ios/IosRunnerLaunchGate.test.ts                  # FIFO admission and env parsing use no platform commands
 portable test/ctrlProxy/ios/IosRunnerLaunchFailure.test.ts               # pure output classification and PID failure ledger
 portable test/utils/ios-cmdline-tools/simctlFailureClassifier.test.ts # pure simctl failure-text classifier over captured fixtures and a fake port
+portable test/utils/ios-cmdline-tools/SimulatorLocationdClients.test.ts # pure clients.plist parser over captured fixtures and an injected plutil
 portable test/utils/ios-cmdline-tools/simctlFailureClassifierWiring.test.ts # classifier callers over captured fixtures, injected exec and FakeTimer; no simctl runs
 portable test/utils/ios-cmdline-tools/CoreSimulatorJxa.test.ts         # injected exec only; no osascript runs
 portable test/utils/ios-cmdline-tools/SimulatorBacklight.test.ts        # injected exec only; no osascript runs

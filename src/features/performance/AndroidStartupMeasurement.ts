@@ -2,6 +2,7 @@ import { ActionableError } from "../../models/ActionableError";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { parseResumedActivityForDisplay } from "../../utils/android-cmdline-tools/parseResumedActivity";
 import { logger } from "../../utils/logger";
+import { parseLauncherActivities } from "../action/launcherActivityParsing";
 import { shellQuote } from "../../utils/shellQuote";
 import type { Timer } from "../../utils/SystemTimer";
 import {
@@ -205,13 +206,33 @@ export class AndroidStartupMeasurement {
       `shell cmd package resolve-activity --brief ${LAUNCHER_INTENT} ${shellQuote(request.appId)}`,
       signal,
     );
-    const component = parseResolvedActivity(result.stdout, request.appId);
+    const component =
+      parseResolvedActivity(result.stdout, request.appId) ??
+      (await this.queryLauncherComponent(request.appId, signal));
     if (!component) {
       throw new ActionableError(
         `No launcher activity found for ${request.appId}. Check that it is installed, or pass activity.`,
       );
     }
     return component;
+  }
+
+  /**
+   * An app with more than one launcher activity makes `resolve-activity` answer with the system
+   * chooser (`CarResolverActivity` on Android Automotive, #19181). The package's own launcher
+   * activities are then listed with `query-activities`, and the first, the one the launcher
+   * ranks highest, is measured, matching what launchApp starts.
+   */
+  private async queryLauncherComponent(
+    appId: string,
+    signal?: AbortSignal,
+  ): Promise<string | null> {
+    const result = await this.exec(
+      `shell cmd package query-activities --brief ${LAUNCHER_INTENT} ${shellQuote(appId)}`,
+      signal,
+    );
+    const activity = parseLauncherActivities(result.stdout, appId)[0];
+    return activity ? `${appId}/${activity}` : null;
   }
 
   private async compile(

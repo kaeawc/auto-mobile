@@ -17,6 +17,7 @@ import { SESSION_CONFIG_ENV } from "../../src/devices/sessionConfig";
 import { shellQuote } from "../../src/utils/shellQuote";
 import { errorMessage } from "../../src/utils/describeUnknownError";
 import { consolePortFromSerial } from "../../src/utils/android-cmdline-tools/EmulatorConsoleClient";
+import { isValidEmulatorConsolePort } from "../../src/utils/android-cmdline-tools/EmulatorPortReservations";
 import {
   getAdbServerScopedAutoMobileDir,
   getSharedAutoMobileDir,
@@ -240,7 +241,9 @@ function protectedEmulatorPortEnv(
   const ports = new Set([5554]);
   for (const selector of protectedDevices) {
     const port = consolePortFromSerial(selector);
-    if (port !== null) {
+    // A port no launch can take needs no exclusion, and the daemon refuses one (#19371); the
+    // serial stays protected by name in the device evidence.
+    if (port !== null && isValidEmulatorConsolePort(port)) {
       ports.add(port);
     }
   }

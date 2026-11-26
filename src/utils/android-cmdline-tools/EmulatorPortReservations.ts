@@ -26,7 +26,8 @@ const MAX_EMULATOR_CONSOLE_PORT = 5682;
 const EMULATOR_CONSOLE_PORT_STEP = 2;
 const TERMINAL_RESERVATION_TTL_MS = 30_000;
 
-function isValidEmulatorConsolePort(port: number): boolean {
+/** Whether a console port is one an emulator launch can use: even, 5554 through 5682. */
+export function isValidEmulatorConsolePort(port: number): boolean {
   return (
     Number.isInteger(port) &&
     port >= MIN_EMULATOR_CONSOLE_PORT &&

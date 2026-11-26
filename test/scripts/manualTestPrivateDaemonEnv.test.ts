@@ -14,6 +14,7 @@ import {
   type CanonicalizePathFs,
 } from "../../scripts/manual-test/privateDaemonEnv";
 import { privateHarnessEnvRefusal } from "../../scripts/manual-test/harnessEnv";
+import { resolveExcludedEmulatorConsolePorts } from "../../src/utils/android-cmdline-tools/EmulatorPortReservations";
 import { resolveAutoMobileBaseDir } from "../../src/utils/tempDir";
 
 const posixTest = process.platform === "win32" ? test.skip : test;
@@ -205,6 +206,19 @@ test("every private daemon excludes protected emulator console ports", () => {
     "5554,5560",
     "5554,5560",
   ]);
+});
+test("protected emulators above the launch range stay out of the exclusion env (#19371)", () => {
+  const specs = derivePrivateDaemonBatch({
+    ...options,
+    protectedDevices: ["emulator-5710", "emulator-5682", "emulator-5750", "emulator-5555"],
+  });
+  const excluded = specs[0].env.AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS;
+  expect(excluded).toBe("5554,5682");
+  expect([
+    ...resolveExcludedEmulatorConsolePorts({
+      AUTOMOBILE_EMULATOR_EXCLUDED_CONSOLE_PORTS: excluded,
+    }),
+  ]).toEqual([5554, 5682]);
 });
 test("private daemon exclusion overrides preserve blank opt-out and per-daemon precedence", () => {
   const specs = derivePrivateDaemonBatch({

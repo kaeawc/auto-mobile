@@ -283,10 +283,9 @@ Kotlin and Swift `PrototypeNotificationsReport` twins replay
 `inspect` do not show it.
 
 Title and body limits count UTF-16 code units. The 5 KiB total counts the JSON-encoded resolved
-arguments, escaping included, and fails the call on its own (`invalid_args` when over). A code
-unit is at most 3 bytes, so title, body and `data` at their per-field limits take at most 4,480 bytes. Text
-bound at post time can still exceed it, such as emoji counted per character (5,632 bytes at the
-limits).
+arguments, escaping included, and fails the call on its own (`invalid_args` when over). Text
+within the per-field limits can still exceed it through multi-byte characters, JSON escaping or the
+other arguments.
 
 The `notifications.schedule` call takes the `post` arguments plus `delaySeconds` (a whole number,
 1 to 604800) and needs `prototype_platform_notifications_scheduled_v1` as well. The same channel and

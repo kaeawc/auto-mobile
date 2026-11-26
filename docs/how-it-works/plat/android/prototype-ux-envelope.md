@@ -67,12 +67,17 @@ and `specPath` files admit the large budget. A show then refuses a spec over the
 runtime without the capability. `requiredPrototypeCapabilities` lists the capability for such a spec,
 including one whose data action literal is over the base budget.
 
+The capability handshake carries only the versioned name, not the numbers. Host and device read the
+same `runtimeBudgets` table from the contract, and the name selects its row.
+
 On the device, the validator and the runtime's state and data writes check the runtime's own budget.
 The host mirrors device data writes and validates patches with the budget of the runtime the spec was
-shown on. ProtoViewer's library store saves and reloads specs with ProtoViewer's budget. ProtoViewer
-bundles keep their own 1 MiB `spec.json` cap. The web library keeps the base budget and does not
-advertise the capability. See the
-[devlog entry](../../../devlog/2026-11-19-prototype-runtime-budgets.md).
+shown on, and caps each patch frame at that budget's `MAX_PROTOTYPE_SPEC_BYTES`. A disposable app
+owns its spec, so its frame cap comes from the capability it advertises. ProtoViewer's library store
+saves and reloads specs with ProtoViewer's budget. ProtoViewer bundles keep their own 1 MiB
+`spec.json` cap. The web library keeps the base budget and does not advertise the capability. See
+the [devlog entry](../../../devlog/2026-11-19-prototype-runtime-budgets.md) and the
+[patch frame entry](../../../devlog/2026-11-26-prototype-patch-frame-budget.md).
 
 Stack-screen budgets (#14213). Renderers draw only a stack's top screen, so node and image bounds
 apply per screen rather than to every screen at once. The `MAX_PROTOTYPE_SPEC_NODES` /

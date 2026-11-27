@@ -19,6 +19,12 @@ export type DisplayProfileRestoreAction =
       commands: string[];
       /** Logical display ids whose state `commands` restore; absent means the default display. */
       scopes?: string[];
+      /**
+       * The posture each command must run in, aligned with `commands`: on a foldable a `wm size`
+       * write lands on the panel active at the time, so its restore switches back to that panel
+       * first (#19404). Absent, or null for a command, means the posture does not matter.
+       */
+      postures?: (RequestedPosture | null)[];
     }
   | { facet: "posture"; posture: RequestedPosture };
 
@@ -51,8 +57,21 @@ function mergeScopedCommands(existing: CommandRestoreAction, added: CommandResto
   if (fresh.length === 0) {
     return false;
   }
-  existing.commands = [...existing.commands, ...added.commands];
+  const addedScopes = added.scopes ?? [DEFAULT_DISPLAY_SCOPE];
+  const freshIndexes = addedScopes.flatMap((scope, index) =>
+    fresh.includes(scope) ? [index] : [],
+  );
+  const existingPostures = existing.postures ?? existing.commands.map(() => null);
+  const addedPostures = added.postures ?? added.commands.map(() => null);
+  existing.commands = [...existing.commands, ...freshIndexes.map((index) => added.commands[index])];
   existing.scopes = [...recorded, ...fresh];
+  const postures = [
+    ...existingPostures,
+    ...freshIndexes.map((index) => addedPostures[index] ?? null),
+  ];
+  if (postures.some((posture) => posture !== null)) {
+    existing.postures = postures;
+  }
   return true;
 }
 
@@ -132,8 +151,12 @@ export class DisplayProfileRestoreRegistry {
       this.forget(deviceId, facet);
       return;
     }
+    const postures = action.postures;
     action.commands = keep.map((index) => action.commands[index]);
     action.scopes = keep.map((index) => recorded[index]);
+    if (postures) {
+      action.postures = keep.map((index) => postures[index] ?? null);
+    }
   }
 
   /** What reset restores, latest-changed facet first. */

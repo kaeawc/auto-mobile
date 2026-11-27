@@ -168,13 +168,30 @@ async function writeRecorded(
   }
 }
 
+/**
+ * The fold panel a `wm size` write lands on: the cover panel while closed, the inner one otherwise.
+ * Undefined when the posture is unreadable, as on a device that does not fold.
+ */
+function panelOf(posture: RequestedPosture | undefined): "cover" | "inner" | undefined {
+  if (posture === undefined) {
+    return undefined;
+  }
+  return posture === "closed" ? "cover" : "inner";
+}
+
 async function applyScreenSize(context: Context, size: string): Promise<DisplayProfileStepResult> {
   const override = parseWmSizeOverride(await run(context, "shell wm size"));
   const restore = override ? `shell wm size ${override}` : "shell wm size reset";
   const command = size === "default" ? "shell wm size reset" : `shell wm size ${size}`;
-  await writeRecorded(context, { facet: "screenSize", commands: [restore] }, () =>
-    runAll(context, [command]),
-  );
+  // `wm size` keeps a separate override per fold panel, so each panel gets its own record and its
+  // restore runs on that panel (#19404).
+  const posture = await context.deps.posture.read(context.deps.signal);
+  const panel = panelOf(posture);
+  const record: DisplayProfileRestoreAction =
+    panel === undefined || posture === undefined
+      ? { facet: "screenSize", commands: [restore] }
+      : { facet: "screenSize", commands: [restore], scopes: [`0:${panel}`], postures: [posture] };
+  await writeRecorded(context, record, () => runAll(context, [command]));
   // An OEM shell may clamp or ignore a size override on a physical device.
   return isAndroidEmulatorSerial(context.device.deviceId)
     ? { step: "screenSize", status: "applied", detail: command }
@@ -498,9 +515,46 @@ export async function restoreDisplayProfileAction(
       return;
     }
     default:
+      if (action.postures?.some((posture) => posture !== null)) {
+        await restoreOnPanels(ports, action.commands, action.postures, signal);
+        return;
+      }
       for (const command of action.commands) {
         await shellRun(ports.shell, command, signal);
       }
+  }
+}
+
+/**
+ * Run each restore command in the posture it was recorded in, so it lands on that fold panel,
+ * then put the posture back to the one found (#19404).
+ */
+async function restoreOnPanels(
+  ports: DisplayProfilePorts,
+  commands: readonly string[],
+  postures: readonly (RequestedPosture | null)[],
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const found = await ports.posture.read(signal);
+  let current = found;
+  const setPosture = async (posture: RequestedPosture) => {
+    const result = await ports.posture.set(posture, signal);
+    if (result.status !== "applied") {
+      throw new ActionableError(
+        result.detail ?? `posture ${posture} could not be set to restore its panel's screen size`,
+      );
+    }
+    current = posture;
+  };
+  for (const [index, command] of commands.entries()) {
+    const posture = postures[index] ?? null;
+    if (posture !== null && panelOf(posture) !== panelOf(current)) {
+      await setPosture(posture);
+    }
+    await shellRun(ports.shell, command, signal);
+  }
+  if (found !== undefined && current !== found) {
+    await setPosture(found);
   }
 }
 

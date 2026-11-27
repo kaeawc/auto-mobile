@@ -4444,9 +4444,15 @@ describe("iOS systemTray open/close", () => {
           keyguardShowing: true,
         });
         expect(invalidated).toEqual(Array(opensAt).fill(iosDevice.deviceId));
-        // An app-tree open re-reads twice for SpringBoard's cover sheet (#19420).
-        expect(observer.getExecuteCallCount()).toBe(1 + opensAt + 2);
-        expect(timer.getSleepHistory()).toEqual(Array(opensAt).fill(250));
+        // An app-tree open re-reads for SpringBoard's cover sheet at least twice and until the
+        // open's remaining 500 ms timeout ends (#19420, #19444).
+        const rereads = Math.max(2, (500 - 250 * (opensAt - 1)) / 250);
+        expect(observer.getExecuteCallCount()).toBe(1 + opensAt + rereads);
+        // The last budget-bound poll still sleeps to the deadline but then starts no read.
+        const budgetBound = 500 - 250 * (opensAt - 1) >= 500 ? 1 : 0;
+        expect(timer.getSleepHistory()).toEqual(
+          Array(opensAt - 1 + rereads - 1 + budgetBound).fill(250),
+        );
         expect(client.swipeCalls).toHaveLength(1);
       },
     );
@@ -4508,6 +4514,48 @@ describe("iOS systemTray open/close", () => {
       expect(timer.getSleepHistory()).toEqual([]);
     });
 
+    test.each([1, 4])(
+      "open re-reads past the cached app tree until SpringBoard shows the cover sheet (device read %s) (#19444)",
+      async (coverSheetRead) => {
+        // #19444: the CtrlProxy client keeps serving the post-swipe app tree for its 2 s TTL, so a
+        // re-read that does not drop that cache never reaches the device.
+        const timer = new FakeTimer();
+        timer.enableAutoAdvance();
+        const client = new FakeIosClient();
+        const observer = new FakeObserveScreen();
+        const coverSheet = createIosObservation(ios27NotificationCenterHierarchy);
+        let cached: ObserveResult | undefined;
+        let cacheDropped = false;
+        let deviceReads = 0;
+        observer.setObserveResult(() => {
+          if (client.swipeCalls.length === 0) {
+            return ios26SettingsClosed;
+          }
+          if (cached && !cacheDropped) {
+            return cached;
+          }
+          cacheDropped = false;
+          deviceReads++;
+          // The first device read is the opening read; SpringBoard shows on re-read `coverSheetRead`.
+          cached = deviceReads > coverSheetRead ? coverSheet : ios26TrayOpenSettings;
+          return cached;
+        });
+        setSystemTrayDependencies({
+          timer,
+          iosClientFactory: () => client,
+          iosHierarchyCacheInvalidator: () => {
+            cacheDropped = true;
+          },
+          observeScreenFactory: () => observer,
+        });
+        const result = await new SystemTray(iosDevice).execute({ action: "open" });
+        expect(result.payload.success).toBe(true);
+        expect(result.payload.observation).toBe(coverSheet);
+        expect(deviceReads).toBe(coverSheetRead + 1);
+        expect(timer.getSleepHistory()).toEqual(Array(coverSheetRead - 1).fill(250));
+      },
+    );
+
     test("open keeps the app-owned cover sheet when SpringBoard never shows it", async () => {
       const timer = new FakeTimer();
       timer.enableAutoAdvance();
@@ -4524,9 +4572,36 @@ describe("iOS systemTray open/close", () => {
       const result = await new SystemTray(iosDevice).execute({ action: "open", awaitTimeout: 500 });
       expect(result.payload.success).toBe(true);
       expect(result.payload.observation).toBe(ios26TrayOpenSettings);
-      // One pre-swipe read, the opening read, and two bounded SpringBoard re-reads.
+      // One pre-swipe read, the opening read, and SpringBoard re-reads until the 500 ms timeout ends.
       expect(observer.getExecuteCallCount()).toBe(4);
-      expect(timer.getSleepHistory()).toEqual([250]);
+      expect(timer.getSleepHistory()).toEqual([250, 250]);
+    });
+
+    test("open starts no SpringBoard re-read past the budget once the minimum reads are done (#19444)", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      const readStarts: number[] = [];
+      observer.setObserveResult(() => {
+        if (client.swipeCalls.length === 0) {
+          return ios26SettingsClosed;
+        }
+        readStarts.push(timer.now());
+        // Each device read takes 50 ms, so a full 250 ms poll after the minimum overshoots.
+        timer.advanceTime(50);
+        return ios26TrayOpenSettings;
+      });
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      const result = await new SystemTray(iosDevice).execute({ action: "open", awaitTimeout: 500 });
+      expect(result.payload.observation).toBe(ios26TrayOpenSettings);
+      // The re-read budget is the 500 ms timeout counted from the opening read at readStarts[0].
+      expect(Math.max(...readStarts) - readStarts[0]).toBeLessThan(500);
+      expect(Math.max(...timer.getSleepHistory())).toBeLessThanOrEqual(250);
     });
 
     // Derived observations model partial lock updates and uncertain foregrounds;
@@ -4834,6 +4909,7 @@ describe("iOS systemTray open/close", () => {
       const result = await ensureSystemTrayOpen(iosDevice, 5000);
       expect(result.opened).toBe(true);
       expect(result.observation?.deviceLock).toEqual({ locked: true, keyguardShowing: true });
+      // Two probes during the open polls; the SpringBoard re-reads outlive the cached reading.
       expect(probeStarts).toBe(2);
       expect(client.swipeCalls).toHaveLength(1);
     });

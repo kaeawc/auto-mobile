@@ -77,6 +77,8 @@ export interface SystemTrayDependencies {
   adbFactory: (device: BootedDevice) => SystemTrayAdb;
   iosClientFactory?: (device: BootedDevice) => SystemTrayIosClient;
   iosLockStateInvalidator?: IosLockStateInvalidator;
+  /** Drops the CtrlProxy client's cached iOS tree so the next observe reads the device. */
+  iosHierarchyCacheInvalidator?: (device: BootedDevice) => void;
   pressHomeFactory?: (device: BootedDevice, signal?: AbortSignal) => Promise<IosGestureResult>;
   pressButtonFactory?: (device: BootedDevice) => Pick<PressButton, "execute">;
   /** Brings the app back after Home closes an app-owned Notification Center (#19231). */
@@ -143,6 +145,8 @@ export const getSystemTrayDependencies = (): SystemTrayDependencies => {
       observeScreenFactory: (device) => createSystemTrayObserveScreen(device),
       adbFactory: (device) => defaultAdbClientFactory.create(device),
       iosClientFactory: defaultIosClientFactory,
+      iosHierarchyCacheInvalidator: (device) =>
+        IOSCtrlProxyClient.getExistingInstance(device.deviceId)?.invalidateCache(),
       pressButtonFactory: (device) => new PressButton(device),
       pressHomeFactory: async (device, signal) => {
         const factory =
@@ -174,13 +178,22 @@ const mergedForegroundRestorer = (
     overrides.iosForegroundRestorerFactory ?? current.iosForegroundRestorerFactory,
 });
 
+const mergedIosCacheInvalidators = (
+  overrides: Partial<SystemTrayDependencies>,
+  current: SystemTrayDependencies,
+): Pick<SystemTrayDependencies, "iosLockStateInvalidator" | "iosHierarchyCacheInvalidator"> => ({
+  iosLockStateInvalidator: overrides.iosLockStateInvalidator ?? current.iosLockStateInvalidator,
+  iosHierarchyCacheInvalidator:
+    overrides.iosHierarchyCacheInvalidator ?? current.iosHierarchyCacheInvalidator,
+});
+
 export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependencies>): void => {
   const current = getSystemTrayDependencies();
   systemTrayDependencies = {
     observeScreenFactory: overrides.observeScreenFactory ?? current.observeScreenFactory,
     adbFactory: overrides.adbFactory ?? current.adbFactory,
     iosClientFactory: overrides.iosClientFactory ?? current.iosClientFactory,
-    iosLockStateInvalidator: overrides.iosLockStateInvalidator ?? current.iosLockStateInvalidator,
+    ...mergedIosCacheInvalidators(overrides, current),
     pressHomeFactory: overrides.pressHomeFactory ?? current.pressHomeFactory,
     pressButtonFactory: overrides.pressButtonFactory ?? current.pressButtonFactory,
     ...mergedForegroundRestorer(overrides, current),

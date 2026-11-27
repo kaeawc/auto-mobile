@@ -8,7 +8,8 @@ import os
 /// aggregate are rebuilt whenever a client starts or stops. A tap delivers frames only while a tapped
 /// process is playing, so once no frames have arrived for `lagMs` the output is padded with silence up
 /// to the wall clock: a capture always has its full duration, and quiet stretches keep their length.
-/// A failed rebuild keeps the running tap and retries on the next tick (#19115).
+/// A failed rebuild keeps the running tap and retries, backing off while the same clients keep failing
+/// (#19115, #19432).
 /// All mutable state is touched only on `queue`. The IOProc runs on its own `ioQueue`: stopping the
 /// aggregate waits for a running IOProc, so sharing one serial queue would deadlock a rebuild.
 final class TapRecorder: @unchecked Sendable {
@@ -71,7 +72,7 @@ final class TapRecorder: @unchecked Sendable {
         let permission = AudioCapturePermission.state()
         try queue.sync {
             startNanos = DispatchTime.now().uptimeNanoseconds
-            if case let .failed(error) = rebuild(clients: SimulatorAudioClients.current(launchdPid: launchdPid)) {
+            if case let .failed(error, _) = rebuild(clients: SimulatorAudioClients.current(launchdPid: launchdPid)) {
                 throw error
             }
             watchClients()
@@ -125,7 +126,7 @@ final class TapRecorder: @unchecked Sendable {
             return
         }
         ticks += 1
-        if swap.retryPending || ticks.isMultiple(of: Self.recheckTicks) {
+        if swap.retryDue() || ticks.isMultiple(of: Self.recheckTicks) {
             refresh()
         }
         let now = DispatchTime.now().uptimeNanoseconds
@@ -160,9 +161,21 @@ final class TapRecorder: @unchecked Sendable {
         guard !done else {
             return
         }
-        if case let .failed(error) = rebuild(clients: SimulatorAudioClients.current(launchdPid: launchdPid)) {
-            // A plain stderr line: the daemon logs it at debug level. The running tap keeps capturing.
-            LoopbackMain.report("tap rebuild failed, retrying on the next tick: \(error)")
+        guard case let .failed(error, warn) = rebuild(clients: SimulatorAudioClients.current(launchdPid: launchdPid))
+        else {
+            return
+        }
+        // A plain stderr line: the daemon logs it at debug level. The running tap keeps capturing.
+        LoopbackMain.report(
+            "tap rebuild failed \(swap.consecutiveFailures) times in a row, retrying in "
+                + "\(swap.ticksUntilRetry * Self.tickMs) ms: \(error)"
+        )
+        if warn {
+            LoopbackMain.report(LoopbackMarker.warning(
+                "The process tap could not be rebuilt for the simulator's current audio clients after "
+                    + "\(swap.consecutiveFailures) attempts, so the capture may be missing a newly started "
+                    + "client's audio: \(error)"
+            ))
         }
     }
 

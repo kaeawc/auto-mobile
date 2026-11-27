@@ -28,7 +28,8 @@ to 8653. It holds that port while the emulator runs, so you need no extra launch
 are not heard. That holds only when the result's `route` is `process-tap`. Without **System Audio
 Recording** permission the capture is silence, and the result's `warnings` says so. Give the app
 that runs AutoMobile that permission in System Settings > Privacy and Security > Screen and System
-Audio Recording.
+Audio Recording. If an app starts playing during a capture and the tap cannot be rebuilt to
+include it, the capture goes on without that app's audio and `warnings` says so.
 
 `injectAudioInput` goes through a loopback device on the Mac, shared by every simulator. Set up the
 Mac once:

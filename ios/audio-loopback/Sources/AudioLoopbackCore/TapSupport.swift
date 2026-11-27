@@ -104,20 +104,49 @@ public enum SilenceFill {
 /// cannot change, so a new client set means a new tap. The new tap is built before the old one is torn
 /// down, so the clients that keep playing never drop audio. A failed build keeps the old tap and leaves
 /// a retry pending instead of ending the capture: a client can exit between enumeration and tap
-/// creation (terminateApp mid-recording).
+/// creation (terminateApp mid-recording). While the same client set keeps failing, the retry backs off
+/// (one tick, doubling up to `maxRetryTicks`) and the `warnAfterFailures`th failure in a row asks for
+/// one warning (#19432); a new client set or a successful build resets both.
 public struct TapSwap<Client: Hashable, Tap> {
     public enum Outcome {
         case unchanged
         case rebuilt
-        case failed(any Error)
+        /// `warn` is true only for the failure that reaches `warnAfterFailures` in a row.
+        case failed(any Error, warn: Bool)
+        /// The same client set failed and its backoff has not elapsed, so nothing was built.
+        case backingOff
     }
 
     public private(set) var tap: Tap?
     public private(set) var clients: [Client: Int32] = [:]
-    /// The last build failed; the caller retries on its next tick.
-    public private(set) var retryPending = false
+    /// The longest wait between retries of one failing client set, in caller ticks.
+    public let maxRetryTicks: Int
+    public let warnAfterFailures: Int
+    /// The client set whose build last failed, while a retry is pending.
+    private var failedClients: [Client: Int32]?
+    /// Builds of `failedClients` that failed in a row.
+    public private(set) var consecutiveFailures = 0
+    /// Ticks left before the pending retry is due.
+    public private(set) var ticksUntilRetry = 0
 
-    public init() {}
+    /// The last build failed; the caller retries once `retryDue()` says so.
+    public var retryPending: Bool {
+        failedClients != nil
+    }
+
+    public init(maxRetryTicks: Int = 50, warnAfterFailures: Int = 5) {
+        self.maxRetryTicks = max(1, maxRetryTicks)
+        self.warnAfterFailures = max(1, warnAfterFailures)
+    }
+
+    /// Advances the backoff by one tick; true when the pending retry should run now.
+    public mutating func retryDue() -> Bool {
+        guard retryPending else {
+            return false
+        }
+        ticksUntilRetry = max(0, ticksUntilRetry - 1)
+        return ticksUntilRetry == 0
+    }
 
     /// Moves to `clients`, building their tap with `build` (not called for no clients) and only then
     /// tearing down the previous tap with `destroy`.
@@ -127,20 +156,26 @@ public struct TapSwap<Client: Hashable, Tap> {
         destroy: (Tap) -> Void
     ) -> Outcome {
         guard clients != self.clients else {
-            retryPending = false
+            clearFailures()
             return .unchanged
+        }
+        if clients == failedClients, ticksUntilRetry > 0 {
+            return .backingOff
         }
         let next: Tap?
         do {
             next = clients.isEmpty ? nil : try build(clients)
         } catch {
-            retryPending = true
-            return .failed(error)
+            consecutiveFailures = clients == failedClients ? consecutiveFailures + 1 : 1
+            failedClients = clients
+            let shift = min(consecutiveFailures - 1, Int.bitWidth - 2)
+            ticksUntilRetry = min(maxRetryTicks, 1 << shift)
+            return .failed(error, warn: consecutiveFailures == warnAfterFailures)
         }
         let previous = tap
         tap = next
         self.clients = clients
-        retryPending = false
+        clearFailures()
         if let previous {
             destroy(previous)
         }
@@ -154,6 +189,12 @@ public struct TapSwap<Client: Hashable, Tap> {
         }
         tap = nil
         clients = [:]
-        retryPending = false
+        clearFailures()
+    }
+
+    private mutating func clearFailures() {
+        failedClients = nil
+        consecutiveFailures = 0
+        ticksUntilRetry = 0
     }
 }

@@ -418,6 +418,24 @@ describe("HostLoopbackAudioSession process-tap capture", () => {
     expect(result.warnings).toEqual([expect.stringContaining("System Audio Recording is denied")]);
   });
 
+  test("a tap the helper could not rebuild for a new client returns the helper's warning (#19432)", async () => {
+    const { session } = setup(
+      (helper) => {
+        helper.ready("process tap of launchd_sim 4242 (2 clients, System Audio Recording denied)");
+        helper.warn("The process tap could not be rebuilt after 5 attempts");
+        helper.stdout.write(tenMsOfPcm);
+        helper.exit(0);
+      },
+      undefined,
+      async () => 4242,
+    );
+    const result = await session.captureAudio({ durationMs: 10 });
+    expect(result.warnings).toEqual([
+      expect.stringContaining("System Audio Recording is denied"),
+      "The process tap could not be rebuilt after 5 attempts",
+    ]);
+  });
+
   test("an authorized tap carries no warning", async () => {
     const { session } = setup(
       (helper) => {

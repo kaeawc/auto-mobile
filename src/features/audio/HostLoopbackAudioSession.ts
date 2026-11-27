@@ -243,12 +243,14 @@ export class HostLoopbackAudioSession implements EmulatorAudioSession {
       bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + (bytes.byteLength & ~1)),
     );
     const expected = Math.floor((options.durationMs * sampleRate) / 1000);
-    const warning = route === "process-tap" ? capturePermissionWarning(helper) : undefined;
+    const permissionWarning =
+      route === "process-tap" ? capturePermissionWarning(helper) : undefined;
+    const warnings = [...(permissionWarning ? [permissionWarning] : []), ...helper.warnings()];
     return {
       pcm: { sampleRate, channels: 1, samples },
       timedOut: timedOut || samples.length < expected,
       route,
-      ...(warning ? { warnings: [warning] } : {}),
+      ...(warnings.length ? { warnings } : {}),
     };
   }
 

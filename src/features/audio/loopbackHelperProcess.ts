@@ -12,6 +12,8 @@ export const LOOPBACK_READY_PREFIX = "audio-loopback-ready:";
 /** The permission TapRecorder.swift names in its ready marker: `…, System Audio Recording <state>)`. */
 const PROCESS_TAP_PERMISSION = /System Audio Recording (\w+)\)\s*$/;
 export const LOOPBACK_ERROR_PREFIX = "audio-loopback-error:";
+/** A problem that leaves the run going but its audio incomplete, such as an untapped client (#19432). */
+export const LOOPBACK_WARNING_PREFIX = "audio-loopback-warning:";
 /** Opening a CoreAudio device takes milliseconds; this only bounds a wedged helper. */
 export const LOOPBACK_READY_TIMEOUT_MS = 5_000;
 
@@ -47,6 +49,8 @@ export interface RunningLoopbackHelper {
    * `denied`, `undetermined` or `unknown`); absent for the loopback device modes.
    */
   capturePermission(): string | undefined;
+  /** The warnings the helper reported so far, in order. */
+  warnings(): string[];
 }
 
 interface HelperReport {
@@ -124,6 +128,7 @@ export async function startLoopbackHelper(options: {
   });
   let pending = "";
   let capturePermission: string | undefined;
+  const warnings: string[] = [];
   const handleLine = (line: string) => {
     if (line.startsWith(LOOPBACK_READY_PREFIX)) {
       logger.debug(`audio-loopback-helper: ${line}`);
@@ -136,6 +141,10 @@ export async function startLoopbackHelper(options: {
       markReady();
     } else if (line.startsWith(LOOPBACK_ERROR_PREFIX)) {
       report = parseError(line);
+    } else if (line.startsWith(LOOPBACK_WARNING_PREFIX)) {
+      const warning = line.slice(LOOPBACK_WARNING_PREFIX.length).trim();
+      logger.warn(`audio-loopback-helper: ${warning}`);
+      warnings.push(warning);
     } else if (line.trim()) {
       logger.debug(`audio-loopback-helper: ${line}`);
     }
@@ -203,6 +212,7 @@ export async function startLoopbackHelper(options: {
     sinkBusy: () => sinkBusy,
     failure: () => loopbackError(options.operation, report, exitCode),
     capturePermission: () => capturePermission,
+    warnings: () => [...warnings],
   };
   await waitForReady(helper, ready, options, () => report);
   return helper;

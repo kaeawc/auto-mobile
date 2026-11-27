@@ -122,6 +122,17 @@
         }
       }
     },
+    "Back": {
+      "comment": "PrototypeScreen chrome: goes back one route inside the open prototype.",
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Back"
+          }
+        }
+      }
+    },
     "Allow network for imported prototypes": {
       "comment": "LibrarySettingsView chrome: Label, message, or action in this screen.",
       "localizations": {

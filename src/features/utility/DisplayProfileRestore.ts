@@ -46,25 +46,60 @@ type CommandRestoreAction = Extract<DisplayProfileRestoreAction, { commands: str
 const DEFAULT_DISPLAY_SCOPE = "0";
 
 /**
- * A command facet is write-once per display: a second display (#14101) adds its own restore
- * commands to the same facet, while a display already recorded keeps its first original.
+ * The fold panel a `wm size` write lands on: the cover panel while closed, the inner one otherwise.
+ * Undefined when the posture is unknown, as on a device that does not fold.
  */
-function mergeScopedCommands(existing: CommandRestoreAction, added: CommandRestoreAction): boolean {
-  const recorded = existing.scopes ?? [DEFAULT_DISPLAY_SCOPE];
-  const fresh = (added.scopes ?? [DEFAULT_DISPLAY_SCOPE]).filter(
-    (scope) => !recorded.includes(scope),
-  );
-  if (fresh.length === 0) {
+export function panelOf(
+  posture: RequestedPosture | null | undefined,
+): "cover" | "inner" | undefined {
+  if (posture === null || posture === undefined) {
+    return undefined;
+  }
+  return posture === "closed" ? "cover" : "inner";
+}
+
+/**
+ * Whether two restore entries put back the same state. The scope is the logical display id
+ * (displayConfig and displayProfile share it); on a foldable an entry may also name the panel it
+ * was recorded on (#19404). An entry without a panel, such as a displayConfig record, covers
+ * every panel of its display, so it and a per-panel entry never both restore the same size.
+ */
+function sameTarget(
+  scopeA: string,
+  postureA: RequestedPosture | null,
+  scopeB: string,
+  postureB: RequestedPosture | null,
+): boolean {
+  if (scopeA !== scopeB) {
     return false;
   }
-  const addedScopes = added.scopes ?? [DEFAULT_DISPLAY_SCOPE];
-  const freshIndexes = addedScopes.flatMap((scope, index) =>
-    fresh.includes(scope) ? [index] : [],
-  );
+  const panelA = panelOf(postureA);
+  const panelB = panelOf(postureB);
+  return panelA === undefined || panelB === undefined || panelA === panelB;
+}
+
+/**
+ * A command facet is write-once per display and fold panel: a second display (#14101) or panel
+ * (#19404) adds its own restore commands to the same facet, while one already recorded keeps its
+ * first original.
+ */
+function mergeScopedCommands(existing: CommandRestoreAction, added: CommandRestoreAction): boolean {
+  const recorded = existing.scopes ?? existing.commands.map(() => DEFAULT_DISPLAY_SCOPE);
   const existingPostures = existing.postures ?? existing.commands.map(() => null);
+  const addedScopes = added.scopes ?? added.commands.map(() => DEFAULT_DISPLAY_SCOPE);
   const addedPostures = added.postures ?? added.commands.map(() => null);
+  const freshIndexes = addedScopes.flatMap((scope, index) =>
+    recorded.some((known, at) =>
+      sameTarget(known, existingPostures[at] ?? null, scope, addedPostures[index] ?? null),
+    )
+      ? []
+      : [index],
+  );
+  if (freshIndexes.length === 0) {
+    return false;
+  }
   existing.commands = [...existing.commands, ...freshIndexes.map((index) => added.commands[index])];
-  existing.scopes = [...recorded, ...fresh];
+  existing.scopes = [...recorded, ...freshIndexes.map((index) => addedScopes[index])];
   const postures = [
     ...existingPostures,
     ...freshIndexes.map((index) => addedPostures[index] ?? null),
@@ -146,14 +181,28 @@ export class DisplayProfileRestoreRegistry {
       return;
     }
     const recorded = action.scopes ?? [DEFAULT_DISPLAY_SCOPE];
-    const keep = recorded.flatMap((scope, index) => (scopes.includes(scope) ? [] : [index]));
+    this.forgetEntries(
+      deviceId,
+      facet,
+      recorded.flatMap((scope, index) => (scopes.includes(scope) ? [index] : [])),
+    );
+  }
+
+  /** Drop the entries at `indexes` from a command facet; the facet goes when nothing remains. */
+  forgetEntries(deviceId: string, facet: DisplayProfileFacet, indexes: readonly number[]): void {
+    const action = this.entries.get(deviceId)?.actions.get(facet);
+    if (!action || !("commands" in action)) {
+      return;
+    }
+    const recorded = action.scopes ?? action.commands.map(() => DEFAULT_DISPLAY_SCOPE);
+    const keep = action.commands.flatMap((_, index) => (indexes.includes(index) ? [] : [index]));
     if (keep.length === 0) {
       this.forget(deviceId, facet);
       return;
     }
     const postures = action.postures;
     action.commands = keep.map((index) => action.commands[index]);
-    action.scopes = keep.map((index) => recorded[index]);
+    action.scopes = keep.map((index) => recorded[index] ?? DEFAULT_DISPLAY_SCOPE);
     if (postures) {
       action.postures = keep.map((index) => postures[index] ?? null);
     }

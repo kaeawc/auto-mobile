@@ -115,7 +115,7 @@ describe("display profiles (#14052)", () => {
     expect(size).toEqual({
       facet: "screenSize",
       commands: ["shell wm size reset"],
-      scopes: ["0:inner"],
+      scopes: ["0"],
       postures: ["opened"],
     });
   });

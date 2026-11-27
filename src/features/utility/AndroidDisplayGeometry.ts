@@ -479,7 +479,9 @@ export class AndroidDisplayGeometry {
       const commands = action.facet === "screenSize" ? [action.commands[mine]] : action.commands;
       if (!(await this.runAll(commands, action.facet, errors))) {
         if (action.facet === "screenSize") {
-          this.registry.forgetScopes(this.device.deviceId, action.facet, [scope]);
+          // Only the entry restored here: on a foldable another panel's entry under the same
+          // display id stays recorded for displayProfile's reset or the session's release (#19404).
+          this.registry.forgetEntries(this.device.deviceId, action.facet, [mine]);
         } else {
           this.registry.forget(this.device.deviceId, action.facet);
         }

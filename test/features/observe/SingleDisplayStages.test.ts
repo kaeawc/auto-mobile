@@ -14,6 +14,7 @@ import { SingleDisplayCaptureStage } from "../../../src/features/observe/SingleD
 import { SingleDisplayEnrichStage } from "../../../src/features/observe/SingleDisplayEnrichStage";
 import { SingleDisplayReconcileStage } from "../../../src/features/observe/SingleDisplayReconcileStage";
 import type { SingleDisplayRun } from "../../../src/features/observe/singleDisplayRun";
+import type { ObservationCollectionRequest } from "../../../src/features/observe/collectors/ObservationCollectionRequest";
 import type { PostCaptureForegroundIdentity } from "../../../src/features/observe/ActiveWindowAttribution";
 import { platformObservationTraits } from "../../../src/features/observe/collectors/PlatformObservationTraits";
 import { SafeAreaAuditor } from "../../../src/features/observe/audits/SafeAreaAuditor";
@@ -118,6 +119,44 @@ describe("SingleDisplayCaptureStage.resolveSingleDisplayIntent", () => {
       new ObservedAndroidDisplayCache(new FakeTimer()),
     ).resolveSingleDisplayIntent(undefined);
     expect(intent.iosLockState).toBeUndefined();
+  });
+});
+
+describe("SingleDisplayCaptureStage hierarchy read policy", () => {
+  const ios: BootedDevice = { name: "iPhone", platform: "ios", deviceId: "SIM-UDID" };
+
+  async function readOptionsFor(device: BootedDevice, options: SingleDisplayRun["options"]) {
+    const requests: ObservationCollectionRequest[] = [];
+    await new SingleDisplayCaptureStage({
+      device: () => device,
+      timer: () => new FakeTimer(),
+      displayBinding: () => unused("displayBinding"),
+      hierarchyCapture: () => unused("hierarchyCapture"),
+      hierarchyCollector: () => unused("hierarchyCollector"),
+      deviceStateCollector: () => unused("deviceStateCollector"),
+      iosLockStateProbe: () => unused("iosLockStateProbe"),
+      observedAndroidDisplayCache: () => new ObservedAndroidDisplayCache(new FakeTimer()),
+      requestedDisplay: () => undefined,
+      selectedDisplayRead: () => ({}),
+      createBaseResult: () => unused("createBaseResult"),
+      createCriticalFallback: () => unused("createCriticalFallback"),
+      collectAllData: async (_result, request) => {
+        requests.push(request);
+      },
+    }).captureSingleDisplay(fakeRun({ options }));
+    expect(requests).toHaveLength(1);
+    return requests[0].readOptions;
+  }
+
+  test("an iOS read forwards requireFreshExtraction to the hierarchy read (#19446)", async () => {
+    expect(await readOptionsFor(ios, { requireFreshExtraction: true, timeoutMs: 900 })).toEqual({
+      timeoutMs: 900,
+      requireFreshExtraction: true,
+    });
+  });
+
+  test("an iOS read without the flag keeps the plain budget, so the cache may serve", async () => {
+    expect(await readOptionsFor(ios, { timeoutMs: 900 })).toBe(900);
   });
 });
 

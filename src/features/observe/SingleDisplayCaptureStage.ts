@@ -79,10 +79,10 @@ export class SingleDisplayCaptureStage {
       skipBackStack,
       readOnly: observerMode || preserveDisplayState || options?.skipRecompositionTracking === true,
       capturedHierarchy,
-      readOptions:
-        this.d.device().platform === "android" && options?.requireFreshExtraction
-          ? { timeoutMs: options.timeoutMs, requireFreshExtraction: options.requireFreshExtraction }
-          : options?.timeoutMs,
+      // Both platforms honour the flag: iOS maps it to a forced device capture (#19446).
+      readOptions: options?.requireFreshExtraction
+        ? { timeoutMs: options.timeoutMs, requireFreshExtraction: options.requireFreshExtraction }
+        : options?.timeoutMs,
       displayId: requestedDisplayId ?? observedAndroid?.logicalId ?? 0,
     });
   }

@@ -68,7 +68,7 @@ export interface ObservePollOptions {
    * Default false preserves standalone settle and waitFor push-wait behaviour.
    */
   skipWaitForFresh?: boolean;
-  /** Embedded gate only: re-extract unverified Android cache hits with a positive floor. */
+  /** Re-extract cache hits per read (Android: unverified hits with a positive floor; iOS: every read). */
   requireFreshExtraction?: boolean;
   /**
    * Resume polling when a finishing capture invalidates a match and budget remains.

@@ -426,6 +426,38 @@ describe("CtrlProxyHierarchy cache invalidation (iOS)", () => {
     }
   });
 
+  test("requireFreshExtraction captures on the device inside the TTL (#19446)", async () => {
+    await primeCache();
+    const cached = h.getCached()!.hierarchy;
+    h.timer.advanceTime(CACHE_TTL_MS - 1);
+
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+      requireFreshExtraction: true,
+    });
+
+    expect(h.fetchCount()).toBe(2);
+    expect(h.requests()[1]).toEqual({ type: "request_hierarchy", disableAllFiltering: false });
+    expect(result.fresh).toBe(true);
+    expect(result[iosHierarchyAcquisition]).not.toBe("client-cache");
+    expect(result.hierarchy).not.toBe(cached);
+  });
+
+  test("without requireFreshExtraction the same read serves the cache (#19446)", async () => {
+    await primeCache();
+    const cached = h.getCached()!.hierarchy;
+    h.timer.advanceTime(CACHE_TTL_MS - 1);
+
+    const result = await h.hierarchy.getLatestHierarchy(false, 1000, undefined, {
+      skipWaitForFresh: true,
+      requireFreshExtraction: false,
+    });
+
+    expect(h.fetchCount()).toBe(1);
+    expect(result[iosHierarchyAcquisition]).toBe("client-cache");
+    expect(result.hierarchy).toBe(cached);
+  });
+
   // --- Controls: these fail if the fix simply disabled caching. ---
 
   test("without invalidation the cache serves inside the TTL", async () => {

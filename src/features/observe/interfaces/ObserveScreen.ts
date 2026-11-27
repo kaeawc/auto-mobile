@@ -34,7 +34,7 @@ export interface ObserveScreenExecuteOptions {
   /** Bounds an explicitly requested hierarchy capture. */
   timeoutMs?: number;
   skipWaitForFresh?: boolean;
-  /** Re-extract Android cache hits (including known wrong-window trees). Off by default. */
+  /** Re-extract cache hits (Android: including known wrong-window trees; iOS: a forced capture). Off by default. */
   requireFreshExtraction?: boolean;
   minTimestamp?: number;
   signal?: AbortSignal;

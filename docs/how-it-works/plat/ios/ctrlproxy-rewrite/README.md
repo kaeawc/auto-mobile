@@ -173,7 +173,7 @@ gesture on the mismatch path to keep the app off the main-screen rule.
 On an iPad, any inset app window (tiled at the screen origin too) reports the screen
 as the root's bounds, and observe also captures the other visible app windows (#18830).
 Candidates are the apps the runner has launched or observed, plus the common system apps
-at most once every 10 s; SpringBoard's tree names no app windows. Observe snapshots each
+at most once every 10 s. Observe snapshots each
 candidate in `.runningForeground` whose window is on screen and not wholly behind the
 focused window. It moves that snapshot into screen space and drops its nodes whose centre
 the focused window covers.
@@ -201,6 +201,15 @@ refuses a target with no such point. The system consumes that first tap to focus
 so the control under it does not react and a second tap activates it. The runner does not
 repeat the tap itself. Any foreground switch drops the observed window frames. An app
 opened outside the runner that is not a common system app is not found.
+
+Stage Manager shows the other apps as cards in a strip beside the stage. Their apps are
+suspended, so there is no window to snapshot. Observe reads one SpringBoard snapshot for
+cards named `card:<bundleId>:sceneID:<scene>`. A card is reported when it is on screen,
+clear of the focused window, not parked by Home, and its app has no window already
+reported or running in the foreground. Each card is one clickable node labelled with the
+app name, with `resource-id` `stage-manager-strip-card`, and a `windows` entry with the
+card frame. Tapping a card brings that app to the stage, and the runner tracks it as
+focused.
 
 Full-screen apps and iPhones have no mismatch and perform no extra read.
 

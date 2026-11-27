@@ -4573,6 +4573,33 @@ describe("iOS systemTray open/close", () => {
       expect(timer.getSleepHistory()).toEqual([250, 250]);
     });
 
+    test("open starts no SpringBoard re-read past the budget once the minimum reads are done (#19444)", async () => {
+      const timer = new FakeTimer();
+      timer.enableAutoAdvance();
+      const client = new FakeIosClient();
+      const observer = new FakeObserveScreen();
+      const readStarts: number[] = [];
+      observer.setObserveResult(() => {
+        if (client.swipeCalls.length === 0) {
+          return ios26SettingsClosed;
+        }
+        readStarts.push(timer.now());
+        // Each device read takes 50 ms, so a full 250 ms poll after the minimum overshoots.
+        timer.advanceTime(50);
+        return ios26TrayOpenSettings;
+      });
+      setSystemTrayDependencies({
+        timer,
+        iosClientFactory: () => client,
+        observeScreenFactory: () => observer,
+      });
+      const result = await new SystemTray(iosDevice).execute({ action: "open", awaitTimeout: 500 });
+      expect(result.payload.observation).toBe(ios26TrayOpenSettings);
+      // The re-read budget is the 500 ms timeout counted from the opening read at readStarts[0].
+      expect(Math.max(...readStarts) - readStarts[0]).toBeLessThanOrEqual(500);
+      expect(Math.max(...timer.getSleepHistory())).toBeLessThanOrEqual(250);
+    });
+
     // Derived observations model partial lock updates and uncertain foregrounds;
     // the captured fixture files remain verbatim.
     test.each([

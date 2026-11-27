@@ -285,6 +285,29 @@ export const waitForSystemTrayOpen = async (
 };
 
 /**
+ * Wait before a SpringBoard re-read. Past the minimum, the wait is capped at the remaining budget
+ * and false means the budget is spent, so no further device read starts; the minimum reads always
+ * get a full poll.
+ */
+const pollBeforeReread = async (
+  read: number,
+  deadline: number,
+  signal?: AbortSignal,
+): Promise<boolean> => {
+  const { timer } = getSystemTrayDependencies();
+  if (read < IOS_APP_TRAY_SPRINGBOARD_MIN_REREADS) {
+    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS, signal);
+    return true;
+  }
+  const remaining = deadline - timer.now();
+  if (remaining <= 0) {
+    return false;
+  }
+  await sleep(Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remaining), signal);
+  return timer.now() <= deadline;
+};
+
+/**
  * The open was detected from an app tree plus lock flags. Return SpringBoard's cover sheet when a
  * device read shows it, so the result observes what the swipe opened instead of the app underneath.
  */
@@ -307,8 +330,8 @@ const preferSpringBoardCoverSheet = async (
   const { timer, iosHierarchyCacheInvalidator } = getSystemTrayDependencies();
   const deadline = timer.now() + Math.min(IOS_APP_TRAY_SPRINGBOARD_WAIT_MS, remainingMs);
   for (let read = 0; ; read++) {
-    if (read > 0) {
-      await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS, signal);
+    if (read > 0 && !(await pollBeforeReread(read, deadline, signal))) {
+      return appObservation;
     }
     // requireFreshExtraction is not forwarded on iOS, so drop the client's cached app tree.
     iosHierarchyCacheInvalidator?.(detector.device);

@@ -1,7 +1,10 @@
 import Foundation
 
 /// SpringBoard keeps full-screen switcher cards behind foreground apps. Only a scaled card
-/// inside the switcher content is evidence that the App Switcher is actually presented.
+/// inside the switcher content is evidence that the App Switcher is actually presented. A card
+/// with no value is a live app scene: an iPad stage or floating window keeps one beside scaled
+/// Stage Manager strip cards, which also report Active, so a live card means the switcher is not
+/// presented (#19455).
 enum AppSwitcherSnapshotClassifier {
     struct ElementSnapshot {
         let identifier: String
@@ -24,6 +27,11 @@ enum AppSwitcherSnapshotClassifier {
         let contentViews = elements.filter {
             $0.identifier == "AppSwitcherContentView" && $0.frame.width > 0 && $0.frame.height > 0
         }
+        let hasLiveCard = elements.contains { card in
+            card.identifier.hasPrefix("card:") && (card.value ?? "").isEmpty
+                && card.frame.width > 0 && card.frame.height > 0
+        }
+        guard !hasLiveCard else { return false }
         return contentViews.contains { content in
             elements.contains { card in
                 card.identifier.hasPrefix("card:") && card.value != stashedCardValue

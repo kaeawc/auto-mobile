@@ -69,6 +69,22 @@ final class AppSwitcherSnapshotClassifierTests: XCTestCase {
         XCTAssertTrue(AppSwitcherSnapshotClassifier.isVisible(active))
     }
 
+    func testCapturedStageManagerStripIsNotTheSwitcher() throws {
+        // #19455: Stage Manager strip cards are scaled and Active like switcher cards, but the stage
+        // app's own card is live (no value), so the switcher is not presented.
+        for name in [
+            "ios27_2-ipad-stage-manager-files-focused",
+            "ios27_2-ipad-stage-manager-reminders-focused",
+            "ios27_2-ipad-windowed-files-floating-focused",
+        ] {
+            let elements = try snapshots(name)
+            XCTAssertTrue(elements.contains { $0.identifier.hasPrefix("card:") && $0.value == nil }, name)
+            XCTAssertFalse(AppSwitcherSnapshotClassifier.isVisible(elements), name)
+        }
+        let strip = try snapshots("ios27_2-ipad-stage-manager-files-focused")
+        XCTAssertTrue(strip.contains { $0.identifier.hasPrefix("card:") && $0.value == "Active" })
+    }
+
     func testCapturedHomeScreensShowTheIconList() throws {
         // #18828: Home parks the floating iPad window, which stays .runningForeground.
         for name in ["ios27_0-home-screen-no-switcher", "ios27_2-ipad-windowed-files-parked-after-home"] {

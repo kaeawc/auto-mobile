@@ -128,6 +128,8 @@ public enum LoopbackFailure: String, Equatable, Sendable {
 public enum LoopbackMarker {
     public static let readyPrefix = "audio-loopback-ready:"
     public static let errorPrefix = "audio-loopback-error:"
+    /// A problem that does not end the run but makes its audio incomplete, such as a client left untapped.
+    public static let warningPrefix = "audio-loopback-warning:"
 
     /// Written once the device is open, before any audio is needed.
     public static func ready(deviceName: String) -> String {
@@ -136,6 +138,10 @@ public enum LoopbackMarker {
 
     public static func error(_ failure: LoopbackFailure, _ message: String) -> String {
         "\(errorPrefix) \(failure.rawValue) \(singleLine(message))"
+    }
+
+    public static func warning(_ message: String) -> String {
+        "\(warningPrefix) \(singleLine(message))"
     }
 
     private static func singleLine(_ text: String) -> String {

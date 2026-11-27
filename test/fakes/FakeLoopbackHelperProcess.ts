@@ -43,6 +43,10 @@ export class FakeLoopbackHelperProcess extends EventEmitter implements LoopbackH
     this.stderr.write(`audio-loopback-ready: ${deviceName}\n`);
   }
 
+  warn(message: string): void {
+    this.stderr.write(`audio-loopback-warning: ${message}\n`);
+  }
+
   report(code: string, message: string): void {
     this.stderr.write(`audio-loopback-error: ${code} ${message}\n`);
   }

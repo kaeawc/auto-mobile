@@ -5,10 +5,11 @@ import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { invalidateDisplayCaches } from "../observe/DisplayTransition";
+import type { RequestedPosture } from "../device/postureCommands";
 import {
   parseOverlayList,
-  PostureSwitchBackError,
   runOnPanels,
+  unrestoredPosture,
   type PostureControl,
 } from "./DisplayProfile";
 import {
@@ -95,7 +96,8 @@ interface OverlayStep {
 export interface PreparedDisplayGeometry {
   previous: DisplayGeometryValues;
   available?: DisplayGeometryAvailability;
-  size?: { current: WmSize; target: DisplaySizeInput };
+  /** `posture`: the fold posture `current` was read in, so its restore targets that panel. */
+  size?: { current: WmSize; target: DisplaySizeInput; posture?: RequestedPosture };
   overlays?: { entries: OverlayEntry[]; steps: OverlayStep[] };
 }
 
@@ -270,12 +272,14 @@ export class AndroidDisplayGeometry {
     try {
       const prepared: PreparedDisplayGeometry = { previous: {} };
       if (input.size !== undefined) {
+        // Read before the size, so the recorded panel is the one the original came from (#19452).
+        const posture = await this.panelPosture();
         const current = await this.readSize();
         const refusal = this.sizeRefusal(input.size, current);
         if (refusal) {
           return { refusal };
         }
-        prepared.size = { current, target: input.size };
+        prepared.size = { current, target: input.size, ...(posture ? { posture } : {}) };
         prepared.previous.size = restorableSize(current);
       }
       if (steps.length > 0) {
@@ -369,7 +373,7 @@ export class AndroidDisplayGeometry {
     }
     // `wm size` keeps one override per fold panel of the default display, so on a foldable the
     // record names the panel this write lands on, as displayProfile's does (#19452).
-    const posture = await this.panelPosture();
+    const posture = size.posture;
     // Record before dispatch: even a rejected write can leave the display resized.
     this.registry.record(
       this.device,
@@ -546,11 +550,12 @@ export class AndroidDisplayGeometry {
     } catch (error) {
       logger.warn(`[DisplayGeometry] size restore failed: ${errorMessage(error)}`, error);
       errors.push(`${action.facet}: ${errorMessage(error)}`);
-      if (error instanceof PostureSwitchBackError) {
-        // Every panel's size is back; displayProfile's reset or the release retries the posture.
+      const pending = unrestoredPosture(error);
+      if (pending !== undefined) {
+        // The posture was not put back: displayProfile's reset or the release retries it.
         this.registry.record(
           this.device,
-          { facet: "posture", posture: error.posture },
+          { facet: "posture", posture: pending },
           this.options.owner,
         );
       }

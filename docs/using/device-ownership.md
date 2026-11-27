@@ -291,9 +291,9 @@ the device. It resets them when a different session next acquires the device:
 
 On Android, `displayConfig` also sets the runtime screen size, navigation mode
 and display-cutout emulation. AutoMobile restores those when the session that
-changed them releases the device or rebinds to another one. `displayConfig`
-`reset` clears a leftover size override even after a daemon restart. On a
-foldable, it restores each fold panel's size.
+changed them releases the device or rebinds to another one. A `displayConfig`
+`reset` restores each recorded fold panel size and otherwise clears the active
+panel's override, even after a daemon restart.
 
 Appearance configuration is per session.
 

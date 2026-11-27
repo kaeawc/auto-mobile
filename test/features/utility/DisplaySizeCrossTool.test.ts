@@ -229,6 +229,74 @@ describe("displayConfig size restore per fold panel (#19452)", () => {
     ]);
   });
 
+  test("the panel is read before the original size, so both describe the same panel", async () => {
+    const read = ports.posture.read.bind(ports.posture);
+    const sizeReadsBeforePosture: number[] = [];
+    ports.posture.read = async () => {
+      sizeReadsBeforePosture.push(
+        adb.getAllCommands().filter((command) => command === "shell wm size").length,
+      );
+      return read();
+    };
+
+    await config.setConfig({ size: { width: 1600, height: 1700 } });
+
+    expect(sizeReadsBeforePosture).toEqual([0]);
+  });
+
+  test("with the posture unreadable at reset, no panel is switched and every entry stays", async () => {
+    await configInnerThenProfileCover();
+    ports.posture.current = undefined;
+    const before = ports.posture.calls.length;
+
+    const result = await config.setConfig({ reset: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("posture is unreadable");
+    expect(ports.posture.calls.length).toBe(before);
+    expect([inner(), cover()]).toEqual(["1600x1700", "900x2000"]);
+    expect(registry.pending(emulator.deviceId)).toEqual([
+      { facet: "posture", posture: "opened" },
+      {
+        facet: "screenSize",
+        commands: ["shell wm size reset", "shell wm size reset"],
+        scopes: ["0", "0"],
+        postures: ["opened", "closed"],
+      },
+    ]);
+  });
+
+  test("a failed panel restore whose switch back also fails records the posture to put back", async () => {
+    adb.displays.set(0, { physical: "2076x2152", override: "1800x1900" });
+    await config.setConfig({ size: { width: 1600, height: 1700 } });
+    ports.posture.current = "closed";
+    await config.setConfig({ size: { width: 900, height: 2000 } });
+    ports.posture.current = "opened";
+    adb.failing.add("shell wm size reset");
+    // The switch to the cover panel is applied; the switch back after its failed restore is refused.
+    ports.posture.onSet = () => {
+      if (ports.posture.calls.length === 1) {
+        ports.posture.unsupported = "posture service busy";
+      }
+    };
+
+    const result = await config.setConfig({ reset: true });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("injected failure");
+    expect([inner(), cover()]).toEqual(["1800x1900", "900x2000"]);
+    expect(await ports.posture.read()).toBe("closed");
+    expect(registry.pending(emulator.deviceId)).toEqual([
+      { facet: "posture", posture: "opened" },
+      {
+        facet: "screenSize",
+        commands: ["shell wm size reset"],
+        scopes: ["0"],
+        postures: ["closed"],
+      },
+    ]);
+  });
+
   test("a refused switch back keeps the posture recorded after every panel is restored", async () => {
     await config.setConfig({ size: { width: 1600, height: 1700 } });
     ports.posture.current = "closed";

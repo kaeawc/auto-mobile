@@ -306,9 +306,7 @@ final class CommandHierarchyCaptureTests: XCTestCase {
 
     func testContextCheckedGestureRecordsRawCapture() async throws {
         let fixture = CaptureFixture()
-        let expected = try XCTUnwrap(fixture.handler.frameContext.context(
-            for: fixture.handler.enrichWithCachedSdkHierarchy(fixture.raw)
-        ))
+        let expected = try XCTUnwrap(fixture.handler.frameContext.context(for: fixture.raw))
         try await fixture.handler.performContextCheckedGesture(expected: expected) {
             try fixture.gestures.tap(x: 1, y: 2, duration: 0)
         }
@@ -319,15 +317,33 @@ final class CommandHierarchyCaptureTests: XCTestCase {
 
     func testAsyncContextCheckedGestureRecordsRawCapture() async throws {
         let fixture = CaptureFixture()
-        let expected = try XCTUnwrap(fixture.handler.frameContext.context(
-            for: fixture.handler.enrichWithCachedSdkHierarchy(fixture.raw)
-        ))
+        let expected = try XCTUnwrap(fixture.handler.frameContext.context(for: fixture.raw))
         try await fixture.handler.performContextCheckedGestureAsync(expected: expected) {
             try await fixture.gestures.setText(resourceId: "field", text: "value")
         }
 
         XCTAssertEqual(fixture.gestures.setTextCalls, 1)
         try fixture.assertRawCaptures(count: 1)
+    }
+
+    func testAnObservedContextSurvivesADifferentSdkMergeAtTheGestureFence() async throws {
+        let fixture = CaptureFixture()
+        let request = RequestHierarchy(requestId: "observe", sinceTimestamp: 0)
+        let observed = try await fixture.handler.handleRequestHierarchy(request, startTime: Date())
+        XCTAssertEqual(observed.data?.insets.source, "ios-sdk-safe-area")
+        let context = try XCTUnwrap(observed.frameContext)
+        // The fence re-captures with whatever SDK snapshot is cached by then; an iPad floating
+        // window made that merge differ from the observe's on every call (#19169).
+        fixture.cache.update(SdkViewHierarchy(
+            timestamp: 3, bundleId: fixture.raw.packageName, screenScale: 3, screenWidth: 375, screenHeight: 812,
+            safeAreaInsets: SdkEdgeInsets(top: 44, right: 0, bottom: 34, left: 0), root: nil
+        ))
+
+        try await fixture.handler.performContextCheckedGesture(expected: context) {
+            try fixture.gestures.tap(x: 1, y: 2, duration: 0)
+        }
+
+        XCTAssertEqual(fixture.gestures.tapCalls, 1)
     }
 
     func testContextlessGesturesStillSkipCapture() async throws {
@@ -375,11 +391,11 @@ private final class CaptureFixture {
     let gestures = FakeGesturePerformer()
     let debouncer = FakeHierarchyDebouncer()
     let handler: CommandHandler
+    let cache = SdkHierarchyCache()
 
     init() {
         locator = FakeElementLocator(hierarchy: raw)
         locator.appState = .runningForeground
-        let cache = SdkHierarchyCache()
         cache.update(SdkViewHierarchy(
             timestamp: 2, bundleId: raw.packageName, screenScale: 3, screenWidth: 375, screenHeight: 812,
             safeAreaInsets: SdkEdgeInsets(top: 20, right: 0, bottom: 10, left: 0), root: nil

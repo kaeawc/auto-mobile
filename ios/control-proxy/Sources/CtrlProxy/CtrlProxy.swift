@@ -155,7 +155,7 @@ public final class CtrlProxy {
                 print("[CtrlProxy] Hierarchy changed (hash=\(hash), extraction=\(extractionTimeMs)ms), broadcasting")
                 guard let self else { return }
                 let enriched = self.commandHandler.enrichWithCachedSdkHierarchy(hierarchy)
-                self.server.broadcastHierarchyUpdate(enriched)
+                self.server.broadcastHierarchyUpdate(enriched, capture: hierarchy)
             case .unchanged:
                 // Don't broadcast unchanged results (animation mode).
                 break
@@ -168,10 +168,12 @@ public final class CtrlProxy {
     }
 
     private func publishSdkHierarchyRefresh() {
-        guard let enriched = Self.sdkHierarchyRefresh(
-            hierarchyDebouncer: hierarchyDebouncer, commandHandler: commandHandler
-        ) else { return }
-        server.broadcastHierarchyUpdate(enriched)
+        guard let capture = hierarchyDebouncer.getLastHierarchy(),
+              let enriched = Self.sdkHierarchyRefresh(
+                  hierarchyDebouncer: hierarchyDebouncer, commandHandler: commandHandler
+              )
+        else { return }
+        server.broadcastHierarchyUpdate(enriched, capture: capture)
     }
 
     /// Internal selection seam for SDK-event refresh tests without a live server or device.

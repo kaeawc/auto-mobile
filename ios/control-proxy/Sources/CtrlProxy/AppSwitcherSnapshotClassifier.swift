@@ -1,10 +1,11 @@
 import Foundation
 
 /// SpringBoard keeps full-screen switcher cards behind foreground apps. Only a scaled card
-/// inside the switcher content is evidence that the App Switcher is actually presented. A card
-/// with no value is a live app scene: an iPad stage or floating window keeps one beside scaled
-/// Stage Manager strip cards, which also report Active, so a live card means the switcher is not
-/// presented (#19455).
+/// inside the switcher content is evidence that the App Switcher is actually presented.
+/// Stage Manager keeps an inset stage card and small strip cards, all scaled and Active, while
+/// no switcher is open. A strip card fully on screen, or a live card with no value, means the
+/// switcher is not presented; opening it moves the strip cards partly off screen and enlarges
+/// them (#19455).
 enum AppSwitcherSnapshotClassifier {
     struct ElementSnapshot {
         let identifier: String
@@ -23,21 +24,24 @@ enum AppSwitcherSnapshotClassifier {
     /// An iPad window parked by Home (Windowed Apps) keeps a scaled card with this value (#18828).
     static let stashedCardValue = "Stashed"
 
+    /// Stage Manager strip cards are under a tenth of the screen wide; switcher cards are far wider.
+    static let stripCardMaxWidthFraction: CGFloat = 0.15
+
     static func isVisible(_ elements: [ElementSnapshot]) -> Bool {
         let contentViews = elements.filter {
             $0.identifier == "AppSwitcherContentView" && $0.frame.width > 0 && $0.frame.height > 0
         }
-        let hasLiveCard = elements.contains { card in
-            card.identifier.hasPrefix("card:") && (card.value ?? "").isEmpty
-                && card.frame.width > 0 && card.frame.height > 0
+        let cards = elements.filter {
+            $0.identifier.hasPrefix("card:") && $0.value != stashedCardValue
+                && $0.frame.width > 0 && $0.frame.height > 0
         }
-        guard !hasLiveCard else { return false }
+        guard !cards.contains(where: { ($0.value ?? "").isEmpty }) else { return false }
         return contentViews.contains { content in
-            elements.contains { card in
-                card.identifier.hasPrefix("card:") && card.value != stashedCardValue
-                    && card.frame.width > 0 && card.frame.height > 0
-                    && card.frame.width < content.frame.width * 0.9
+            let showsStrip = cards.contains { card in
+                card.frame.minX >= content.frame.minX && card.frame.maxX <= content.frame.maxX
+                    && card.frame.width < content.frame.width * stripCardMaxWidthFraction
             }
+            return !showsStrip && cards.contains { $0.frame.width < content.frame.width * 0.9 }
         }
     }
 }
@@ -54,7 +58,6 @@ enum SpringBoardHomeScreenClassifier {
         }
     }
 }
-
 
 /// Stage Manager shows the iPad's other app windows as cards in a strip beside the stage.
 /// SpringBoard names each card `card:<bundleId>:sceneID:<scene>` with the app name as its label;
@@ -73,7 +76,8 @@ enum StageManagerStrip {
     static func bundleId(fromCardIdentifier identifier: String) -> String? {
         guard identifier.hasPrefix(cardPrefix) else { return nil }
         let afterPrefix = identifier.index(identifier.startIndex, offsetBy: cardPrefix.count)
-        guard let marker = identifier.range(of: sceneMarker, range: afterPrefix ..< identifier.endIndex) else { return nil }
+        guard let marker = identifier.range(of: sceneMarker, range: afterPrefix ..< identifier.endIndex)
+        else { return nil }
         let bundleId = identifier[afterPrefix ..< marker.lowerBound]
         return bundleId.isEmpty ? nil : String(bundleId)
     }

@@ -70,19 +70,31 @@ final class AppSwitcherSnapshotClassifierTests: XCTestCase {
     }
 
     func testCapturedStageManagerStripIsNotTheSwitcher() throws {
-        // #19455: Stage Manager strip cards are scaled and Active like switcher cards, but the stage
-        // app's own card is live (no value), so the switcher is not presented.
+        // #19455: Stage Manager strip cards are scaled and Active like switcher cards.
         for name in [
             "ios27_2-ipad-stage-manager-files-focused",
             "ios27_2-ipad-stage-manager-reminders-focused",
+            "ios27_2-ipad-stage-manager-strip-no-switcher",
             "ios27_2-ipad-windowed-files-floating-focused",
         ] {
-            let elements = try snapshots(name)
-            XCTAssertTrue(elements.contains { $0.identifier.hasPrefix("card:") && $0.value == nil }, name)
-            XCTAssertFalse(AppSwitcherSnapshotClassifier.isVisible(elements), name)
+            XCTAssertFalse(try AppSwitcherSnapshotClassifier.isVisible(snapshots(name)), name)
         }
-        let strip = try snapshots("ios27_2-ipad-stage-manager-files-focused")
-        XCTAssertTrue(strip.contains { $0.identifier.hasPrefix("card:") && $0.value == "Active" })
+    }
+
+    func testCapturedStageManagerStripCardsAloneHideTheSwitcher() throws {
+        // On the device every card, the inset stage card included, reports Active.
+        let elements = try snapshots("ios27_2-ipad-stage-manager-strip-no-switcher")
+        XCTAssertTrue(elements.filter { $0.identifier.hasPrefix("card:") }.allSatisfy { $0.value == "Active" })
+        XCTAssertFalse(AppSwitcherSnapshotClassifier.isVisible(elements))
+        let withoutStrip = elements.filter { $0.frame.width >= 100 || !$0.identifier.hasPrefix("card:") }
+        XCTAssertTrue(AppSwitcherSnapshotClassifier.isVisible(withoutStrip))
+    }
+
+    func testCapturedStageManagerSwitcherIsVisible() throws {
+        // Opening the switcher in Stage Manager moves the strip cards partly off screen.
+        let elements = try snapshots("ios27_2-ipad-stage-manager-switcher-open")
+        XCTAssertTrue(elements.filter { $0.identifier.hasPrefix("card:") }.allSatisfy { $0.value == "Active" })
+        XCTAssertTrue(AppSwitcherSnapshotClassifier.isVisible(elements))
     }
 
     func testCapturedHomeScreensShowTheIconList() throws {

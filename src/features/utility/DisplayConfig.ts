@@ -28,6 +28,7 @@ import {
   type DisplayGeometrySupport,
   type DisplayGeometryValues,
 } from "./AndroidDisplayGeometry";
+import { SetPostureControl } from "./SetPostureControl";
 import { DEFAULT_FONT_SCALE, type DisplayTheme, type FontScaleInput } from "./displayConfigTypes";
 import {
   ANDROID_THEME_UNSUPPORTED_ERROR,
@@ -692,8 +693,10 @@ export class DisplayConfig {
     }
   }
 
+  /** The posture scopes a default-display size record to its fold panel (#19452). */
   private geometry(adb: AdbExecutor): AndroidDisplayGeometry {
-    return new AndroidDisplayGeometry(this.device, adb, this.geometryOptions);
+    const posture = new SetPostureControl(this.device, this.adbFactory);
+    return new AndroidDisplayGeometry(this.device, adb, { posture, ...this.geometryOptions });
   }
 
   /** Android size/navigation/cutout (#14101): validated before any write, reported as one result. */
@@ -718,11 +721,8 @@ export class DisplayConfig {
   }
 
   private screenControls(): IosSimulatorScreenControls {
-    return new IosSimulatorScreenControls(
-      this.device.deviceId,
-      this.simctl,
-      this.screenControlOptions,
-    );
+    const { deviceId } = this.device;
+    return new IosSimulatorScreenControls(deviceId, this.simctl, this.screenControlOptions);
   }
 
   private async setNonGeometry(input: SetDisplayConfigInput): Promise<DisplayConfigResult> {

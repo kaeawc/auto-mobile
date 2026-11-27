@@ -505,7 +505,18 @@ export async function restoreDisplayProfileAction(
     }
     default:
       if (action.postures?.some((posture) => posture !== null)) {
-        await restoreOnPanels(ports, action.commands, action.postures, signal);
+        const postures = action.postures;
+        await runOnPanels(
+          ports.posture,
+          action.commands.map((command, index) => ({
+            command,
+            posture: postures[index] ?? null,
+          })),
+          async (command) => {
+            await shellRun(ports.shell, command, signal);
+          },
+          signal,
+        );
         return;
       }
       for (const command of action.commands) {
@@ -518,7 +529,7 @@ export async function restoreDisplayProfileAction(
  * Every panel's size was restored, but the posture could not be put back to `posture`, the one
  * reset found: reset records it so a later reset can retry the switch.
  */
-class PostureSwitchBackError extends ActionableError {
+export class PostureSwitchBackError extends ActionableError {
   constructor(
     message: string,
     readonly posture: RequestedPosture,
@@ -527,35 +538,40 @@ class PostureSwitchBackError extends ActionableError {
   }
 }
 
+/** One recorded `wm size` restore and the posture of the fold panel it belongs to. */
+export interface PanelRestoreStep {
+  command: string;
+  /** null: the command does not depend on the panel and runs in the current posture. */
+  posture: RequestedPosture | null;
+}
+
 /**
- * Run each restore command in the posture it was recorded in, so it lands on that fold panel,
- * then put the posture back to the one found (#19404).
+ * Run each restore step in the posture it was recorded in, so it lands on that fold panel, then
+ * put the posture back to the one found (#19404, #19452). `run` throws when the device refuses a
+ * step; the steps after it are skipped, but the posture is still put back. Throws
+ * PostureSwitchBackError when only the switch back failed.
  */
-async function restoreOnPanels(
-  ports: DisplayProfilePorts,
-  commands: readonly string[],
-  postures: readonly (RequestedPosture | null)[],
-  signal: AbortSignal | undefined,
+export async function runOnPanels(
+  posture: PostureControl,
+  steps: readonly PanelRestoreStep[],
+  run: (command: string, index: number) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const found = await ports.posture.read(signal);
+  const found = await posture.read(signal);
   let current = found;
-  const setPosture = async (posture: RequestedPosture) => {
-    const result = await ports.posture.set(posture, signal);
+  const setPosture = async (target: RequestedPosture) => {
+    const result = await posture.set(target, signal);
     if (result.status !== "applied") {
       throw new ActionableError(
-        result.detail ?? `posture ${posture} could not be set to restore its panel's screen size`,
+        result.detail ?? `posture ${target} could not be set to restore its panel's screen size`,
       );
     }
-    current = posture;
+    current = target;
   };
-  for (const [index, command] of commands.entries()) {
-    const posture = postures[index] ?? null;
-    if (posture !== null && panelOf(posture) !== panelOf(current)) {
-      await setPosture(posture);
+  const switchBack = async () => {
+    if (found === undefined || current === found) {
+      return;
     }
-    await shellRun(ports.shell, command, signal);
-  }
-  if (found !== undefined && current !== found) {
     try {
       await setPosture(found);
     } catch (error) {
@@ -564,7 +580,25 @@ async function restoreOnPanels(
         found,
       );
     }
+  };
+  try {
+    for (const [index, step] of steps.entries()) {
+      if (step.posture !== null && panelOf(step.posture) !== panelOf(current)) {
+        await setPosture(step.posture);
+      }
+      await run(step.command, index);
+    }
+  } catch (error) {
+    await switchBack().catch((switchError: unknown) => {
+      // The step's own failure is what the caller reports; the posture stays where it is.
+      logger.warn(
+        `posture switch back after a failed panel restore failed: ${errorMessage(switchError)}`,
+        switchError,
+      );
+    });
+    throw error;
   }
+  await switchBack();
 }
 
 /**

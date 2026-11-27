@@ -2,6 +2,7 @@ import type {
   AdbExecuteOptions,
   AdbExecutor,
 } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { RequestedPosture } from "../../src/features/device/postureCommands";
 import type { ExecResult } from "../../src/models";
 import { createExecResult } from "../../src/utils/execResult";
 import { FakeAdbClient } from "./FakeAdbClient";
@@ -58,6 +59,13 @@ export class FakeDisplayGeometryAdb extends FakeAdbClient implements AdbExecutor
   ignoreSizeWrites = false;
   /** Commands (exact) that report a shell failure instead of applying. */
   readonly failing = new Set<string>();
+  /**
+   * Set to model a foldable: display 0 keeps one size override per fold panel, the cover panel
+   * while the posture is closed and the inner one otherwise. `displays.get(0)` is the inner panel.
+   */
+  foldPosture?: () => RequestedPosture | undefined;
+  /** The cover panel of display 0 while `foldPosture` is set. */
+  readonly cover: FakeDisplay = { physical: "1080x2400" };
 
   override async executeCommand(command: string, options?: AdbExecuteOptions): Promise<ExecResult> {
     const fallback = await super.executeCommand(command, options);
@@ -105,8 +113,15 @@ export class FakeDisplayGeometryAdb extends FakeAdbClient implements AdbExecutor
     return overlay ? this.overlayCommand(overlay[1], overlay[2]) : undefined;
   }
 
+  /** The display (or, on a foldable's default display, the panel) a `wm size` call reaches. */
+  private target(displayId: number): FakeDisplay | undefined {
+    return displayId === 0 && this.foldPosture?.() === "closed"
+      ? this.cover
+      : this.displays.get(displayId);
+  }
+
   private wmSize(value: string | undefined, displayId: number): string {
-    const display = this.displays.get(displayId);
+    const display = this.target(displayId);
     if (!display) {
       return `Error: invalid display ${displayId}`;
     }

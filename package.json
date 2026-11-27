@@ -142,7 +142,7 @@
     "@emnapi/runtime": "1.11.3",
     "@img/colour": "1.1.0",
     "@jimp/core": "1.7.0",
-    "@jimp/diff": "1.7.0",
+    "@jimp/diff": "2.0.0",
     "@jimp/file-ops": "1.7.0",
     "@jimp/js-bmp": "1.7.0",
     "@jimp/js-gif": "1.7.0",

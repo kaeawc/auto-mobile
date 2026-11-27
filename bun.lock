@@ -9,7 +9,7 @@
         "@emnapi/runtime": "1.11.3",
         "@img/colour": "1.1.0",
         "@jimp/core": "1.7.0",
-        "@jimp/diff": "1.7.0",
+        "@jimp/diff": "2.0.0",
         "@jimp/file-ops": "1.7.0",
         "@jimp/js-bmp": "1.7.0",
         "@jimp/js-gif": "1.7.0",
@@ -227,7 +227,7 @@
 
     "@jimp/core": ["@jimp/core@1.7.0", "", { "dependencies": { "@jimp/file-ops": "1.7.0", "@jimp/types": "1.7.0", "@jimp/utils": "1.7.0", "await-to-js": "^3.0.0", "exif-parser": "^0.1.12", "file-type": "^21.3.3", "mime": "3" } }, "sha512-8WHSJO6G4+iZFWaEZc856FEKM9GV4mNR/v7TB47w/5vqTb2krDBM/LpBpXY1P/zWDZPPeJ9VUqN6vWUPy7CD/Q=="],
 
-    "@jimp/diff": ["@jimp/diff@1.7.0", "", { "dependencies": { "@jimp/plugin-resize": "1.7.0", "@jimp/types": "1.7.0", "@jimp/utils": "1.7.0", "pixelmatch": "^5.3.0" } }, "sha512-zAZPBeHbD9rA/fgHzX2lFn7xFX5NVLd5nrfxinuPWhx6ryxp2wR2i9UbuI3tdRga6Scn4EdEzRzvXkNgBeLrzw=="],
+    "@jimp/diff": ["@jimp/diff@2.0.0", "", { "dependencies": { "@jimp/plugin-resize": "2.0.0", "@jimp/types": "2.0.0", "@jimp/utils": "2.0.0", "pixelmatch": "^5.3.0", "zod": "^4.6.7" } }, "sha512-AYbvxvZkYpq5gvsXCaWIu/3XpdlvFS62nDrSCzKNduczp2vfK0amOHGKPzmK6W8CHFrMDpX/DLngTFgdvoVh+A=="],
 
     "@jimp/file-ops": ["@jimp/file-ops@1.7.0", "", {}, "sha512-bt67KqYWTxEOfxPfUg1d2BW5Jw5BiR8DyNUn3j5O4Z+UibKOLJ95pDK8a1gxdMFBHkFMj0rmnUPB6st//m6k/w=="],
 
@@ -577,6 +577,8 @@
 
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" } }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 
+    "fflate": ["fflate@0.8.3", "", {}, "sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA=="],
+
     "file-type": ["file-type@21.3.4", "", { "dependencies": { "@tokenizer/inflate": "^0.4.1", "strtok3": "^10.3.4", "token-types": "^6.1.1", "uint8array-extras": "^1.4.0" } }, "sha512-Ievi/yy8DS3ygGvT47PjSfdFoX+2isQueoYP1cntFW1JLYAuS4GD7NUPGg4zv2iZfV52uDyk5w5Z0TdpRS6Q1g=="],
 
     "formatly": ["formatly@0.11.4", "", { "dependencies": { "fd-package-json": "^2.0.0", "package-manager-detector": "^1.8.0" }, "bin": { "formatly": "bin/index.mjs" } }, "sha512-TeCC10lP8KCgoX+Fe5lryILIT0/Dy+nP0OSVnsuB5CwXoLuOdqxCYlPFF1inR8S/zTy1ec7TjhS2TeRKWzzImA=="],
@@ -805,6 +807,12 @@
 
     "zwitch": ["zwitch@2.0.4", "", {}, "sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A=="],
 
+    "@jimp/diff/@jimp/plugin-resize": ["@jimp/plugin-resize@2.0.0", "", { "dependencies": { "@jimp/core": "2.0.0", "@jimp/types": "2.0.0", "buffer": "^6.0.3", "zod": "^4.6.7" } }, "sha512-R/5WsgjJ4U2nvt34FQZc7khfrfWIAhXANoKoouLCEKRjZOhWZydf+4/d9D0lZDukrTfmmGeW0zinovqejoAGTw=="],
+
+    "@jimp/diff/@jimp/types": ["@jimp/types@2.0.0", "", { "dependencies": { "zod": "^4.6.7" } }, "sha512-F3LfMQ6ea1X6xloT1279RpVezhENRfhpYQArBW6eTnpfhOZ25PXY3xrQYoXDUP7zbA3h1QZgougNaNb45ACVNA=="],
+
+    "@jimp/diff/@jimp/utils": ["@jimp/utils@2.0.0", "", { "dependencies": { "@jimp/types": "2.0.0", "buffer": "^6.0.3", "tinycolor2": "^1.6.0" } }, "sha512-05W0JJuxoFd1Pd14Xbetad3bfKIrs6Wfm8Zs7sgG0hz0CuVvZKbPoU5Oot0hC8x5+0qj6C7YbWSYwyq/QyIYfQ=="],
+
     "@jimp/diff/pixelmatch": ["pixelmatch@5.3.0", "", { "dependencies": { "pngjs": "^6.0.0" }, "bin": "bin/pixelmatch" }, "sha512-o8mkY4E/+LNUf6LzX96ht6k6CEDi65k9G2rjMtBe9Oo+VPKSvl+0GKHuH/AlG+GA5LPG/i5hrekkxUc3s2HU+Q=="],
 
     "@oxc-resolver/binding-wasm32-wasi/@emnapi/runtime": ["@emnapi/runtime@1.11.2", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-kyOl3X0DuTiT1h2ft8r2fYO8JYtU9a9Xis/zBSiGArNaagCOWx90N1k2wxp18czFDH+OgcWGb5ZP/XMt3dcyPA=="],
@@ -819,17 +827,23 @@
 
     "image-q/@types/node": ["@types/node@16.9.1", "", {}, "sha512-QpLcX9ZSsq3YYUUnD3nFDY8H7wctAhQj/TFKL8Ya8v5fMm3CFXxo8zStsLAl780ltoYoo1WvKUVGBQK+1ifr7g=="],
 
+    "jimp/@jimp/diff": ["@jimp/diff@1.7.0", "", { "dependencies": { "@jimp/plugin-resize": "1.7.0", "@jimp/types": "1.7.0", "@jimp/utils": "1.7.0", "pixelmatch": "^5.3.0" } }, "sha512-zAZPBeHbD9rA/fgHzX2lFn7xFX5NVLd5nrfxinuPWhx6ryxp2wR2i9UbuI3tdRga6Scn4EdEzRzvXkNgBeLrzw=="],
+
     "knip/oxc-parser": ["oxc-parser@0.156.0", "", { "dependencies": { "@oxc-project/types": "^0.156.0" }, "optionalDependencies": { "@oxc-parser/binding-android-arm-eabi": "0.156.0", "@oxc-parser/binding-android-arm64": "0.156.0", "@oxc-parser/binding-darwin-arm64": "0.156.0", "@oxc-parser/binding-darwin-x64": "0.156.0", "@oxc-parser/binding-freebsd-x64": "0.156.0", "@oxc-parser/binding-linux-arm-gnueabihf": "0.156.0", "@oxc-parser/binding-linux-arm-musleabihf": "0.156.0", "@oxc-parser/binding-linux-arm64-gnu": "0.156.0", "@oxc-parser/binding-linux-arm64-musl": "0.156.0", "@oxc-parser/binding-linux-ppc64-gnu": "0.156.0", "@oxc-parser/binding-linux-riscv64-gnu": "0.156.0", "@oxc-parser/binding-linux-riscv64-musl": "0.156.0", "@oxc-parser/binding-linux-s390x-gnu": "0.156.0", "@oxc-parser/binding-linux-x64-gnu": "0.156.0", "@oxc-parser/binding-linux-x64-musl": "0.156.0", "@oxc-parser/binding-openharmony-arm64": "0.156.0", "@oxc-parser/binding-win32-arm64-msvc": "0.156.0", "@oxc-parser/binding-win32-ia32-msvc": "0.156.0", "@oxc-parser/binding-win32-x64-msvc": "0.156.0" } }, "sha512-7JhjgOfZjrIFJH5TlHrpRua864Si5GvwrPr5+eIRCY2sszhKXo6pyhP0HQKOGTtfO4UowwZ72XTGba0+lZphOQ=="],
 
     "parse-bmfont-xml/xml2js": ["xml2js@0.5.0", "", { "dependencies": { "sax": ">=0.6.0", "xmlbuilder": "~11.0.0" } }, "sha512-drPFnkQJik/O+uPKpqSgr22mpuFHqKdbS835iAQrUC73L2F5WkboIRd63ai/2Yg6I1jzifPFKH2NTK+cfglkIA=="],
 
     "tinyglobby/picomatch": ["picomatch@4.0.4", "", {}, "sha512-QP88BAKvMam/3NxH6vj2o21R6MjxZUAd6nlwAS/pnGvN9IVLocLHxGYIzFhg6fUQ+5th6P4dv4eW9jX3DSIj7A=="],
 
+    "@jimp/diff/@jimp/plugin-resize/@jimp/core": ["@jimp/core@2.0.0", "", { "dependencies": { "@jimp/file-ops": "2.0.0", "@jimp/types": "2.0.0", "@jimp/utils": "2.0.0", "await-to-js": "^3.0.0", "buffer": "^6.0.3", "exif-parser": "^0.1.12", "fflate": "^0.8.3", "file-type": "^22.3.0", "mime": "3" } }, "sha512-QIcg7Nrkyn6bc+8vvUoAR8Sv6xNIclm4XuB6NgirwWdrCSvpWHBa0z/8MCpXy7LC7hCEh3jBRCJxl0ZHfvrhNg=="],
+
     "@jimp/diff/pixelmatch/pngjs": ["pngjs@6.0.0", "", {}, "sha512-TRzzuFRRmEoSW/p1KVAmiOgPco2Irlah+bGFCeNfJXxxYGwSw7YwAOAcd7X28K/m5bjBWKsC29KyoMfHbypayg=="],
 
     "@types/pngjs/@types/node/undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
 
     "@types/xml2js/@types/node/undici-types": ["undici-types@7.16.0", "", {}, "sha512-Zz+aZWSj8LE6zoxD+xrjh4VfkIG8Ya6LvYkZqtUQGJPZjYl53ypCaUwWqo7eI0x66KBGeRo+mlBEkMSeSZ38Nw=="],
+
+    "jimp/@jimp/diff/pixelmatch": ["pixelmatch@5.3.0", "", { "dependencies": { "pngjs": "^6.0.0" }, "bin": "bin/pixelmatch" }, "sha512-o8mkY4E/+LNUf6LzX96ht6k6CEDi65k9G2rjMtBe9Oo+VPKSvl+0GKHuH/AlG+GA5LPG/i5hrekkxUc3s2HU+Q=="],
 
     "knip/oxc-parser/@oxc-parser/binding-android-arm-eabi": ["@oxc-parser/binding-android-arm-eabi@0.156.0", "", { "os": "android", "cpu": "arm" }, "sha512-RMq7DKNzEp1T51QKNLTn0NryNEt2IYfh7mZBlIdi2Ju52ltOEDMeIXv0XBpA6dL7j7ChjlcovtGcc1Jv4qMipg=="],
 
@@ -870,5 +884,13 @@
     "knip/oxc-parser/@oxc-parser/binding-win32-x64-msvc": ["@oxc-parser/binding-win32-x64-msvc@0.156.0", "", { "os": "win32", "cpu": "x64" }, "sha512-dcpx5Y1x2v/cs7U/q3SZMvmxfyXjVvqC86jMuw2ZZUbHDd7W2cW7uSMQfg3GLVaE68Su3H9xd/Pc4v6QNyeSRg=="],
 
     "knip/oxc-parser/@oxc-project/types": ["@oxc-project/types@0.156.0", "", {}, "sha512-1Duyg48TdJNdyhEB8Xn1L36bT9Pv6GUtlKjHxOys8xkaF/rQq3XJE+bAurSK/AgIz5mGFsb77cn9Pb20+WCScw=="],
+
+    "@jimp/diff/@jimp/plugin-resize/@jimp/core/@jimp/file-ops": ["@jimp/file-ops@2.0.0", "", {}, "sha512-Qovqgupd8YanqnrCNI7w8WhDNdwZHv3zs//vAd3UJVjKvU6LIalM3KAnyo0XXd2IzTPL85q0b47x8jlobR4TrQ=="],
+
+    "@jimp/diff/@jimp/plugin-resize/@jimp/core/file-type": ["file-type@22.3.0", "", { "dependencies": { "@tokenizer/inflate": "^0.6.0", "strtok3": "^10.6.3", "token-types": "^6.1.2", "uint8array-extras": "^1.6.0" } }, "sha512-PrPedgnnWl5bWz3JHgar0QSzRvzeyFh7dZ9JpYOgcPZu4KALS9zw4MMa6qXRYyjeBsAlpaWB2boLuG991+0HIQ=="],
+
+    "jimp/@jimp/diff/pixelmatch/pngjs": ["pngjs@6.0.0", "", {}, "sha512-TRzzuFRRmEoSW/p1KVAmiOgPco2Irlah+bGFCeNfJXxxYGwSw7YwAOAcd7X28K/m5bjBWKsC29KyoMfHbypayg=="],
+
+    "@jimp/diff/@jimp/plugin-resize/@jimp/core/file-type/@tokenizer/inflate": ["@tokenizer/inflate@0.6.1", "", { "dependencies": { "debug": "^4.4.3", "strtok3": "^10.8.0", "token-types": "^6.2.0" } }, "sha512-EuqSyHdOXN61cc5/rsW6uUn1TJZJGZr56jlkUbsLwVJ6uHgvwQyFkYfOCf+zzPFAYjftPk1WeJnEhpLVvzbm1A=="],
   }
 }

@@ -14,6 +14,8 @@ export interface ConfiguredDeviceInventoryError {
   retryable?: boolean;
   retryAfterMs?: number;
   missing?: string[];
+  /** Age of the returned images when they come from an earlier complete observation. */
+  ageMs?: number;
 }
 
 export type ConfiguredDeviceInventoryObservation =

@@ -63,9 +63,10 @@ enum StageManagerStrip {
 
     /// The bundle id in a SpringBoard card identifier, or nil for any other identifier.
     static func bundleId(fromCardIdentifier identifier: String) -> String? {
-        guard identifier.hasPrefix(cardPrefix),
-              let marker = identifier.range(of: sceneMarker) else { return nil }
-        let bundleId = identifier[identifier.index(identifier.startIndex, offsetBy: cardPrefix.count) ..< marker.lowerBound]
+        guard identifier.hasPrefix(cardPrefix) else { return nil }
+        let afterPrefix = identifier.index(identifier.startIndex, offsetBy: cardPrefix.count)
+        guard let marker = identifier.range(of: sceneMarker, range: afterPrefix ..< identifier.endIndex) else { return nil }
+        let bundleId = identifier[afterPrefix ..< marker.lowerBound]
         return bundleId.isEmpty ? nil : String(bundleId)
     }
 

@@ -73,6 +73,7 @@ final class StageManagerStripTests: XCTestCase {
         XCTAssertNil(StageManagerStrip.bundleId(fromCardIdentifier: "AppSwitcherContentView"))
         XCTAssertNil(StageManagerStrip.bundleId(fromCardIdentifier: "card:com.apple.Preferences"))
         XCTAssertNil(StageManagerStrip.bundleId(fromCardIdentifier: "card::sceneID:x"))
+        XCTAssertNil(StageManagerStrip.bundleId(fromCardIdentifier: "card:sceneID:x"))
     }
 
     func testStripCardsBesideTheFocusedWindowAreReportedTopToBottom() throws {

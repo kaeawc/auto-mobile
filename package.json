@@ -167,7 +167,7 @@
     "@jimp/plugin-resize": "1.7.0",
     "@jimp/plugin-rotate": "1.7.0",
     "@jimp/plugin-threshold": "1.7.0",
-    "@jimp/types": "1.7.0",
+    "@jimp/types": "2.0.0",
     "@jimp/utils": "1.7.0",
     "@material-design-icons/svg": "0.14.15",
     "@tokenizer/inflate": "0.4.1",

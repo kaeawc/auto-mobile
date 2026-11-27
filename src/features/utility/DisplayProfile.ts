@@ -505,7 +505,18 @@ export async function restoreDisplayProfileAction(
     }
     default:
       if (action.postures?.some((posture) => posture !== null)) {
-        await restoreOnPanels(ports, action.commands, action.postures, signal);
+        const postures = action.postures;
+        await runOnPanels(
+          ports.posture,
+          action.commands.map((command, index) => ({
+            command,
+            posture: postures[index] ?? null,
+          })),
+          async (command) => {
+            await shellRun(ports.shell, command, signal);
+          },
+          signal,
+        );
         return;
       }
       for (const command of action.commands) {
@@ -515,56 +526,98 @@ export async function restoreDisplayProfileAction(
 }
 
 /**
- * Every panel's size was restored, but the posture could not be put back to `posture`, the one
- * reset found: reset records it so a later reset can retry the switch.
+ * A panel size restore that did not finish. `sizesRestored`: every panel's size is back and only
+ * the switch back failed. `posture`: the posture reset found and could not put back, which the
+ * caller records so a later reset retries the switch.
  */
-class PostureSwitchBackError extends ActionableError {
+export class PanelRestoreError extends ActionableError {
   constructor(
     message: string,
-    readonly posture: RequestedPosture,
+    readonly sizesRestored: boolean,
+    readonly posture?: RequestedPosture,
   ) {
     super(message);
   }
 }
 
+/** The posture a failed panel restore left un-restored, for the caller to record; else undefined. */
+export function unrestoredPosture(error: unknown): RequestedPosture | undefined {
+  return error instanceof PanelRestoreError ? error.posture : undefined;
+}
+
+/** One recorded `wm size` restore and the posture of the fold panel it belongs to. */
+export interface PanelRestoreStep {
+  command: string;
+  /** null: the command does not depend on the panel and runs in the current posture. */
+  posture: RequestedPosture | null;
+}
+
 /**
- * Run each restore command in the posture it was recorded in, so it lands on that fold panel,
- * then put the posture back to the one found (#19404).
+ * Run each restore step in the posture it was recorded in, so it lands on that fold panel, then
+ * put the posture back to the one found (#19404, #19452). `run` throws when the device refuses a
+ * step; the steps after it are skipped, but the posture is still put back, and PanelRestoreError
+ * reports it, as it does when only the switch back failed. With a step tied to
+ * a panel and no readable posture, nothing runs: the panel cannot be targeted or switched back.
  */
-async function restoreOnPanels(
-  ports: DisplayProfilePorts,
-  commands: readonly string[],
-  postures: readonly (RequestedPosture | null)[],
-  signal: AbortSignal | undefined,
+export async function runOnPanels(
+  posture: PostureControl,
+  steps: readonly PanelRestoreStep[],
+  run: (command: string, index: number) => Promise<void>,
+  signal?: AbortSignal,
 ): Promise<void> {
-  const found = await ports.posture.read(signal);
+  const found = await posture.read(signal);
+  if (found === undefined && steps.some((step) => step.posture !== null)) {
+    throw new PanelRestoreError(
+      "the posture is unreadable, so no fold panel's screen size was restored; it stays recorded",
+      false,
+    );
+  }
   let current = found;
-  const setPosture = async (posture: RequestedPosture) => {
-    const result = await ports.posture.set(posture, signal);
+  const setPosture = async (target: RequestedPosture) => {
+    const result = await posture.set(target, signal);
     if (result.status !== "applied") {
       throw new ActionableError(
-        result.detail ?? `posture ${posture} could not be set to restore its panel's screen size`,
+        result.detail ?? `posture ${target} could not be set to restore its panel's screen size`,
       );
     }
-    current = posture;
+    current = target;
   };
-  for (const [index, command] of commands.entries()) {
-    const posture = postures[index] ?? null;
-    if (posture !== null && panelOf(posture) !== panelOf(current)) {
-      await setPosture(posture);
+  const switchBack = async () => {
+    if (found === undefined || current === found) {
+      return;
     }
-    await shellRun(ports.shell, command, signal);
-  }
-  if (found !== undefined && current !== found) {
     try {
       await setPosture(found);
     } catch (error) {
-      throw new PostureSwitchBackError(
+      throw new PanelRestoreError(
         toActionableError(error, `posture ${found} could not be put back`).message,
+        true,
         found,
       );
     }
+  };
+  try {
+    for (const [index, step] of steps.entries()) {
+      if (step.posture !== null && panelOf(step.posture) !== panelOf(current)) {
+        await setPosture(step.posture);
+      }
+      await run(step.command, index);
+    }
+  } catch (error) {
+    const message = toActionableError(error, "panel screen size restore failed").message;
+    try {
+      await switchBack();
+    } catch (switchError) {
+      // The step's failure is the one reported; the posture to put back goes with it.
+      logger.warn(
+        `posture switch back after a failed panel restore failed: ${errorMessage(switchError)}`,
+        switchError,
+      );
+      throw new PanelRestoreError(message, false, found);
+    }
+    throw new PanelRestoreError(message, false);
   }
+  await switchBack();
 }
 
 /**
@@ -584,14 +637,14 @@ export async function resetDisplayProfile(
       context.registry.forget(device.deviceId, action.facet);
       steps.push({ step: action.facet, status: "applied" });
     } catch (error) {
-      if (error instanceof PostureSwitchBackError) {
-        // The sizes are back; only the posture is not, so keep that for the next reset.
+      if (error instanceof PanelRestoreError && error.sizesRestored) {
+        // The sizes are back; only the posture is not.
         context.registry.forget(device.deviceId, action.facet);
-        context.registry.record(
-          device,
-          { facet: "posture", posture: error.posture },
-          context.deps.owner,
-        );
+      }
+      const pending = unrestoredPosture(error);
+      if (pending !== undefined) {
+        // Keep the posture reset found for the next reset.
+        context.registry.record(device, { facet: "posture", posture: pending }, context.deps.owner);
       }
       logger.warn(
         `displayProfile restore of ${action.facet} failed: ${errorMessage(error)}`,

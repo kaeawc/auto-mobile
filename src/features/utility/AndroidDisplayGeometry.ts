@@ -5,9 +5,16 @@ import { isAndroidEmulatorSerial } from "../../utils/androidSerial";
 import { errorMessage } from "../../utils/describeUnknownError";
 import { logger } from "../../utils/logger";
 import { invalidateDisplayCaches } from "../observe/DisplayTransition";
-import { parseOverlayList } from "./DisplayProfile";
+import type { RequestedPosture } from "../device/postureCommands";
+import {
+  parseOverlayList,
+  runOnPanels,
+  unrestoredPosture,
+  type PostureControl,
+} from "./DisplayProfile";
 import {
   defaultDisplayProfileRestoreRegistry,
+  type DisplayProfileRestoreAction,
   type DisplayProfileRestoreRegistry,
 } from "./DisplayProfileRestore";
 import {
@@ -67,6 +74,11 @@ export interface DisplayGeometryOptions {
   registry?: DisplayProfileRestoreRegistry;
   /** Clears observation, screenshot and coordinate caches after the geometry moved. */
   invalidate?: (deviceId: string, reason: string) => void;
+  /**
+   * Reads the fold posture, so a default-display size is recorded on the panel it lands on and
+   * reset restores each panel's size there (#19452). Absent: sizes are recorded for every panel.
+   */
+  posture?: PostureControl;
 }
 
 export interface DisplayGeometryRead {
@@ -84,7 +96,8 @@ interface OverlayStep {
 export interface PreparedDisplayGeometry {
   previous: DisplayGeometryValues;
   available?: DisplayGeometryAvailability;
-  size?: { current: WmSize; target: DisplaySizeInput };
+  /** `posture`: the fold posture `current` was read in, so its restore targets that panel. */
+  size?: { current: WmSize; target: DisplaySizeInput; posture?: RequestedPosture };
   overlays?: { entries: OverlayEntry[]; steps: OverlayStep[] };
 }
 
@@ -111,6 +124,8 @@ const DEFAULT_DISPLAY_SCOPE = "0";
 const SAFE_OVERLAY_NAME = /^[A-Za-z0-9_.:]+$/;
 
 const GEOMETRY_FACETS: readonly string[] = ["screenSize", "navigationMode", "cutout"];
+
+type SizeRestoreAction = Extract<DisplayProfileRestoreAction, { commands: string[] }>;
 
 /** Listing the `android` target keeps the call small; it holds every navbar and cutout overlay. */
 const OVERLAY_LIST_COMMAND = "shell cmd overlay list android";
@@ -257,12 +272,14 @@ export class AndroidDisplayGeometry {
     try {
       const prepared: PreparedDisplayGeometry = { previous: {} };
       if (input.size !== undefined) {
+        // Read before the size, so the recorded panel is the one the original came from (#19452).
+        const posture = await this.panelPosture();
         const current = await this.readSize();
         const refusal = this.sizeRefusal(input.size, current);
         if (refusal) {
           return { refusal };
         }
-        prepared.size = { current, target: input.size };
+        prepared.size = { current, target: input.size, ...(posture ? { posture } : {}) };
         prepared.previous.size = restorableSize(current);
       }
       if (steps.length > 0) {
@@ -354,6 +371,9 @@ export class AndroidDisplayGeometry {
     if (!size || sameSize(restorableSize(size.current), size.target)) {
       return false;
     }
+    // `wm size` keeps one override per fold panel of the default display, so on a foldable the
+    // record names the panel this write lands on, as displayProfile's does (#19452).
+    const posture = size.posture;
     // Record before dispatch: even a rejected write can leave the display resized.
     this.registry.record(
       this.device,
@@ -361,12 +381,18 @@ export class AndroidDisplayGeometry {
         facet: "screenSize",
         commands: [wmSizeWriteCommand(restorableSize(size.current), this.options.displayId)],
         scopes: [String(this.displayId)],
+        ...(posture === undefined ? {} : { postures: [posture] }),
       },
       this.options.owner,
     );
     const command = wmSizeWriteCommand(size.target, this.options.displayId);
     errors.push(...(await this.runChecked(command, "size")));
     return true;
+  }
+
+  /** The posture whose panel a default-display size lands on; undefined off a foldable. */
+  private async panelPosture() {
+    return this.displayId === 0 ? await this.options.posture?.read() : undefined;
   }
 
   private async applyOverlays(
@@ -465,26 +491,12 @@ export class AndroidDisplayGeometry {
       .flatMap((action) =>
         "commands" in action && GEOMETRY_FACETS.includes(action.facet) ? [action] : [],
       );
-    const scope = String(this.displayId);
     let sizeRecorded = false;
     for (const action of recorded) {
-      // A size record holds one command per display (`commands[i]` restores `scopes[i]`): only
-      // the targeted display is restored here, the others stay recorded for their own reset.
-      const scopes = action.scopes ?? [DEFAULT_DISPLAY_SCOPE];
-      const mine = action.facet === "screenSize" ? scopes.indexOf(scope) : -1;
-      if (action.facet === "screenSize" && mine < 0) {
-        continue;
-      }
-      sizeRecorded ||= action.facet === "screenSize";
-      const commands = action.facet === "screenSize" ? [action.commands[mine]] : action.commands;
-      if (!(await this.runAll(commands, action.facet, errors))) {
-        if (action.facet === "screenSize") {
-          // Only the entry restored here: on a foldable another panel's entry under the same
-          // display id stays recorded for displayProfile's reset or the session's release (#19404).
-          this.registry.forgetEntries(this.device.deviceId, action.facet, [mine]);
-        } else {
-          this.registry.forget(this.device.deviceId, action.facet);
-        }
+      if (action.facet === "screenSize") {
+        sizeRecorded = (await this.restoreSize(action, errors)) || sizeRecorded;
+      } else if (!(await this.runAll(action.commands, action.facet, errors))) {
+        this.registry.forget(this.device.deviceId, action.facet);
       }
     }
     if (!sizeRecorded) {
@@ -497,6 +509,59 @@ export class AndroidDisplayGeometry {
       ...(Object.keys(after).length > 0 ? { applied: after } : {}),
       errors,
     };
+  }
+
+  /**
+   * Restore the targeted display's recorded sizes; returns whether it had one. A size record
+   * holds one command per display (`commands[i]` restores `scopes[i]`): the other displays stay
+   * recorded for their own reset. On a foldable the default display may hold one entry per panel,
+   * each run on its own panel before the posture goes back (#19452). Each restored entry is
+   * forgotten; one that fails stays recorded for the next reset or the session's release.
+   */
+  private async restoreSize(action: SizeRestoreAction, errors: string[]): Promise<boolean> {
+    const scope = String(this.displayId);
+    const scopes = action.scopes ?? action.commands.map(() => DEFAULT_DISPLAY_SCOPE);
+    const mine = scopes.flatMap((recorded, index) => (recorded === scope ? [index] : []));
+    if (mine.length === 0) {
+      return false;
+    }
+    const postures = action.postures;
+    const posture = this.options.posture;
+    if (!posture || !postures || mine.every((index) => (postures[index] ?? null) === null)) {
+      // One entry covers every panel (or the device does not fold): restore it in place.
+      if (!(await this.runAll([action.commands[mine[0]]], action.facet, errors))) {
+        this.registry.forgetEntries(this.device.deviceId, action.facet, [mine[0]]);
+      }
+      return true;
+    }
+    const restored: number[] = [];
+    try {
+      await runOnPanels(
+        posture,
+        mine.map((index) => ({
+          command: action.commands[index],
+          posture: postures[index] ?? null,
+        })),
+        async (command, step) => {
+          await this.run(command);
+          restored.push(mine[step]);
+        },
+      );
+    } catch (error) {
+      logger.warn(`[DisplayGeometry] size restore failed: ${errorMessage(error)}`, error);
+      errors.push(`${action.facet}: ${errorMessage(error)}`);
+      const pending = unrestoredPosture(error);
+      if (pending !== undefined) {
+        // The posture was not put back: displayProfile's reset or the release retries it.
+        this.registry.record(
+          this.device,
+          { facet: "posture", posture: pending },
+          this.options.owner,
+        );
+      }
+    }
+    this.registry.forgetEntries(this.device.deviceId, action.facet, restored);
+    return true;
   }
 
   /** Run commands in order; returns true when one failed (the rest are skipped). */

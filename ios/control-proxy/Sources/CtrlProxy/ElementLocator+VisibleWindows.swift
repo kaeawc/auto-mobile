@@ -70,8 +70,8 @@ struct ObservedLayout {
 
 extension ElementLocator {
     /// Apps that may own another visible window: the apps this runner has launched or observed,
-    /// plus, now and then, the common system apps. SpringBoard's tree names no app windows on
-    /// iOS 27.2, so it is not a source. Sorted for a
+    /// plus, now and then, the common system apps. SpringBoard's cards on iOS 27.2 name only the
+    /// focused window and Stage Manager strip apps, so it is not a source. Sorted for a
     /// stable window order; never the focused app or SpringBoard.
     nonisolated static func otherWindowCandidates(observed: Set<String>, focusedBundleId: String) -> [String] {
         observed.subtracting([focusedBundleId, "com.apple.springboard"]).sorted()
@@ -301,6 +301,11 @@ extension ElementLocator {
         )
     }
 
+    /// Whether two frames share any area.
+    nonisolated static func overlaps(_ first: ElementBounds, _ second: ElementBounds) -> Bool {
+        first.left < second.right && second.left < first.right && first.top < second.bottom && second.top < first.bottom
+    }
+
     private nonisolated static func contains(_ outer: ElementBounds, _ inner: ElementBounds) -> Bool {
         inner.left >= outer.left && inner.right <= outer.right && inner.top >= outer.top && inner.bottom <= outer.bottom
     }
@@ -370,7 +375,63 @@ extension ElementLocator {
                 guard let visible = Self.removingOccluded(optimized, by: focusedFrame) else { continue }
                 windows.append(VisibleAppWindow(bundleId: bundleId, frame: frame, hierarchy: visible))
             }
-            return windows
+            return windows + stageManagerStripWindows(
+                focusedBundleId: focusedBundleId,
+                focusedFrame: focusedFrame,
+                screen: screen,
+                excluding: Set(windows.map(\.bundleId))
+            )
+        }
+
+        /// Stage Manager strip cards as one-node windows, from one SpringBoard snapshot. Strip
+        /// apps are suspended, so `backgroundAppWindows` cannot snapshot them (#18830).
+        private func stageManagerStripWindows(
+            focusedBundleId: String,
+            focusedFrame: ElementBounds,
+            screen: ElementBounds,
+            excluding: Set<String>
+        )
+            -> [VisibleAppWindow]
+        {
+            let springboard = XCUIApplication.withoutUIInterruptions(bundleIdentifier: "com.apple.springboard")
+            let snapshot: XCUIElementSnapshot? = catchingObjCExceptionNonThrowing(
+                { try? springboard.snapshot() }, fallback: nil
+            )
+            guard let snapshot else { return [] }
+            let cards = StageManagerStrip.cards(
+                in: Self.springBoardCardElements(in: snapshot),
+                excluding: excluding.union([focusedBundleId, "com.apple.springboard"]),
+                focused: focusedFrame,
+                screen: screen,
+                isLive: { bundleId in
+                    catchingObjCExceptionNonThrowing({
+                        XCUIApplication.withoutUIInterruptions(bundleIdentifier: bundleId).state.rawValue >= 4
+                    }, fallback: false)
+                }
+            )
+            return cards.map(StageManagerStrip.window(for:))
+        }
+
+        /// SpringBoard's switcher cards (`card:` identifiers) with their labels.
+        static func springBoardCardElements(
+            in snapshot: XCUIElementSnapshot
+        )
+            -> [AppSwitcherSnapshotClassifier.ElementSnapshot]
+        {
+            var elements: [AppSwitcherSnapshotClassifier.ElementSnapshot] = []
+            var pending: [XCUIElementSnapshot] = [snapshot]
+            while let element = pending.popLast() {
+                if StageManagerStrip.bundleId(fromCardIdentifier: element.identifier) != nil {
+                    elements.append(.init(
+                        identifier: element.identifier,
+                        frame: element.frame,
+                        value: element.value as? String,
+                        label: element.label
+                    ))
+                }
+                pending.append(contentsOf: element.children)
+            }
+            return elements
         }
 
         /// TTL for the background-window system-app sweep: about 40 state queries, so not per observe.

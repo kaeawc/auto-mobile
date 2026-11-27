@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 extension CommandHandler {
     @discardableResult
@@ -16,7 +17,7 @@ extension CommandHandler {
 
         let hierarchy: ViewHierarchy
         do {
-            hierarchy = try enrichWithCachedSdkHierarchy(await captureHierarchy())
+            hierarchy = try await captureHierarchy()
         } catch {
             throw CommandError.hierarchyCaptureFailed(reason: WireError.message(for: error))
         }
@@ -25,7 +26,7 @@ extension CommandHandler {
         return try await perf.withScope {
             try await MainActor.run {
                 guard self.frameContext.context(for: hierarchy) == expected else {
-                    throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+                    throw self.staleFrameContext(expected: expected, hierarchy: hierarchy)
                 }
                 return try operation()
             }
@@ -49,7 +50,7 @@ extension CommandHandler {
         let hierarchy: ViewHierarchy?
         if expected != nil {
             do {
-                hierarchy = try enrichWithCachedSdkHierarchy(await captureHierarchy())
+                hierarchy = try await captureHierarchy()
             } catch {
                 throw CommandError.hierarchyCaptureFailed(reason: WireError.message(for: error))
             }
@@ -76,10 +77,20 @@ extension CommandHandler {
     {
         if let expected {
             guard let hierarchy, frameContext.context(for: hierarchy) == expected else {
-                throw CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
+                throw staleFrameContext(expected: expected, hierarchy: hierarchy)
             }
         }
         return try await operation()
+    }
+
+    /// Logs why the fence rejected `expected` (#19169) and returns the unchanged wire error.
+    func staleFrameContext(expected: String, hierarchy: ViewHierarchy?) -> CommandError {
+        let reason = hierarchy.map { frameContext.staleReason(expected: expected, hierarchy: $0) }
+            ?? "no hierarchy was captured"
+        Logger(subsystem: "dev.jasonpearson.automobile", category: "FrameContext")
+            .warning("Stale frame context: \(reason, privacy: .public)")
+        print("[CommandHandler] Stale frame context: \(reason)")
+        return CommandError.executionFailed("Stale frame context; observe a fresh frame before retrying")
     }
 
     // MARK: - Gestures

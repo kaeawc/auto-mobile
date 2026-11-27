@@ -108,7 +108,10 @@ extension CommandHandler {
             requestId: request.requestId,
             data: enriched,
             perfTiming: perfTiming,
-            frameContext: frameContext.context(for: enriched),
+            // The context names the XCUITest capture, not the SDK merge: how much SDK detail a merge
+            // keeps depends on the SDK snapshot's age, so the gesture fence's re-capture with the
+            // cached snapshot would otherwise disagree with this one (#19169).
+            frameContext: frameContext.issueContext(for: hierarchy),
             servedFromCache: false
         )
     }
@@ -277,7 +280,7 @@ extension CommandHandler {
     private func currentFrameContext() async -> String? {
         do {
             let hierarchy = try await captureHierarchy()
-            return frameContext.context(for: enrichWithCachedSdkHierarchy(hierarchy))
+            return frameContext.context(for: hierarchy)
         } catch {
             Logger(subsystem: "dev.jasonpearson.automobile", category: "CommandHandler")
                 .warning(

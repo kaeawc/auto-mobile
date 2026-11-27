@@ -811,9 +811,10 @@ final class WebSocketServer: @unchecked Sendable {
         upgradedConnections.set(responder, forId: id)
     }
 
-    /// Broadcast a hierarchy update push (requestId: nil), stamping the frameContext.
-    func broadcastHierarchyUpdate(_ hierarchy: ViewHierarchy) {
-        let context = frameContext.recordTransition(to: hierarchy)
+    /// Broadcast a hierarchy update push (requestId: nil), stamping the frameContext of
+    /// `capture`, the XCUITest capture behind `hierarchy` before any SDK merge (#19169).
+    func broadcastHierarchyUpdate(_ hierarchy: ViewHierarchy, capture: ViewHierarchy? = nil) {
+        let context = frameContext.recordTransition(to: capture ?? hierarchy)
         let response = HierarchyUpdateResponse(
             requestId: nil,
             data: hierarchy,

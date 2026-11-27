@@ -75,6 +75,63 @@ describe("display profiles (#14052)", () => {
     expect(ports.posture.current).toBe("opened");
   });
 
+  test("a size set on each fold panel is reset on that panel, and the posture ends where it was (#19404)", async () => {
+    // Each wm size write lands on the panel of the posture it runs in.
+    const timeline: string[] = [];
+    const shellWrites = () => writes().length;
+    let seen = 0;
+    const flush = () => {
+      const all = writes();
+      for (; seen < shellWrites(); seen++) {
+        timeline.push(`${ports.posture.current}: ${all[seen]}`);
+      }
+    };
+    ports.posture.onSet = flush;
+
+    await applyDisplayProfile(emulator, { screenSize: "900x2000" }, deps());
+    await applyDisplayProfile(emulator, { posture: "closed", screenSize: "1000x2100" }, deps());
+    await resetDisplayProfile(emulator, deps());
+    flush();
+
+    expect(timeline).toEqual([
+      "opened: shell wm size 900x2000",
+      "closed: shell wm size 1000x2100",
+      "opened: shell wm size reset",
+      "closed: shell wm size reset",
+    ]);
+    expect(ports.posture.calls).toEqual(["closed", "opened", "closed", "opened"]);
+    expect(ports.posture.current).toBe("opened");
+    expect(registry.pending(emulator.deviceId)).toEqual([]);
+  });
+
+  test("a second size on the same panel keeps the first original (#19404)", async () => {
+    await applyDisplayProfile(emulator, { screenSize: "900x2000" }, deps());
+    ports.shell.setCommandResponse(
+      "shell wm size",
+      createExecResult("Physical size: 1080x2400\nOverride size: 900x2000\n", ""),
+    );
+    await applyDisplayProfile(emulator, { posture: "half_opened", screenSize: "800x1800" }, deps());
+    const [, size] = registry.pending(emulator.deviceId);
+    expect(size).toEqual({
+      facet: "screenSize",
+      commands: ["shell wm size reset"],
+      scopes: ["0"],
+      postures: ["opened"],
+    });
+  });
+
+  test("a device without a readable posture records the size as before", async () => {
+    ports.posture.current = undefined;
+    await applyDisplayProfile(emulator, { screenSize: "900x2000" }, deps());
+    expect(registry.pending(emulator.deviceId)).toEqual([
+      { facet: "screenSize", commands: ["shell wm size reset"] },
+    ]);
+    ports.shell.clearHistory();
+    await resetDisplayProfile(emulator, deps());
+    expect(writes()).toEqual(["shell wm size reset"]);
+    expect(ports.posture.calls).toEqual([]);
+  });
+
   test("reset restores every changed setting, latest first, and a second reset changes nothing", async () => {
     await applyDisplayProfile(
       emulator,

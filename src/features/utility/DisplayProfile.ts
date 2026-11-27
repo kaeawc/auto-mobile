@@ -22,6 +22,7 @@ import {
   type DisplayProfileFacet,
   type DisplayProfileRestoreAction,
   type DisplayProfileRestoreRegistry,
+  panelOf,
 } from "./DisplayProfileRestore";
 
 /** `cmd overlay enable-exclusive --category`, nav-mode overlays and force dark are API 29+. */
@@ -172,9 +173,14 @@ async function applyScreenSize(context: Context, size: string): Promise<DisplayP
   const override = parseWmSizeOverride(await run(context, "shell wm size"));
   const restore = override ? `shell wm size ${override}` : "shell wm size reset";
   const command = size === "default" ? "shell wm size reset" : `shell wm size ${size}`;
-  await writeRecorded(context, { facet: "screenSize", commands: [restore] }, () =>
-    runAll(context, [command]),
-  );
+  // `wm size` keeps a separate override per fold panel, so each panel gets its own entry under the
+  // display id displayConfig also records, and its restore runs on that panel (#19404).
+  const posture = await context.deps.posture.read(context.deps.signal);
+  const record: DisplayProfileRestoreAction =
+    posture === undefined
+      ? { facet: "screenSize", commands: [restore] }
+      : { facet: "screenSize", commands: [restore], scopes: ["0"], postures: [posture] };
+  await writeRecorded(context, record, () => runAll(context, [command]));
   // An OEM shell may clamp or ignore a size override on a physical device.
   return isAndroidEmulatorSerial(context.device.deviceId)
     ? { step: "screenSize", status: "applied", detail: command }
@@ -498,9 +504,66 @@ export async function restoreDisplayProfileAction(
       return;
     }
     default:
+      if (action.postures?.some((posture) => posture !== null)) {
+        await restoreOnPanels(ports, action.commands, action.postures, signal);
+        return;
+      }
       for (const command of action.commands) {
         await shellRun(ports.shell, command, signal);
       }
+  }
+}
+
+/**
+ * Every panel's size was restored, but the posture could not be put back to `posture`, the one
+ * reset found: reset records it so a later reset can retry the switch.
+ */
+class PostureSwitchBackError extends ActionableError {
+  constructor(
+    message: string,
+    readonly posture: RequestedPosture,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Run each restore command in the posture it was recorded in, so it lands on that fold panel,
+ * then put the posture back to the one found (#19404).
+ */
+async function restoreOnPanels(
+  ports: DisplayProfilePorts,
+  commands: readonly string[],
+  postures: readonly (RequestedPosture | null)[],
+  signal: AbortSignal | undefined,
+): Promise<void> {
+  const found = await ports.posture.read(signal);
+  let current = found;
+  const setPosture = async (posture: RequestedPosture) => {
+    const result = await ports.posture.set(posture, signal);
+    if (result.status !== "applied") {
+      throw new ActionableError(
+        result.detail ?? `posture ${posture} could not be set to restore its panel's screen size`,
+      );
+    }
+    current = posture;
+  };
+  for (const [index, command] of commands.entries()) {
+    const posture = postures[index] ?? null;
+    if (posture !== null && panelOf(posture) !== panelOf(current)) {
+      await setPosture(posture);
+    }
+    await shellRun(ports.shell, command, signal);
+  }
+  if (found !== undefined && current !== found) {
+    try {
+      await setPosture(found);
+    } catch (error) {
+      throw new PostureSwitchBackError(
+        toActionableError(error, `posture ${found} could not be put back`).message,
+        found,
+      );
+    }
   }
 }
 
@@ -521,6 +584,15 @@ export async function resetDisplayProfile(
       context.registry.forget(device.deviceId, action.facet);
       steps.push({ step: action.facet, status: "applied" });
     } catch (error) {
+      if (error instanceof PostureSwitchBackError) {
+        // The sizes are back; only the posture is not, so keep that for the next reset.
+        context.registry.forget(device.deviceId, action.facet);
+        context.registry.record(
+          device,
+          { facet: "posture", posture: error.posture },
+          context.deps.owner,
+        );
+      }
       logger.warn(
         `displayProfile restore of ${action.facet} failed: ${errorMessage(error)}`,
         error,

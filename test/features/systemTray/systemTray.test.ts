@@ -4446,9 +4446,13 @@ describe("iOS systemTray open/close", () => {
         expect(invalidated).toEqual(Array(opensAt).fill(iosDevice.deviceId));
         // An app-tree open re-reads for SpringBoard's cover sheet at least twice and until the
         // open's remaining 500 ms timeout ends (#19420, #19444).
-        const rereads = Math.max(2, (500 - 250 * (opensAt - 1)) / 250 + 1);
+        const rereads = Math.max(2, (500 - 250 * (opensAt - 1)) / 250);
         expect(observer.getExecuteCallCount()).toBe(1 + opensAt + rereads);
-        expect(timer.getSleepHistory()).toEqual(Array(opensAt - 1 + rereads - 1).fill(250));
+        // The last budget-bound poll still sleeps to the deadline but then starts no read.
+        const budgetBound = 500 - 250 * (opensAt - 1) >= 500 ? 1 : 0;
+        expect(timer.getSleepHistory()).toEqual(
+          Array(opensAt - 1 + rereads - 1 + budgetBound).fill(250),
+        );
         expect(client.swipeCalls).toHaveLength(1);
       },
     );
@@ -4569,7 +4573,7 @@ describe("iOS systemTray open/close", () => {
       expect(result.payload.success).toBe(true);
       expect(result.payload.observation).toBe(ios26TrayOpenSettings);
       // One pre-swipe read, the opening read, and SpringBoard re-reads until the 500 ms timeout ends.
-      expect(observer.getExecuteCallCount()).toBe(5);
+      expect(observer.getExecuteCallCount()).toBe(4);
       expect(timer.getSleepHistory()).toEqual([250, 250]);
     });
 
@@ -4596,7 +4600,7 @@ describe("iOS systemTray open/close", () => {
       const result = await new SystemTray(iosDevice).execute({ action: "open", awaitTimeout: 500 });
       expect(result.payload.observation).toBe(ios26TrayOpenSettings);
       // The re-read budget is the 500 ms timeout counted from the opening read at readStarts[0].
-      expect(Math.max(...readStarts) - readStarts[0]).toBeLessThanOrEqual(500);
+      expect(Math.max(...readStarts) - readStarts[0]).toBeLessThan(500);
       expect(Math.max(...timer.getSleepHistory())).toBeLessThanOrEqual(250);
     });
 
@@ -4906,7 +4910,7 @@ describe("iOS systemTray open/close", () => {
       expect(result.opened).toBe(true);
       expect(result.observation?.deviceLock).toEqual({ locked: true, keyguardShowing: true });
       // Two probes during the open polls; the SpringBoard re-reads outlive the cached reading.
-      expect(probeStarts).toBe(3);
+      expect(probeStarts).toBe(2);
       expect(client.swipeCalls).toHaveLength(1);
     });
 

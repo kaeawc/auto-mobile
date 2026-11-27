@@ -304,7 +304,7 @@ const pollBeforeReread = async (
     return false;
   }
   await sleep(Math.min(SYSTEM_TRAY_POLL_INTERVAL_MS, remaining), signal);
-  return timer.now() <= deadline;
+  return timer.now() < deadline;
 };
 
 /**

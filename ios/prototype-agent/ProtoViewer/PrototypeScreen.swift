@@ -14,6 +14,8 @@ struct PrototypeScreen: View {
     /// Closes the prototype: pops the phone stack, or empties the detail pane at regular width.
     let onClose: @MainActor () -> Void
     @State private var chromeAppearance: PrototypeChromeAppearance?
+    /// Set while Back belongs to the prototype's own navigation (#19086); nil at its root route.
+    @State private var prototypeBack: PrototypeBackAction?
     @State private var showsSettings = false
     @State private var revision = 0
     @State private var rendererActive = false
@@ -123,7 +125,28 @@ struct PrototypeScreen: View {
         .preferredColorScheme(chromeAppearance?.colorScheme)
         .navigationTitle(entry.label)
         .navigationBarTitleDisplayMode(.inline)
+        // A pushed route pops before the prototype closes, as on Android. Hiding the system back
+        // button also turns off the column's interactive pop, so the left-edge swipe reaches the
+        // prototype's own stack.
+        .navigationBarBackButtonHidden(prototypeBack != nil)
         .toolbar {
+            if let prototypeBack {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        prototypeBack()
+                    } label: {
+                        Label(
+                            String(
+                                localized: "Back",
+                                comment: "PrototypeScreen chrome: goes back one route inside the open prototype."
+                            ),
+                            systemImage: "chevron.backward"
+                        )
+                        .labelStyle(.titleAndIcon)
+                    }
+                    .accessibilityIdentifier("prototype-back")
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
                     Button("Settings", systemImage: "gearshape") { showsSettings = true }
@@ -183,6 +206,7 @@ struct PrototypeScreen: View {
                 )
                 .standaloneStorage(registry: registry)
                 .onAppearanceChange { chromeAppearance = $0 }
+                .onBackAvailabilityChange { prototypeBack = $0 }
                 .onFirstRender {
                     guard importRefusal == nil else { return }
                     firstRender = true
@@ -191,6 +215,7 @@ struct PrototypeScreen: View {
                 }
                 .onStopped {
                     PrototypeAssetRegistrar.releaseProcessFonts()
+                    prototypeBack = nil
                     rendererActive = false
                     firstRender = false
                     waitingForStop = false

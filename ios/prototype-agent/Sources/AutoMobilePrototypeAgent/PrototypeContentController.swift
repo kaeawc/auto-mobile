@@ -20,6 +20,9 @@
         private var appearanceObservation: (any UITraitChangeRegistration)?
         var onAppearanceChange: (@MainActor (PrototypeChromeAppearance) -> Void)?
         private var appearanceReport = PrototypeAppearanceReport()
+        /// Called with true while Back belongs to the prototype (a pushed route or an open drawer).
+        var onBackAvailabilityChange: (@MainActor (Bool) -> Void)?
+        private var backReport = PrototypeBackReport()
         private var appliedAccessibility: PrototypeHostAccessibility?
 
         init(
@@ -190,11 +193,20 @@
                     onAppearanceChange(mode)
                 }
             }
+            if let onBackAvailabilityChange, let handlesBack = backReport.report(handlesBack: session.handlesBack) {
+                onBackAvailabilityChange(handlesBack)
+            }
             let flags = PrototypeHostAccessibility(session: session, windowShown: true)
             guard flags != appliedAccessibility else { return }
             appliedAccessibility = flags
             layers.apply(flags)
             UIAccessibility.post(notification: accessibilityNotification, argument: nil)
+        }
+
+        /// Back inside the prototype: closes its open drawer or pops its topmost pushed route.
+        @discardableResult
+        func popPrototypeBack() -> Bool {
+            model.popTopmostStack()
         }
 
         @objc

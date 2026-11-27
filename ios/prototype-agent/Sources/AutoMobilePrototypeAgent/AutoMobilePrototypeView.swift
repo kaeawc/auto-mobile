@@ -64,10 +64,26 @@
             return view
         }
 
+        /// Internal host seam (#19086): reports a Back action while the prototype handles Back itself
+        /// (a pushed route or an open drawer), and nil at its root, where Back should close it.
+        func onBackAvailabilityChange(_ action: @escaping @MainActor (PrototypeBackAction?) -> Void) -> Self {
+            var view = self
+            view.renderer.onBackAvailabilityChange = action
+            return view
+        }
+
         /// The embedded renderer or a diagnostic covering the entire presentation.
         public var body: some View {
             renderer.id(identity)
         }
+    }
+
+    /// Runs the prototype's own Back once: closes its open drawer or pops its topmost route.
+    @MainActor
+    struct PrototypeBackAction {
+        let perform: @MainActor () -> Void
+
+        func callAsFunction() { perform() }
     }
 
     private struct PrototypeEmbeddedIdentity: Hashable {
@@ -108,6 +124,18 @@
         var onStop: @MainActor () -> Void = {}
         var onFirstRender: (@MainActor () -> Void)?
         var onAppearanceChange: (@MainActor (PrototypeChromeAppearance) -> Void)?
+        var onBackAvailabilityChange: (@MainActor (PrototypeBackAction?) -> Void)?
+
+        private func backCallback(_ controller: PrototypeEmbeddedController) -> (@MainActor (Bool) -> Void)? {
+            guard let onBackAvailabilityChange else { return nil }
+            // Reported during a session update; deliver host state changes afterwards, as appearance does.
+            return { [weak controller] handlesBack in
+                let action = handlesBack
+                    ? PrototypeBackAction { _ = controller?.popPrototypeBack() }
+                    : nil
+                Task { @MainActor in onBackAvailabilityChange(action) }
+            }
+        }
 
         private func appearanceCallback() -> (@MainActor (PrototypeChromeAppearance) -> Void)? {
             guard let onAppearanceChange else { return nil }
@@ -131,6 +159,7 @@
             )
             controller.onFirstRender = onFirstRender
             controller.onAppearanceChange = appearanceCallback()
+            controller.onBackAvailabilityChange = backCallback(controller)
             return controller
         }
 
@@ -139,6 +168,7 @@
             controller.updateNetwork(network)
             controller.updateCallbacks(onEvent: onEvent, onDismiss: onDismiss, onLoadError: onLoadError)
             controller.onAppearanceChange = appearanceCallback()
+            controller.onBackAvailabilityChange = backCallback(controller)
             controller.syncAppearance()
         }
 

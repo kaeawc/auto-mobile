@@ -156,7 +156,7 @@
     "@jimp/plugin-contain": "1.7.0",
     "@jimp/plugin-cover": "1.7.0",
     "@jimp/plugin-crop": "1.7.0",
-    "@jimp/plugin-displace": "1.7.0",
+    "@jimp/plugin-displace": "2.0.0",
     "@jimp/plugin-dither": "1.7.0",
     "@jimp/plugin-fisheye": "1.7.0",
     "@jimp/plugin-flip": "1.7.0",

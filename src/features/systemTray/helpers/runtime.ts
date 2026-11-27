@@ -333,7 +333,7 @@ const preferSpringBoardCoverSheet = async (
     if (read > 0 && !(await pollBeforeReread(read, deadline, signal))) {
       return appObservation;
     }
-    // requireFreshExtraction is not forwarded on iOS, so drop the client's cached app tree.
+    // Belt and braces: requireFreshExtraction already forces an iOS capture (#19446).
     iosHierarchyCacheInvalidator?.(detector.device);
     const fresh = await observeSystemTray(observeScreen, minTimestamp, signal, true);
     const packageName = fresh.viewHierarchy?.packageName ?? "";

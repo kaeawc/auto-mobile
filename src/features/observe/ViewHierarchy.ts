@@ -182,6 +182,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       throw new Error("Unsupported platform");
     }
     const timeoutMs = typeof readOptions === "number" ? readOptions : readOptions?.timeoutMs;
+    const { requireFreshExtraction } = typeof readOptions === "object" ? readOptions : {};
     const deadline = timeoutMs === undefined ? undefined : this.timer.now() + timeoutMs;
     const result =
       this.device.platform === "ios"
@@ -190,6 +191,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
             minTimestamp,
             timeoutMs,
             signal,
+            requireFreshExtraction,
           })
         : await this.getAndroidViewHierarchy(queryOptions, {
             perf,
@@ -205,8 +207,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       minTimestamp,
       signal,
       deadline,
-      requireFreshExtraction:
-        typeof readOptions === "object" ? readOptions.requireFreshExtraction : undefined,
+      requireFreshExtraction,
     });
   }
 
@@ -274,11 +275,10 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       }
       return result;
     }
+    // Re-read with the same freshness, floor, signal and fresh-extraction policy (#19446).
     return this.getiOSViewHierarchy(context.perf, {
-      skipWaitForFresh: context.skipWaitForFresh,
-      minTimestamp: context.minTimestamp,
+      ...context,
       timeoutMs: this.remainingRecoveryBudget(context),
-      signal: context.signal,
     });
   }
 
@@ -403,7 +403,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       minTimestamp = 0,
       timeoutMs,
       signal,
-    }: Omit<ViewHierarchyReadRequest, "perf" | "requireFreshExtraction"> = {},
+      requireFreshExtraction = false,
+    }: Omit<ViewHierarchyReadRequest, "perf"> = {},
   ): Promise<ViewHierarchyResult> {
     const startTime = this.timer.now();
     logger.info(
@@ -421,7 +422,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
           !skipWaitForFresh, // waitForFresh = opposite of skipWaitForFresh
           timeoutMs ?? 15000, // timeout: caller budget when supplied
           perf,
-          { skipWaitForFresh, minTimestamp, signal },
+          { skipWaitForFresh, minTimestamp, signal, requireFreshExtraction },
         );
       } catch (error) {
         if (!(error instanceof IosRunnerStalledError)) {

@@ -1,5 +1,6 @@
 import { convertToViewHierarchyResult } from "./IosHierarchyConverter";
 import type { LatestHierarchyOptions } from "../android/types";
+import type { IosLatestHierarchyOptions } from "./IosCtrlProxyClientContracts";
 import type { CtrlSocket } from "../shared/types";
 /**
  * CtrlProxy iOSHierarchy - Delegate for hierarchy operations.
@@ -194,8 +195,9 @@ export class CtrlProxyHierarchy {
     perf?: PerformanceTracker,
     {
       skipWaitForFresh = false,
+      requireFreshExtraction,
       ...options
-    }: LatestHierarchyOptions & { skipWaitForFresh?: boolean } = {},
+    }: IosLatestHierarchyOptions = {},
   ): Promise<CtrlProxyHierarchyResponse> {
     const { minTimestamp, signal } = resolveLatestHierarchyOptions(options);
     this.checkHierarchyAbort(signal);
@@ -206,8 +208,9 @@ export class CtrlProxyHierarchy {
       cacheNeedsVerification,
       cacheMissesMinTimestamp,
       cachedIsSpringboard,
+      cacheForced,
       response,
-    } = this.inspectCachedHierarchy(cachedHierarchy, minTimestamp);
+    } = this.inspectCachedHierarchy(cachedHierarchy, minTimestamp, requireFreshExtraction === true);
     if (response) {
       return response;
     }
@@ -238,6 +241,7 @@ export class CtrlProxyHierarchy {
         cacheNeedsVerification,
         cacheMissesMinTimestamp,
         cachedIsSpringboard,
+        cacheForced,
       })
     ) {
       this.logCacheVerification(
@@ -255,7 +259,7 @@ export class CtrlProxyHierarchy {
         cacheMissing,
         cacheInvalidated,
         cachedIsSpringboard,
-        { cacheMissesMinTimestamp, minTimestamp },
+        { cacheMissesMinTimestamp, minTimestamp, cacheForced },
       );
       const result = await this.requestHierarchySync(perf, false, signal, {
         timeoutMs: timeout,
@@ -360,7 +364,16 @@ export class CtrlProxyHierarchy {
     };
   }
 
-  private inspectCachedHierarchy(cachedHierarchy: CachedHierarchy | null, minTimestamp: number) {
+  /**
+   * `requireFreshExtraction` turns a servable entry into a forced capture: a fresh-within-TTL tree
+   * is not proof of the current screen, since the runner does not push system-UI changes such as
+   * the cover sheet (#19446).
+   */
+  private inspectCachedHierarchy(
+    cachedHierarchy: CachedHierarchy | null,
+    minTimestamp: number,
+    cacheForced: boolean,
+  ) {
     let cachedCaptureAgeMs: number | undefined;
     let cacheNeedsVerification = false;
     let cacheMissesMinTimestamp = false;
@@ -388,7 +401,7 @@ export class CtrlProxyHierarchy {
       cacheNeedsVerification = !isFresh;
       cacheMissesMinTimestamp = !meetsMinTimestamp;
 
-      if (isFresh && meetsMinTimestamp && !cachedIsSpringboard) {
+      if (isFresh && meetsMinTimestamp && !cachedIsSpringboard && !cacheForced) {
         if (cachedHierarchy.hierarchy.packageName) {
           this.lastKnownPackageName = cachedHierarchy.hierarchy.packageName;
         }
@@ -405,6 +418,7 @@ export class CtrlProxyHierarchy {
           cacheNeedsVerification,
           cacheMissesMinTimestamp,
           cachedIsSpringboard,
+          cacheForced,
         };
       }
     }
@@ -414,6 +428,7 @@ export class CtrlProxyHierarchy {
       cacheNeedsVerification,
       cacheMissesMinTimestamp,
       cachedIsSpringboard,
+      cacheForced,
       response: undefined,
     };
   }
@@ -454,6 +469,7 @@ export class CtrlProxyHierarchy {
       cacheNeedsVerification: boolean;
       cacheMissesMinTimestamp: boolean;
       cachedIsSpringboard: boolean;
+      cacheForced: boolean;
     },
   ): boolean {
     return (
@@ -461,7 +477,8 @@ export class CtrlProxyHierarchy {
       cache.cacheMissing ||
       cache.cacheNeedsVerification ||
       cache.cacheMissesMinTimestamp ||
-      cache.cachedIsSpringboard
+      cache.cachedIsSpringboard ||
+      cache.cacheForced
     );
   }
 
@@ -676,11 +693,16 @@ export class CtrlProxyHierarchy {
     {
       cacheMissesMinTimestamp,
       minTimestamp,
-    }: { cacheMissesMinTimestamp: boolean; minTimestamp: number },
+      cacheForced,
+    }: { cacheMissesMinTimestamp: boolean; minTimestamp: number; cacheForced: boolean },
   ): { forceCapture: boolean; sinceTimestamp?: number } {
     return {
       forceCapture:
-        cacheMissing || cacheInvalidated || cachedIsSpringboard || cacheMissesMinTimestamp,
+        cacheMissing ||
+        cacheInvalidated ||
+        cachedIsSpringboard ||
+        cacheMissesMinTimestamp ||
+        cacheForced,
       sinceTimestamp: minTimestamp === 0 ? undefined : minTimestamp,
     };
   }

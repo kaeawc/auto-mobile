@@ -142,6 +142,13 @@ export const defaultBootedDeviceLister: BootedDeviceLister = () =>
 
 export const noOpServiceManagerFactory: ServiceManagerFactory = () => new NoOpIOSCtrlProxyManager();
 
+/** Trailing options for the iOS client's `getLatestHierarchy`. */
+export interface IosLatestHierarchyOptions extends LatestHierarchyOptions {
+  skipWaitForFresh?: boolean;
+  /** Capture on the device even when a fresh cached tree would satisfy the read (#19446). */
+  requireFreshExtraction?: boolean;
+}
+
 /**
  * Interface for CtrlProxy providing iOS UI hierarchy and interaction capabilities
  * via WebSocket connection to iOS CtrlProxy
@@ -153,7 +160,7 @@ export interface IosCtrlProxy extends Omit<CtrlProxyClient, "requestPinch"> {
     waitForFresh?: boolean,
     timeout?: number,
     perf?: PerformanceTracker,
-    options?: LatestHierarchyOptions & { skipWaitForFresh?: boolean },
+    options?: IosLatestHierarchyOptions,
   ): Promise<CtrlProxyHierarchyResponse>;
 
   requestHierarchySync(

@@ -461,6 +461,44 @@ describe("ViewHierarchy", function () {
     });
 
     test.each([
+      [{ timeoutMs: 700, requireFreshExtraction: true }, true],
+      [{ timeoutMs: 700 }, false],
+    ] as const)(
+      "iOS getViewHierarchy forwards requireFreshExtraction to the client (#19446): %p",
+      async (readPolicy, expected) => {
+        const iosDevice: BootedDevice = {
+          deviceId: "test-ios-device",
+          name: "Test iPhone",
+          platform: "ios",
+        };
+        const seen: Array<{ requireFreshExtraction?: boolean } | undefined> = [];
+        const fakeIosClient = {
+          convertToViewHierarchyResult: convertIosHierarchy,
+          getLatestHierarchy: async (
+            _waitForFresh?: boolean,
+            _timeout?: number,
+            _perf?: unknown,
+            options?: { requireFreshExtraction?: boolean },
+          ) => {
+            seen.push(options);
+            return { hierarchy: null, fresh: false };
+          },
+        };
+        const getInstanceSpy = spyOnIosClientInstance(fakeIosClient);
+        try {
+          await new ViewHierarchy(
+            iosDevice,
+            new FakeAdbClientFactory(fakeAdb),
+            mockCtrlProxyClient,
+          ).getViewHierarchy(undefined, { skipWaitForFresh: true, ...readPolicy });
+          expect(seen[0]?.requireFreshExtraction).toBe(expected);
+        } finally {
+          getInstanceSpy.mockRestore();
+        }
+      },
+    );
+
+    test.each([
       ["simulator_not_booted", undefined],
       ["auto_setup_failed", "runner install failed"],
     ] as const)("reports iOS hierarchy unavailable reason %s", async (reason, detail) => {

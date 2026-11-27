@@ -6,7 +6,10 @@ import type { ViewHierarchyReadRequest } from "../hierarchyReadArgs";
 /** Internal hierarchy read policy; numeric budgets remain supported for existing callers. */
 export interface HierarchyReadOptions {
   timeoutMs?: number;
-  /** Re-extract an Android cache hit; a positive floor also requires independent freshness evidence. */
+  /**
+   * Re-extract a cache hit. Android: an unverified hit with a positive floor needs independent
+   * freshness evidence. iOS: the client captures on the device instead of serving its cache.
+   */
   requireFreshExtraction?: boolean;
 }
 

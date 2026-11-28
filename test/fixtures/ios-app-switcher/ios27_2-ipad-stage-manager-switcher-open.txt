@@ -1,0 +1,112 @@
+Attributes: Application, 0x10b462440, pid: 43918, label: ' '
+Element subtree:
+ →Application, 0x10b462440, pid: 43918, label: ' '
+    Window, 0x10b463c00, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x10b4626c0, {{0.0, 0.0}, {1032.0, 1376.0}}
+        Other, 0x10b462e40, {{1174.5, -150.0}, {7.5, 7.5}}
+    Window, 0x10b461b80, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x10b461f40, {{0.0, 0.0}, {1032.0, 1376.0}}
+        Other, 0x10b461400, {{0.0, 0.0}, {1032.0, 1376.0}}
+        Other, 0x10b463340, {{0.0, 0.0}, {1032.0, 1376.0}}
+    Window, 0x10b462f80, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x10b461900, {{0.0, 0.0}, {1032.0, 1376.0}}
+    Window, 0x10b463700, {{0.0, 0.0}, {1032.0, 1376.0}}, identifier: 'SBSwitcherWindow:Main'
+      Other, 0x10b463980, {{0.0, 0.0}, {1032.0, 1376.0}}
+        Other, 0x10b462800, {{0.0, 0.0}, {1032.0, 1376.0}}
+          Other, 0x10b463480, {{0.0, 0.0}, {1032.0, 1376.0}}
+            Other, 0x10b4621c0, {{0.0, 0.0}, {1032.0, 1376.0}}
+              ScrollView, 0x10b462940, {{0.0, 0.0}, {1032.0, 1376.0}}
+              Other, 0x10a4552c0, {{0.0, 0.0}, {1032.0, 1376.0}}, identifier: 'AppSwitcherContentView'
+                Other, 0x10a455cc0, {{-219.0, 673.5}, {259.0, 410.5}}
+                  Other, 0x10a457980, {{-219.0, 673.5}, {259.0, 410.5}}
+                    Other, 0x10b5d4140, {{-219.0, 673.5}, {259.0, 410.5}}
+                Other, 0x10b5d4780, {{-204.4, 145.0}, {244.5, 410.5}}
+                  Other, 0x10b5d5400, {{-204.4, 145.0}, {244.5, 410.5}}
+                    Other, 0x10b5d4b40, {{-204.4, 145.0}, {244.5, 410.5}}
+                Other, 0x10b5d4a00, {{198.0, 126.5}, {636.0, 1008.0}}
+                  Other, 0x10b5d4dc0, {{198.0, 126.5}, {636.0, 1008.0}}
+                    Other, 0x10b5d5180, {{198.0, 126.5}, {636.0, 1008.0}}
+                Other, 0x116a24000, {{-219.0, 673.5}, {259.0, 410.5}}, identifier: 'card:com.apple.Preferences:sceneID:com.apple.Preferences-default', label: 'Settings', value: Active
+                Other, 0x116a24500, {{-204.4, 145.0}, {244.5, 410.5}}, identifier: 'card:com.apple.DocumentsApp:sceneID:com.apple.DocumentsApp-97487739-130B-4048-843D-EB3A74F1A451', label: 'Files', value: Active
+                Other, 0x116a26300, {{198.0, 126.5}, {636.0, 1008.0}}, identifier: 'card:com.apple.reminders:sceneID:com.apple.reminders-A6BBC1FC-D039-4CAA-BF63-F31179BAF00F', label: 'Reminders', value: Active
+    Window, 0x116a24140, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x116a25f40, {{0.0, 0.0}, {1032.0, 1376.0}}
+        Other, 0x116a248c0, {{0.0, 0.0}, {1032.0, 1376.0}}
+    Window, 0x116a26440, {{0.0, 0.0}, {516.0, 688.0}}
+      Other, 0x116a24280, {{0.0, 0.0}, {516.0, 688.0}}
+        Other, 0x116a252c0, {{0.0, 0.0}, {516.0, 688.0}}
+    Window, 0x116a25180, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x116a25cc0, {{0.0, 0.0}, {1032.0, 1376.0}}
+        Other, 0x116a26580, {{0.0, 0.0}, {1032.0, 1376.0}}
+    Window, 0x116a25b80, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x116a261c0, {{0.0, 0.0}, {1032.0, 1376.0}}
+        Other, 0x116a24640, {{0.0, 0.0}, {1032.0, 1376.0}}
+          Other, 0x116a26080, {{0.0, 0.0}, {1032.0, 1376.0}}
+          Other, 0x116a25900, {{0.0, 0.0}, {1032.0, 1376.0}}
+          Other, 0x116a24b40, {{0.0, 1261.0}, {1032.0, 115.0}}, identifier: 'Multitasking Dock'
+            Other, 0x116a25540, {{102.5, 1261.0}, {457.0, 107.0}}, identifier: 'user icon list view', label: 'Dock'
+              Icon, 0x116a24c80, {{122.0, 1280.5}, {68.0, 68.0}}, identifier: 'Messages', label: 'Messages'
+                Other, 0x116a24f00, {{122.0, 1280.5}, {68.0, 68.0}}
+                  Other, 0x116a25040, {{122.0, 1280.5}, {68.0, 68.0}}
+                    Other, 0x116a24dc0, {{122.0, 1280.5}, {68.0, 68.0}}
+                      Other, 0x116a257c0, {{122.0, 1280.5}, {68.0, 68.0}}
+              Icon, 0x116a243c0, {{209.5, 1280.5}, {68.0, 68.0}}, identifier: 'Safari', label: 'Safari'
+                Other, 0x116a25400, {{209.5, 1280.5}, {68.0, 68.0}}
+                  Other, 0x116a25e00, {{209.5, 1280.5}, {68.0, 68.0}}
+                    Other, 0x116a25a40, {{209.5, 1280.5}, {68.0, 68.0}}
+                      Other, 0x116a4c000, {{209.5, 1280.5}, {68.0, 68.0}}
+              Icon, 0x116a4d180, {{297.0, 1280.5}, {68.0, 68.0}}, identifier: 'Calendar', label: 'Calendar', value: Friday, November 27
+                Other, 0x116a4c140, {{297.0, 1280.5}, {68.0, 68.0}}
+                  Other, 0x116a4e1c0, {{297.0, 1280.5}, {68.0, 68.0}}
+                    Other, 0x116a4f700, {{297.0, 1280.5}, {68.0, 68.0}}
+                      Other, 0x116a4ee40, {{297.0, 1280.5}, {68.0, 68.0}}
+              Icon, 0x116a4ed00, {{384.5, 1280.5}, {68.0, 68.0}}, identifier: 'Photos', label: 'Photos'
+                Other, 0x116a4f340, {{384.5, 1280.5}, {68.0, 68.0}}
+                  Other, 0x116a4e6c0, {{384.5, 1280.5}, {68.0, 68.0}}
+                    Other, 0x116a4fc00, {{384.5, 1280.5}, {68.0, 68.0}}
+                      Other, 0x116a4ebc0, {{384.5, 1280.5}, {68.0, 68.0}}
+              Icon, 0x116a4f840, {{472.0, 1280.5}, {68.0, 68.0}}, identifier: 'Siri', label: 'Siri'
+                Other, 0x116a4f5c0, {{472.0, 1280.5}, {68.0, 68.0}}
+                  Other, 0x116a4e800, {{472.0, 1280.5}, {68.0, 68.0}}
+                    Other, 0x116a4e940, {{472.0, 1280.5}, {68.0, 68.0}}
+                      Other, 0x116a4ea80, {{472.0, 1280.5}, {68.0, 68.0}}
+            Other, 0x116a4d680, {{580.0, 1280.5}, {243.0, 68.0}}, identifier: 'Recent icon list view', label: 'Suggestions'
+              Icon, 0x116a4fac0, {{580.0, 1280.5}, {68.0, 68.0}}, identifier: 'Reminders', label: 'Reminders'
+                Other, 0x116a4f0c0, {{580.0, 1280.5}, {68.0, 68.0}}
+                  Other, 0x116a4f200, {{580.0, 1280.5}, {68.0, 68.0}}
+                    Other, 0x116a4fd40, {{580.0, 1280.5}, {68.0, 68.0}}
+                      Other, 0x116a4ef80, {{580.0, 1280.5}, {68.0, 68.0}}
+              Icon, 0x116a4e300, {{667.5, 1280.5}, {68.0, 68.0}}, identifier: 'Files', label: 'Files'
+                Other, 0x116a4c500, {{667.5, 1280.5}, {68.0, 68.0}}
+                  Other, 0x116a4f480, {{667.5, 1280.5}, {68.0, 68.0}}
+                    Other, 0x116a4fe80, {{667.5, 1280.5}, {68.0, 68.0}}
+                      Other, 0x116a4f980, {{667.5, 1280.5}, {68.0, 68.0}}
+              Icon, 0x116a4da40, {{755.0, 1280.5}, {68.0, 68.0}}, identifier: 'Settings', label: 'Settings'
+                Other, 0x116a4d2c0, {{755.0, 1280.5}, {68.0, 68.0}}
+                  Other, 0x116a4e440, {{755.0, 1280.5}, {68.0, 68.0}}
+                    Other, 0x116a4d900, {{755.0, 1280.5}, {68.0, 68.0}}
+                      Other, 0x116a4e080, {{755.0, 1280.5}, {68.0, 68.0}}
+            Other, 0x116a4c640, {{823.0, 1261.0}, {19.5, 107.0}}, identifier: 'utilities icon list view', label: 'Utilities'
+            Icon, 0x116a4cc80, {{840.5, 1278.5}, {72.0, 72.0}}, identifier: 'AppLibrary', label: 'App Library'
+              Other, 0x116a4db80, {{879.0, 1289.5}, {22.5, 22.5}}, identifier: 'SBHLibraryCategoryStackView-innerIcon-1:dev.jasonpearson.automobile.ctrlproxy.uitests.xctrunner'
+              Other, 0x116a4df40, {{851.5, 1289.5}, {22.5, 22.5}}, identifier: 'SBHLibraryCategoryStackView-innerIcon-0:dev.jasonpearson.automobile.ctrlproxy'
+        Other, 0x116a4de00, {{0.0, 0.0}, {1032.0, 1376.0}}
+    Window, 0x116a4c3c0, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x116a4cdc0, {{0.0, 0.0}, {1032.0, 1376.0}}
+    Window, 0x116a4cb40, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x116a4d040, {{0.0, 0.0}, {1032.0, 1376.0}}
+    Window, 0x116a4d400, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x116a4dcc0, {{0.0, 0.0}, {1032.0, 1376.0}}
+    Window (Main), 0x116a4cf00, {{0.0, 0.0}, {1032.0, 1376.0}}
+      Other, 0x116a2ebc0, {{0.0, 0.0}, {1032.0, 1376.0}}
+        Other, 0x116a2c780, {{0.0, 0.0}, {1032.0, 1376.0}}
+          Other, 0x116a2e940, {{0.0, 0.0}, {1032.0, 1376.0}}
+            RemotePlaceholder, 0x116a2e800, pid: 97904, {{inf, inf}, {0.0, 0.0}}
+            RemotePlaceholder, 0x116a2da40, pid: 97904, {{inf, inf}, {0.0, 0.0}}
+Path to element:
+ →Application, 0x10b462440, pid: 43918, label: ' '
+Query chain:
+ →Find: Application 'com.apple.springboard'
+  Output: {
+    Application, 0x116a2f700, pid: 43918, label: ' '
+  }

@@ -22,6 +22,8 @@ const QUOTED_FIELDS = ["identifier", "label", "value"] as const;
 const QUOTED_PATTERNS = QUOTED_FIELDS.map(
   (key) => [key, new RegExp(`, ${key}: '(.*?)'${NEXT_FIELD}`)] as const,
 );
+// XCUI prints some values bare (`value: Active`), not quoted.
+const BARE_VALUE = new RegExp(`, value: ([^'].*?)${NEXT_FIELD}`);
 const TAPPABLE_TYPES = new Set(["Button", "Cell", "Link", "Switch", "Key"]);
 
 function readFrame(fields: string): WatchHierarchyNode["bounds"] | undefined {
@@ -46,6 +48,10 @@ export function parseXcuiDebugLine(line: string): XcuiDebugLine | undefined {
     if (value !== undefined) {
       node[key] = value;
     }
+  }
+  const bareValue = node.value === undefined ? BARE_VALUE.exec(fields)?.[1] : undefined;
+  if (bareValue !== undefined) {
+    node.value = bareValue;
   }
   return node;
 }

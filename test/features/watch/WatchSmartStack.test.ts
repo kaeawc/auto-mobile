@@ -171,6 +171,15 @@ describe("parseXcuiDebugDescription", () => {
     ).toMatchObject({ label: "Reading 'high', value matters", value: "7" });
   });
 
+  test("reads a bare value, as XCUI prints a SpringBoard card's", () => {
+    expect(
+      parseXcuiDebugLine(
+        "  Other, 0x1, {{18.0, 443.4}, {62.7, 173.3}}, identifier: 'card:a', label: 'Files', value: Active",
+      ),
+    ).toMatchObject({ identifier: "card:a", label: "Files", value: "Active" });
+    expect(parseXcuiDebugLine("  Other, 0x1, label: 'Files'")?.value).toBeUndefined();
+  });
+
   test("gives a frameless line its parent's frame", () => {
     const dump = [
       "Element subtree:",

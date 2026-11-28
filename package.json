@@ -145,7 +145,7 @@
     "@jimp/diff": "1.7.0",
     "@jimp/file-ops": "1.7.0",
     "@jimp/js-bmp": "1.7.0",
-    "@jimp/js-gif": "1.7.0",
+    "@jimp/js-gif": "2.0.0",
     "@jimp/js-jpeg": "1.7.0",
     "@jimp/js-png": "1.7.0",
     "@jimp/js-tiff": "1.7.0",
